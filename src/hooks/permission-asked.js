@@ -1,5 +1,10 @@
-export function createPermissionAskedHook() {
-  return async () => {
-    // TODO: the legacy plugin does not implement a dedicated permission.asked hook.
+export function createPermissionAskedHook(legacyHandlers) {
+  return async (input) => {
+    const handler = legacyHandlers["permission.asked"];
+    if (typeof handler !== "function") {
+      return;
+    }
+
+    return handler(input);
   };
 }
