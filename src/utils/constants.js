@@ -1,0 +1,15 @@
+export const DISPLAY_NAME = "DevAI AIDD Plugin";
+export const PRODUCT_NAME = "DevAI AIDD Guard";
+export const PACKAGE_NAME = "devai-aidd-guard";
+export const DIST_FILE_NAME = "devai-aidd-guard.js";
+export const GLOBAL_CONFIG_FILE_NAME = "devai-aidd-guard.global.jsonc";
+export const PROJECT_CONFIG_FILE_NAME = "devai-aidd-guard.project.jsonc";
+export const LEGACY_PROJECT_CONFIG_FILE_NAME = "opencode-aidd-plugin.json";
+export const LEGACY_WORKFLOW_PROJECT_CONFIG_FILE_NAME = "devai-git-workflow.json";
+export const GLOBAL_CONFIG_DIR = ".config/opencode";
+export const PROJECT_CONFIG_DIR = ".opencode";
+export const LEGACY_PLUGIN_SERVICE_NAME = "opencode-aidd-plugin";
+export const PLUGIN_SERVICE_NAME = "devai-aidd-guard";
+export const LEGACY_STATE_DIRECTORY_NAME = "opencode-aidd-plugin";
+export const STATE_DIRECTORY_NAME = "devai-aidd-guard";
+export const LEGACY_COMPAT_MARKER_FILE_NAME = ".devai-aidd-guard.compat.generated";

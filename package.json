@@ -1,0 +1,13 @@
+{
+  "name": "devai-aidd-guard",
+  "version": "1.0.0",
+  "description": "DevAI AIDD Guard plugin for opencode-based DevAI environments.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.js",
+    "release": "node scripts/make-release.js",
+    "pack": "npm run build && npm run release",
+    "test": "node --check src/index.js && node --check src/policies/legacy/devai-git-workflo.js && node --check scripts/build.js && node --check scripts/make-release.js && node tests/regression.test.js"
+  }
+}

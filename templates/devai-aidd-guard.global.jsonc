@@ -1,0 +1,18 @@
+{
+  // DevAI AIDD Guard global defaults
+  "branch": {
+    "pattern": "{type}/{ticket}-{slug}",
+    "defaultType": "chore",
+    "fallbackTicket": "no-ticket",
+    "longLivedBranches": ["main", "master"],
+    "defaultMergeTarget": "",
+    "validationRegex": "^(feat|fix|docs|chore|refactor|design)\\/[A-Z]+-\\d+-[a-z0-9-]+$|^(feat|fix|docs|chore|refactor|design)\\/no-ticket-[a-z0-9-]+$"
+  },
+  "audit": {
+    "enabled": true,
+    "logToClient": true,
+    "logToFile": false,
+    "logFilePath": "",
+    "httpEndpoint": ""
+  }
+}

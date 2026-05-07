@@ -1,0 +1,13 @@
+node_modules/
+npm-debug.log*
+
+.opencode/state/
+
+dist/*
+!dist/.gitkeep
+
+release/devai-aidd-guard/latest/*
+!release/devai-aidd-guard/latest/.gitkeep
+
+release/devai-aidd-guard/versions/*
+!release/devai-aidd-guard/versions/.gitkeep

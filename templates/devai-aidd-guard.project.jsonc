@@ -1,0 +1,18 @@
+{
+  // DevAI AIDD Guard project overrides
+  "branch": {
+    "defaultMergeTarget": "main",
+    "commandTypeMap": {
+      "bmad-bmm-dev-story": "feat",
+      "bmad-bmm-code-review": "fix"
+    }
+  },
+  "workflowPolicy": {
+    "bmad-bmm-quick-dev": {
+      "category": "implementation",
+      "identityStrategy": "ticket-or-args",
+      "branchRequired": true,
+      "finalization": "commit-and-push"
+    }
+  }
+}

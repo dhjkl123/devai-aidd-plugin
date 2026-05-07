@@ -1,0 +1,8 @@
+{
+  "plugins": [
+    {
+      "name": "DevAI AIDD Plugin",
+      "path": "~/.config/opencode/plugins/devai-aidd-guard.js"
+    }
+  ]
+}
