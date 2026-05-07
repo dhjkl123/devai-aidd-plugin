@@ -1,6 +1,6 @@
 # Story 1.2: Detect BMAD Workflow Commands and Runtime Context
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -53,16 +53,19 @@ so that later Git decisions are based on the correct workflow context.
 
 ### Review Follow-ups (AI)
 
-- [ ] [AI-Review][Medium] `detectWorkflowContext`가 `new Date().toISOString()`을 호출해 "순수 함수" 계약을 위반함 — `detectedAt` 주입을 훅 래퍼 레이어로 이전하거나 `now` 의존성을 인자로 받아 결정성 확보 [src/services/workflow/detect-workflow-context.js:40]
-- [ ] [AI-Review][Medium] phase 전환이 회귀 테스트에서 직접 단언되지 않음 — `workflowState`에 인스펙션 API를 추가하거나 다른 관찰 전략으로 `phase === "in-progress"`를 명시적으로 검증 [tests/regression.test.js:340-353]
-- [ ] [AI-Review][Medium] `sessionID` 누락 시 상태 스토어가 `undefined` 키로 오염될 수 있음 — 감지기 또는 훅에서 `sessionID` 필수 가드를 추가해 cross-session leakage 차단 [src/services/workflow/detect-workflow-context.js:39, src/hooks/command-execute-before.js:8]
-- [ ] [AI-Review][Medium] `tool.execute.after`의 phase 전환 경로가 테스트되지 않음 — `tool.execute.after` 호출을 회귀 테스트에 추가해 양쪽 훅 모두 커버 [tests/regression.test.js, src/hooks/tool-execute-after.js]
-- [ ] [AI-Review][Medium] `session.deleted`의 워크플로우 상태 클리어가 테스트되지 않음 — 회귀 테스트에서 `session.deleted` 이벤트 발사 후 후속 도구 이벤트가 phase를 advance시키지 않음을 단언 [tests/regression.test.js, src/hooks/session.js:5-7]
-- [ ] [AI-Review][Low] `audit.info` 호출의 외부 try/catch가 중복 — `src/audit/logger.js`가 이미 모든 목적지 오류를 흡수하므로 단순화 가능 [src/hooks/command-execute-before.js:10-24]
-- [ ] [AI-Review][Low] `commandName`과 `normalizedCommand`가 동일한 값을 중복 보유 — 향후 분기 계획이 없다면 단일 필드로 정리 [src/services/workflow/detect-workflow-context.js:36-37]
-- [ ] [AI-Review][Low] 상태 스토어의 mutability 정책 불일치 — `set`은 shallow copy, `advancePhase`는 in-place 변이, `get`은 라이브 참조 반환. 일관된 정책(예: get 시 사본 반환)으로 통일 [src/services/workflow/workflow-state.js:11-32]
-- [ ] [AI-Review][Low] `get()`의 `undefined`→`null` 강제 변환 제거 — `Map.get`이 반환하는 `undefined` 그대로 사용 [src/services/workflow/workflow-state.js:15-18]
-- [ ] [AI-Review][Low] `tool-execute-before.js`와 `tool-execute-after.js`가 바이트 단위 동일 — 공통 헬퍼 `advancePhaseIfWorkflowSession`로 DRY [src/hooks/tool-execute-before.js, src/hooks/tool-execute-after.js]
+- [x] [AI-Review][Medium] `detectWorkflowContext`가 `new Date().toISOString()`을 호출해 "순수 함수" 계약을 위반함 — `detectedAt` 주입을 훅 래퍼 레이어로 이전하거나 `now` 의존성을 인자로 받아 결정성 확보 [src/services/workflow/detect-workflow-context.js:40]
+- [x] [AI-Review][Medium] phase 전환이 회귀 테스트에서 직접 단언되지 않음 — `workflowState`에 인스펙션 API를 추가하거나 다른 관찰 전략으로 `phase === "in-progress"`를 명시적으로 검증 [tests/regression.test.js:340-353]
+- [x] [AI-Review][Medium] `sessionID` 누락 시 상태 스토어가 `undefined` 키로 오염될 수 있음 — 감지기 또는 훅에서 `sessionID` 필수 가드를 추가해 cross-session leakage 차단 [src/services/workflow/detect-workflow-context.js:39, src/hooks/command-execute-before.js:8]
+- [x] [AI-Review][Medium] `tool.execute.after`의 phase 전환 경로가 테스트되지 않음 — `tool.execute.after` 호출을 회귀 테스트에 추가해 양쪽 훅 모두 커버 [tests/regression.test.js, src/hooks/tool-execute-after.js]
+- [x] [AI-Review][Medium] `session.deleted`의 워크플로우 상태 클리어가 테스트되지 않음 — 회귀 테스트에서 `session.deleted` 이벤트 발사 후 후속 도구 이벤트가 phase를 advance시키지 않음을 단언 [tests/regression.test.js, src/hooks/session.js:5-7]
+- [x] [AI-Review][Low] `audit.info` 호출의 외부 try/catch가 중복 — `src/audit/logger.js`가 이미 모든 목적지 오류를 흡수하므로 단순화 가능 [src/hooks/command-execute-before.js:10-24]
+- [x] [AI-Review][Low] `commandName`과 `normalizedCommand`가 동일한 값을 중복 보유 — 향후 분기 계획이 없다면 단일 필드로 정리 [src/services/workflow/detect-workflow-context.js:36-37]
+- [x] [AI-Review][Low] 상태 스토어의 mutability 정책 불일치 — `set`은 shallow copy, `advancePhase`는 in-place 변이, `get`은 라이브 참조 반환. 일관된 정책(예: get 시 사본 반환)으로 통일 [src/services/workflow/workflow-state.js:11-32]
+- [x] [AI-Review][Low] `get()`의 `undefined`→`null` 강제 변환 제거 — `Map.get`이 반환하는 `undefined` 그대로 사용 [src/services/workflow/workflow-state.js:15-18]
+- [x] [AI-Review][Low] `tool-execute-before.js`와 `tool-execute-after.js`가 바이트 단위 동일 — 공통 헬퍼 `advancePhaseIfWorkflowSession`로 DRY [src/hooks/tool-execute-before.js, src/hooks/tool-execute-after.js]
+- [x] [AI-Review][Low] `WorkflowPhase` typedef이 JSDoc-only이라 `advancePhase`가 임의 문자열을 수용 — `WORKFLOW_PHASES` 상수를 export하고 런타임 검증 추가 [src/services/workflow/detect-workflow-context.js, src/services/workflow/workflow-state.js]
+- [x] [AI-Review][Low] `tool.execute.after` 래퍼 경로의 phase 전환이 회귀 테스트에서 직접 단언되지 않음 — 팩토리 레벨 단언 추가 [tests/regression.test.js]
+- [x] [AI-Review][Low] 동일 sessionID 재감지 동작이 회귀 단언으로 명시되지 않음 — re-detection 시 audit 재발행 + phase 리셋 단언 추가 [tests/regression.test.js, src/hooks/command-execute-before.js]
 
 ## Dev Notes
 
@@ -199,6 +202,23 @@ claude-sonnet-4-6 (1M context)
 - `src/hooks/session.js`: `session.deleted` 이벤트 시 워크플로우 상태 클리어. legacy 핸들러 위임 유지.
 - `tests/regression.test.js`: 비-워크플로우 명령 경로(zero parts, zero guard, no audit), audit 페이로드 shape, 단계 전진 멱등성, legacy 패리티 검증 추가.
 - `npm run build && npm test` 모두 통과. `status: "passed"`.
+- ✅ 코드 리뷰 follow-up 10건 처리 완료 (Medium 5, Low 5). 상세:
+  - [Medium] `detectWorkflowContext` 순수성 회복 — `detectedAt`를 호출자가 옵션으로 주입하도록 변경; 훅 래퍼에서 `new Date().toISOString()` 주입.
+  - [Medium] phase 전환을 회귀 테스트에서 직접 단언 — `workflow-state.js`/`detect-workflow-context.js`를 직접 import하여 `phase === "in-progress"` 명시적 검증 + 멱등성/미상 세션 no-op 단위 검증 추가.
+  - [Medium] `sessionID` 누락 가드 추가 — `detectWorkflowContext`가 `sessionID` 미존재 시 `null` 반환; `advancePhaseIfWorkflowSession`은 `sessionID` 누락/미상 세션을 안전하게 no-op.
+  - [Medium] `tool.execute.after` 경로 테스트 추가 — wrapper 핸들러를 통해 호출 후 추가 audit 이벤트가 발생하지 않음을 단언.
+  - [Medium] `session.deleted` 클리어 테스트 추가 — `event` 핸들러로 삭제 후 후속 mutating 도구가 legacy guard를 트리거하지 않음을 단언.
+  - [Low] `command-execute-before`의 try/catch 제거 — `audit.info`는 `src/audit/logger.js`에서 이미 모든 목적지 오류를 흡수하므로 중복 방어 코드 정리.
+  - [Low] `commandName`/`normalizedCommand` 중복 제거 — 단일 `commandName` 필드로 정리, JSDoc typedef도 동기화.
+  - [Low] workflow-state mutability 정책 통일 — `get`이 사본을 반환하도록 변경하여 외부 변이가 store에 누설되지 않음을 보장.
+  - [Low] `get()`의 `undefined`→`null` 강제 변환 제거 — `Map.get`이 반환하는 `undefined`를 그대로 노출.
+  - [Low] `tool-execute-before/after` DRY 처리 — 공통 헬퍼 `advancePhaseIfWorkflowSession`을 `detect-workflow-context.js`에서 export하여 양쪽 훅이 동일하게 호출.
+- 리팩터 후 `npm run build && npm test` 재실행: 모두 통과. legacy 패리티(`normalizeOutputParts` deepEqual + mutating-tool error 메시지) 유지 확인.
+- ✅ 2차 코드 리뷰 follow-up 3건 처리 (Low 3건). 상세:
+  - [Low] `WORKFLOW_PHASES` 상수 export + `advancePhase` 런타임 가드 — 잘못된 phase 문자열(예: `"in_progress"`) 입력 시 즉시 throw하여 typo로 인한 silent drift 차단.
+  - [Low] `tool.execute.after` 래퍼 phase 전환을 팩토리 레벨에서 직접 단언 — 인스펙션 가능한 `workflowState`로 hook을 직접 호출하고 `phase === "in-progress"`를 검증.
+  - [Low] 동일 sessionID 재감지 동작 단언 추가 — 두 번째 invocation에서 audit 재발행 + 단위 레벨에서 `set`이 phase를 `"start"`로 리셋함을 확인.
+- 2차 follow-up 후 `npm run build && npm test` 재실행: 모두 통과. legacy 패리티 유지 확인.
 
 ### File List
 
@@ -217,3 +237,5 @@ claude-sonnet-4-6 (1M context)
 
 - 2026-05-08: Story 1.2 구현 완료 — 워크플로우 감지 서비스 (`src/services/workflow/`) 생성, 래퍼 훅에 감지 및 단계 관리 로직 추가, `workflow.detected` audit 이벤트 발행, `normalizeCommandName` 공유화, 회귀 테스트 확장.
 - 2026-05-08: 코드 리뷰 수행 — Medium 5건, Low 5건 발견. Review Follow-ups (AI) 섹션에 액션 아이템 등록. Status를 review → in-progress로 전환.
+- 2026-05-08: 코드 리뷰 follow-up 10건 모두 처리 — `detectedAt` 호출자 주입(순수성 회복), `sessionID` 누락 가드, `commandName` 단일 필드 정리, workflow-state `get` 사본 반환, audit try/catch 제거, `advancePhaseIfWorkflowSession` 공통 헬퍼로 DRY, 회귀 테스트에 phase 전환/`tool.execute.after`/`session.deleted` 단언 추가. Status를 in-progress → review로 전환.
+- 2026-05-08: 2차 코드 리뷰 수행 — Critical/High/Medium 0건, Low 3건. 자동 수정 옵션으로 모두 처리: `WORKFLOW_PHASES` 런타임 가드, `tool.execute.after` 래퍼 phase 단언, 동일 sessionID 재감지 단언. `npm run build && npm test` 통과. Status를 review → done으로 전환.

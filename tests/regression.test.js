@@ -10,6 +10,15 @@ const legacyModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "policies", "legacy", "devai-git-workflo.js"),
 ).href;
 const wrapperModuleUrl = pathToFileURL(path.join(projectRoot, "src", "index.js")).href;
+const workflowStateModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "workflow", "workflow-state.js"),
+).href;
+const detectWorkflowContextModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "workflow", "detect-workflow-context.js"),
+).href;
+const toolExecuteAfterModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "hooks", "tool-execute-after.js"),
+).href;
 const builtModulePath = path.join(projectRoot, "dist", "devai-aidd-guard.js");
 const builtModuleUrl = pathToFileURL(builtModulePath).href;
 const legacyModulePath = path.join(
@@ -350,6 +359,221 @@ async function main() {
       logCountAfter,
       logCountBefore,
       "phase advance: additional read tool calls must not emit extra workflow.detected events (idempotent)",
+    );
+
+    // ── Workflow state contract (unit-style assertions) ────────────────────
+    const { createWorkflowStateStore } = await import(workflowStateModuleUrl);
+    const { detectWorkflowContext, advancePhaseIfWorkflowSession } = await import(
+      detectWorkflowContextModuleUrl
+    );
+
+    // sessionID guard: detectWorkflowContext returns null when sessionID is missing
+    const noSessionCtx = detectWorkflowContext(
+      { command: "/bmad-bmm-quick-dev", arguments: "" },
+      new Set(["bmad-bmm-quick-dev"]),
+      { detectedAt: "2026-05-08T00:00:00.000Z" },
+    );
+    assert.equal(
+      noSessionCtx,
+      null,
+      "detectWorkflowContext must return null when sessionID is absent",
+    );
+
+    // detectedAt is injected by the caller (pure function contract)
+    const fixedAt = "2026-05-08T12:34:56.000Z";
+    const detectedCtx = detectWorkflowContext(
+      { command: "/bmad-bmm-quick-dev", arguments: "X", sessionID: "s-unit" },
+      new Set(["bmad-bmm-quick-dev"]),
+      { detectedAt: fixedAt },
+    );
+    assert.equal(detectedCtx?.commandName, "bmad-bmm-quick-dev");
+    assert.equal(detectedCtx?.phase, "start");
+    assert.equal(
+      detectedCtx?.detectedAt,
+      fixedAt,
+      "detectedAt must be the value injected by the caller",
+    );
+
+    // workflow-state phase transition + idempotency
+    const store = createWorkflowStateStore();
+    store.set("s-unit", detectedCtx);
+    assert.equal(store.get("s-unit")?.phase, "start");
+    advancePhaseIfWorkflowSession(store, "s-unit", "in-progress");
+    assert.equal(
+      store.get("s-unit")?.phase,
+      "in-progress",
+      "advancePhaseIfWorkflowSession must transition start → in-progress",
+    );
+    advancePhaseIfWorkflowSession(store, "s-unit", "in-progress");
+    assert.equal(
+      store.get("s-unit")?.phase,
+      "in-progress",
+      "second advance must remain at in-progress (idempotent)",
+    );
+
+    // unknown / missing sessionID: no-op without errors
+    advancePhaseIfWorkflowSession(store, "unknown-session", "in-progress");
+    assert.equal(store.get("unknown-session"), undefined);
+    advancePhaseIfWorkflowSession(store, undefined, "in-progress");
+
+    // get() returns a copy — external mutations must not leak back
+    const snapshot = store.get("s-unit");
+    snapshot.phase = "tampered";
+    assert.equal(
+      store.get("s-unit")?.phase,
+      "in-progress",
+      "get must return a copy so external mutations do not leak into the store",
+    );
+
+    // clear removes the entry
+    store.clear("s-unit");
+    assert.equal(store.get("s-unit"), undefined, "clear must remove the entry");
+
+    // ── tool.execute.after path advances phase via wrapper hook ────────────
+    const afterWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
+    const afterCmdOutput = { parts: [] };
+    await afterWrapper.handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "", sessionID: "s-after" },
+      afterCmdOutput,
+    );
+    const afterLogsBefore = afterWrapper.mock.logs.filter(
+      (l) => l.body?.message === "workflow.detected",
+    ).length;
+    await afterWrapper.handlers["tool.execute.after"](
+      { sessionID: "s-after", tool: "read", args: {} },
+      { args: {} },
+    );
+    const afterLogsAfter = afterWrapper.mock.logs.filter(
+      (l) => l.body?.message === "workflow.detected",
+    ).length;
+    assert.equal(
+      afterLogsAfter,
+      afterLogsBefore,
+      "tool.execute.after: must not emit additional workflow.detected events",
+    );
+
+    // ── tool.execute.after wrapper directly advances phase (factory-level) ──
+    // Exercises the wrapper hook factory against an inspectable workflowState so
+    // we can directly assert phase === "in-progress" after the after-hook runs,
+    // closing the gap left by the bootstrap-level test above.
+    const { createToolExecuteAfterHook } = await import(toolExecuteAfterModuleUrl);
+    const afterDirectStore = createWorkflowStateStore();
+    afterDirectStore.set("s-after-direct", {
+      commandName: "bmad-bmm-quick-dev",
+      arguments: "",
+      sessionID: "s-after-direct",
+      detectedAt: "2026-05-08T00:00:00.000Z",
+      phase: "start",
+    });
+    const afterDirectHook = createToolExecuteAfterHook({}, { workflowState: afterDirectStore });
+    await afterDirectHook(
+      { sessionID: "s-after-direct", tool: "read", args: {} },
+      { args: {} },
+    );
+    assert.equal(
+      afterDirectStore.get("s-after-direct")?.phase,
+      "in-progress",
+      "tool.execute.after wrapper must advance phase from start to in-progress",
+    );
+
+    // ── Re-detection on same sessionID resets state and re-emits audit ─────
+    const reWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
+    await reWrapper.handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "first", sessionID: "s-re" },
+      { parts: [] },
+    );
+    await reWrapper.handlers["tool.execute.before"](
+      { sessionID: "s-re", tool: "read", args: {} },
+      { args: {} },
+    );
+    const reFirstAuditCount = reWrapper.mock.logs.filter(
+      (l) => l.body?.message === "workflow.detected",
+    ).length;
+    assert.equal(
+      reFirstAuditCount,
+      1,
+      "first invocation: exactly one workflow.detected audit event",
+    );
+    await reWrapper.handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "second", sessionID: "s-re" },
+      { parts: [] },
+    );
+    const reSecondAuditCount = reWrapper.mock.logs.filter(
+      (l) => l.body?.message === "workflow.detected",
+    ).length;
+    assert.equal(
+      reSecondAuditCount,
+      2,
+      "re-invocation on same sessionID: must emit a second workflow.detected audit event (intentional state reset)",
+    );
+
+    // Unit-level: store.set on existing sessionID resets phase back to "start"
+    const resetStore = createWorkflowStateStore();
+    resetStore.set("s-reset", {
+      commandName: "x",
+      arguments: "",
+      sessionID: "s-reset",
+      detectedAt: "2026-05-08T00:00:00.000Z",
+      phase: "start",
+    });
+    advancePhaseIfWorkflowSession(resetStore, "s-reset", "in-progress");
+    assert.equal(resetStore.get("s-reset")?.phase, "in-progress");
+    resetStore.set("s-reset", {
+      commandName: "x",
+      arguments: "",
+      sessionID: "s-reset",
+      detectedAt: "2026-05-08T00:00:00.000Z",
+      phase: "start",
+    });
+    assert.equal(
+      resetStore.get("s-reset")?.phase,
+      "start",
+      "set on existing sessionID must reset phase (overwrites prior context)",
+    );
+
+    // ── advancePhase rejects invalid phase values (typo guard) ─────────────
+    const phaseGuardStore = createWorkflowStateStore();
+    phaseGuardStore.set("s-guard", {
+      commandName: "x",
+      arguments: "",
+      sessionID: "s-guard",
+      detectedAt: "2026-05-08T00:00:00.000Z",
+      phase: "start",
+    });
+    assert.throws(
+      () => phaseGuardStore.advancePhase("s-guard", "in_progress"),
+      /Invalid workflow phase/,
+      "advancePhase must reject phase values outside WORKFLOW_PHASES (catches typos like 'in_progress')",
+    );
+    assert.equal(
+      phaseGuardStore.get("s-guard")?.phase,
+      "start",
+      "rejected advancePhase call must not mutate stored phase",
+    );
+
+    // ── session.deleted clears state — subsequent tool events do not throw ──
+    const delWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
+    const delCmdOutput = { parts: [] };
+    await delWrapper.handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "", sessionID: "s-deleted" },
+      delCmdOutput,
+    );
+    await delWrapper.handlers.event({
+      event: { type: "session.deleted", properties: { sessionID: "s-deleted" } },
+    });
+    let postDeleteError = null;
+    try {
+      await delWrapper.handlers["tool.execute.before"](
+        { sessionID: "s-deleted", tool: "write", args: {} },
+        { args: {} },
+      );
+    } catch (e) {
+      postDeleteError = e;
+    }
+    assert.equal(
+      postDeleteError,
+      null,
+      "session.deleted: state must be cleared so later mutating-tool calls do not trigger the legacy guard",
     );
 
     // ── Legacy parity still holds after refactor ───────────────────────────
