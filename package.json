@@ -9,5 +9,8 @@
     "release": "node scripts/make-release.js",
     "pack": "npm run build && npm run release",
     "test": "node --check src/index.js && node --check src/policies/legacy/devai-git-workflo.js && node --check scripts/build.js && node --check scripts/make-release.js && node tests/regression.test.js"
+  },
+  "dependencies": {
+    "ajv": "8.17.1"
   }
 }

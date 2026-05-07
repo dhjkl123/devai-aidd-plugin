@@ -15,6 +15,7 @@ import { createToolExecuteAfterHook } from "./hooks/tool-execute-after.js";
 import { createSessionHook } from "./hooks/session.js";
 import { createPermissionAskedHook } from "./hooks/permission-asked.js";
 import { createFileEditedHook } from "./hooks/file-edited.js";
+import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-policy.js";
 
 const SUPPORTED_RUNTIME = "Node.js ESM plugin runtime (Node 22 target)";
 
@@ -48,6 +49,26 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       httpAdapter,
     });
 
+    // Emit config.validation.failed audit event if any config layer was dropped or had errors.
+    // Best-effort only — bootstrap continues regardless of audit outcome (NFR7/NFR8).
+    if (!runtimeConfig.validation.valid || runtimeConfig.validation.droppedLayers.length > 0) {
+      const normalizedErrors = (runtimeConfig.validation.errors || []).map((err) => ({
+        instancePath: err.instancePath,
+        message: err.message,
+        params: err.params,
+      }));
+      await audit.info("config.validation.failed", {
+        event: "config.validation.failed",
+        timestamp: new Date().toISOString(),
+        workflow: null,
+        command: null,
+        details: {
+          droppedLayers: runtimeConfig.validation.droppedLayers,
+          errors: normalizedErrors,
+        },
+      });
+    }
+
     ensureLegacyProjectConfigCompatibility(directory, fsAdapter, runtimeConfig);
 
     await audit.info("plugin bootstrap", {
@@ -79,13 +100,20 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
 
     const workflowState = createWorkflowStateStore();
 
+    // Build pluginContext so downstream hook factories (Story 1.4+) and
+    // approval hooks (Epic 2) can consume the resolver without re-loading config.
+    const pluginContext = {
+      runtimeConfig,
+      resolvePolicy: (workflowContext) => resolveWorkflowPolicy(workflowContext, runtimeConfig.config),
+    };
+
     return {
-      "command.execute.before": createCommandExecuteBeforeHook(legacyHandlers, { workflowCommands, workflowState, audit }),
-      "tool.execute.before": createToolExecuteBeforeHook(legacyHandlers, { workflowState }),
-      "tool.execute.after": createToolExecuteAfterHook(legacyHandlers, { workflowState }),
-      "permission.asked": createPermissionAskedHook(legacyHandlers),
-      "file.edited": createFileEditedHook(legacyHandlers),
-      event: createSessionHook(legacyHandlers, { workflowState }),
+      "command.execute.before": createCommandExecuteBeforeHook(legacyHandlers, { workflowCommands, workflowState, audit, pluginContext }),
+      "tool.execute.before": createToolExecuteBeforeHook(legacyHandlers, { workflowState, pluginContext }),
+      "tool.execute.after": createToolExecuteAfterHook(legacyHandlers, { workflowState, pluginContext }),
+      "permission.asked": createPermissionAskedHook(legacyHandlers, { pluginContext }),
+      "file.edited": createFileEditedHook(legacyHandlers, { pluginContext }),
+      event: createSessionHook(legacyHandlers, { workflowState, pluginContext }),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

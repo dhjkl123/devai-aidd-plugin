@@ -1,4 +1,4 @@
-export function createPermissionAskedHook(legacyHandlers) {
+export function createPermissionAskedHook(legacyHandlers, _pluginInjections = {}) {
   return async (input) => {
     const handler = legacyHandlers["permission.asked"];
     if (typeof handler !== "function") {

@@ -19,6 +19,12 @@ const detectWorkflowContextModuleUrl = pathToFileURL(
 const toolExecuteAfterModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "hooks", "tool-execute-after.js"),
 ).href;
+const loadConfigModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "config", "load-config.js"),
+).href;
+const resolveWorkflowPolicyModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "workflow", "resolve-workflow-policy.js"),
+).href;
 const builtModulePath = path.join(projectRoot, "dist", "devai-aidd-guard.js");
 const builtModuleUrl = pathToFileURL(builtModulePath).href;
 const legacyModulePath = path.join(
@@ -605,6 +611,548 @@ async function main() {
   }
 }
 
+/**
+ * Story 1.3: Verify config merge precedence.
+ * - Project config values override global config values.
+ * - Legacy files are read when no modern project file exists.
+ */
+async function verifyConfigMergePrecedence() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?v=${Date.now()}`);
+
+  // Create a sandboxed temp workspace with both global and project configs
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-merge-"));
+  const globalConfigDir = path.join(tempRoot, "global-home", ".config", "opencode");
+  const projectConfigDir = path.join(tempRoot, "project", ".opencode");
+  const legacyProjectDir = path.join(tempRoot, "legacy", ".opencode");
+  fs.mkdirSync(globalConfigDir, { recursive: true });
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+  fs.mkdirSync(legacyProjectDir, { recursive: true });
+
+  try {
+    // Write global config with a known defaultType
+    fs.writeFileSync(
+      path.join(globalConfigDir, "devai-aidd-guard.global.jsonc"),
+      JSON.stringify({ branch: { defaultType: "docs" } }),
+      "utf8",
+    );
+
+    // Write project config that overrides defaultType
+    fs.writeFileSync(
+      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }),
+      "utf8",
+    );
+
+    // Test 1: project overrides global
+    const fakeHomedir = path.join(tempRoot, "global-home");
+    const fsAdapter = {
+      existsSync: fs.existsSync.bind(fs),
+      readFileSync: fs.readFileSync.bind(fs),
+      readdirSync: fs.readdirSync.bind(fs),
+      mkdirSync: fs.mkdirSync.bind(fs),
+      writeFileSync: fs.writeFileSync.bind(fs),
+      dirname: path.dirname.bind(path),
+      homedir: () => fakeHomedir,
+    };
+
+    const projectDir = path.join(tempRoot, "project");
+    const result1 = loadRuntimeConfig(projectDir, fsAdapter);
+    assert.equal(
+      result1.config.branch.defaultType,
+      "feat",
+      "verifyConfigMergePrecedence: project config must override global config",
+    );
+    assert.equal(
+      result1.sources.hasProjectConfig,
+      true,
+      "verifyConfigMergePrecedence: hasProjectConfig must be true",
+    );
+    assert.equal(
+      result1.sources.hasGlobalConfig,
+      true,
+      "verifyConfigMergePrecedence: hasGlobalConfig must be true",
+    );
+
+    // Test 2: legacy files are read when no modern project config
+    const legacyDir = path.join(tempRoot, "legacy");
+    fs.writeFileSync(
+      path.join(legacyProjectDir, "opencode-aidd-plugin.json"),
+      JSON.stringify({ branch: { defaultType: "refactor" } }),
+      "utf8",
+    );
+    const result2 = loadRuntimeConfig(legacyDir, fsAdapter);
+    assert.equal(
+      result2.config.branch.defaultType,
+      "refactor",
+      "verifyConfigMergePrecedence: legacy project config must be read when no modern project file",
+    );
+    assert.equal(
+      result2.sources.hasLegacyProjectConfig,
+      true,
+      "verifyConfigMergePrecedence: hasLegacyProjectConfig must be true when legacy file present",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 1.3: Verify validation fallback behavior.
+ * - Invalid project config is dropped; effective config uses the lower layer.
+ * - validation.droppedLayers includes "projectConfig".
+ * - validation.errors is non-empty.
+ */
+async function verifyValidationFallback() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?v2=${Date.now()}`);
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-fallback-"));
+  const projectConfigDir = path.join(tempRoot, "project", ".opencode");
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+
+  try {
+    // Write an intentionally invalid project config: branch.longLivedBranches must be array, not integer
+    fs.writeFileSync(
+      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { longLivedBranches: 42 } }),
+      "utf8",
+    );
+
+    const fakeHomedir = path.join(tempRoot, "no-home");
+    const fsAdapter = {
+      existsSync: fs.existsSync.bind(fs),
+      readFileSync: fs.readFileSync.bind(fs),
+      readdirSync: fs.readdirSync.bind(fs),
+      mkdirSync: fs.mkdirSync.bind(fs),
+      writeFileSync: fs.writeFileSync.bind(fs),
+      dirname: path.dirname.bind(path),
+      homedir: () => fakeHomedir,
+    };
+
+    const projectDir = path.join(tempRoot, "project");
+    const result = loadRuntimeConfig(projectDir, fsAdapter);
+
+    // (a) Effective config must use lower layer (defaults), so longLivedBranches is an array
+    assert.ok(
+      Array.isArray(result.config.branch.longLivedBranches),
+      "verifyValidationFallback: effective config must use valid lower layer (longLivedBranches must be array)",
+    );
+
+    // (b) droppedLayers must include "projectConfig"
+    assert.ok(
+      result.validation.droppedLayers.includes("projectConfig"),
+      "verifyValidationFallback: droppedLayers must include 'projectConfig' when project config is invalid",
+    );
+
+    // (c) errors must be non-empty
+    assert.ok(
+      result.validation.errors.length > 0,
+      "verifyValidationFallback: validation.errors must be non-empty when project config is invalid",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 1.3 (AI-4): Verify validation fallback when an invalid LOWER layer
+ * (globalConfig) coexists with a valid UPPER layer (projectConfig).
+ *
+ * Regression target: prior `validateAndRecover` algorithm dropped from the
+ * highest priority down on every failure, which incorrectly destroyed the
+ * valid `projectConfig` whenever `globalConfig` was malformed. The redesigned
+ * algorithm validates each layer incrementally, so only `globalConfig` is
+ * dropped and `projectConfig` overrides survive.
+ */
+async function verifyValidationFallbackLowerLayer() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?v3=${Date.now()}`);
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-fallback-lower-"));
+  const globalConfigDir = path.join(tempRoot, "global-home", ".config", "opencode");
+  const projectConfigDir = path.join(tempRoot, "project", ".opencode");
+  fs.mkdirSync(globalConfigDir, { recursive: true });
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+
+  try {
+    // Invalid global config: longLivedBranches must be an array, not an integer.
+    fs.writeFileSync(
+      path.join(globalConfigDir, "devai-aidd-guard.global.jsonc"),
+      JSON.stringify({ branch: { longLivedBranches: 99, defaultType: "docs" } }),
+      "utf8",
+    );
+    // Valid project config that overrides defaultType to "feat".
+    fs.writeFileSync(
+      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }),
+      "utf8",
+    );
+
+    const fakeHomedir = path.join(tempRoot, "global-home");
+    const fsAdapter = {
+      existsSync: fs.existsSync.bind(fs),
+      readFileSync: fs.readFileSync.bind(fs),
+      readdirSync: fs.readdirSync.bind(fs),
+      mkdirSync: fs.mkdirSync.bind(fs),
+      writeFileSync: fs.writeFileSync.bind(fs),
+      dirname: path.dirname.bind(path),
+      homedir: () => fakeHomedir,
+    };
+
+    const projectDir = path.join(tempRoot, "project");
+    const result = loadRuntimeConfig(projectDir, fsAdapter);
+
+    // (a) projectConfig must NOT be in droppedLayers — its value must survive.
+    assert.equal(
+      result.validation.droppedLayers.includes("projectConfig"),
+      false,
+      "verifyValidationFallbackLowerLayer: projectConfig must NOT be dropped when only globalConfig is invalid",
+    );
+
+    // (b) globalConfig must be the dropped layer.
+    assert.ok(
+      result.validation.droppedLayers.includes("globalConfig"),
+      "verifyValidationFallbackLowerLayer: globalConfig must be dropped when its branch.longLivedBranches is invalid",
+    );
+
+    // (c) Effective config must reflect the valid project override.
+    assert.equal(
+      result.config.branch.defaultType,
+      "feat",
+      "verifyValidationFallbackLowerLayer: project override (defaultType=feat) must survive after globalConfig is dropped",
+    );
+
+    // (d) longLivedBranches must come from defaults (not the invalid global).
+    assert.ok(
+      Array.isArray(result.config.branch.longLivedBranches),
+      "verifyValidationFallbackLowerLayer: effective longLivedBranches must remain a valid array",
+    );
+
+    // (e) errors must be tagged with the offending layer name.
+    const errorLayers = result.validation.errors
+      .map((err) => (err && err.params && err.params.layer) || null)
+      .filter(Boolean);
+    assert.ok(
+      errorLayers.includes("globalConfig"),
+      "verifyValidationFallbackLowerLayer: error entries must be tagged with params.layer === 'globalConfig'",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 1.3 (AI-2): Verify that JSONC parse failures surface through the
+ * validation pipeline instead of being silently dropped.
+ */
+async function verifyParseFailureSurfacing() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?v4=${Date.now()}`);
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-parse-"));
+  const projectConfigDir = path.join(tempRoot, "project", ".opencode");
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+
+  try {
+    // Write a syntactically broken JSON file.
+    fs.writeFileSync(
+      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      "{ this is not valid JSON",
+      "utf8",
+    );
+
+    const fakeHomedir = path.join(tempRoot, "no-home");
+    const fsAdapter = {
+      existsSync: fs.existsSync.bind(fs),
+      readFileSync: fs.readFileSync.bind(fs),
+      readdirSync: fs.readdirSync.bind(fs),
+      mkdirSync: fs.mkdirSync.bind(fs),
+      writeFileSync: fs.writeFileSync.bind(fs),
+      dirname: path.dirname.bind(path),
+      homedir: () => fakeHomedir,
+    };
+
+    const projectDir = path.join(tempRoot, "project");
+    const result = loadRuntimeConfig(projectDir, fsAdapter);
+
+    assert.equal(
+      result.validation.valid,
+      false,
+      "verifyParseFailureSurfacing: validation.valid must be false on parse failure",
+    );
+    const parseErrorEntry = result.validation.errors.find(
+      (err) => err && err.params && err.params.source === "parseJsonc",
+    );
+    assert.ok(
+      parseErrorEntry,
+      "verifyParseFailureSurfacing: parse error must be present in validation.errors with params.source === 'parseJsonc'",
+    );
+    assert.equal(
+      parseErrorEntry.params.layer,
+      "projectConfig",
+      "verifyParseFailureSurfacing: parse error must be tagged with the layer name",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 1.3 (AI-3): Verify forward-compat: unknown additionalProperties on
+ * extension-prone sections (branch, audit, workflowPolicy[command]) must NOT
+ * cause the layer to be dropped.
+ */
+async function verifyForwardCompatExtensionKeys() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?v5=${Date.now()}`);
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-forward-"));
+  const projectConfigDir = path.join(tempRoot, "project", ".opencode");
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+
+  try {
+    fs.writeFileSync(
+      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({
+        branch: { defaultType: "feat", futureField: "preview" },
+        audit: { enabled: true, futureTransport: "kafka" },
+      }),
+      "utf8",
+    );
+
+    const fakeHomedir = path.join(tempRoot, "no-home");
+    const fsAdapter = {
+      existsSync: fs.existsSync.bind(fs),
+      readFileSync: fs.readFileSync.bind(fs),
+      readdirSync: fs.readdirSync.bind(fs),
+      mkdirSync: fs.mkdirSync.bind(fs),
+      writeFileSync: fs.writeFileSync.bind(fs),
+      dirname: path.dirname.bind(path),
+      homedir: () => fakeHomedir,
+    };
+
+    const projectDir = path.join(tempRoot, "project");
+    const result = loadRuntimeConfig(projectDir, fsAdapter);
+
+    assert.equal(
+      result.validation.droppedLayers.length,
+      0,
+      "verifyForwardCompatExtensionKeys: projectConfig with future fields must NOT be dropped",
+    );
+    assert.equal(
+      result.config.branch.defaultType,
+      "feat",
+      "verifyForwardCompatExtensionKeys: projectConfig override must apply",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 1.3 (AI-5): Verify schemaVersion is enforced via const so a wrong
+ * version explicitly fails validation rather than silently passing.
+ */
+async function verifySchemaVersionEnforcement() {
+  const { validateRuntimeConfig, RUNTIME_CONFIG_SCHEMA_VERSION } = await import(
+    `${pathToFileURL(path.join(projectRoot, "src", "config", "validate-config.js")).href}?v=${Date.now()}`
+  );
+  const { DEFAULT_PLUGIN_CONFIG } = await import(
+    pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href
+  );
+
+  // Sanity: defaults pass.
+  const defaultsResult = validateRuntimeConfig(DEFAULT_PLUGIN_CONFIG);
+  assert.equal(
+    defaultsResult.valid,
+    true,
+    "verifySchemaVersionEnforcement: DEFAULT_PLUGIN_CONFIG must validate without schemaVersion",
+  );
+
+  // Correct version passes.
+  const okResult = validateRuntimeConfig({
+    ...DEFAULT_PLUGIN_CONFIG,
+    schemaVersion: RUNTIME_CONFIG_SCHEMA_VERSION,
+  });
+  assert.equal(
+    okResult.valid,
+    true,
+    "verifySchemaVersionEnforcement: correct schemaVersion must validate",
+  );
+
+  // Wrong version fails.
+  const badResult = validateRuntimeConfig({
+    ...DEFAULT_PLUGIN_CONFIG,
+    schemaVersion: 999,
+  });
+  assert.equal(
+    badResult.valid,
+    false,
+    "verifySchemaVersionEnforcement: schemaVersion=999 must fail validation",
+  );
+  assert.ok(
+    badResult.errors.some(
+      (err) => err.instancePath === "/schemaVersion" || (err.params && err.params.allowedValue !== undefined),
+    ),
+    "verifySchemaVersionEnforcement: errors must reference /schemaVersion",
+  );
+}
+
+/**
+ * Story 1.3: Verify resolveWorkflowPolicy behavior.
+ * - Matched command → outcome: "allow", policy keys present
+ * - Unmatched command → outcome: "ask", fallback policy shape
+ * - null context → outcome: "skip"
+ */
+async function verifyResolveWorkflowPolicy() {
+  const { resolveWorkflowPolicy } = await import(resolveWorkflowPolicyModuleUrl);
+  const { DEFAULT_PLUGIN_CONFIG } = await import(
+    pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href
+  );
+
+  // Case 1: matched command
+  const matchedContext = {
+    commandName: "bmad-bmm-dev-story",
+    arguments: "",
+    sessionID: "s-policy-test",
+    detectedAt: "2026-05-08T00:00:00.000Z",
+    phase: "start",
+  };
+  const matchedResult = resolveWorkflowPolicy(matchedContext, DEFAULT_PLUGIN_CONFIG);
+  assert.equal(
+    matchedResult.outcome,
+    "allow",
+    "verifyResolveWorkflowPolicy: matched command must resolve to outcome 'allow'",
+  );
+  assert.ok(
+    matchedResult.details && matchedResult.details.policy,
+    "verifyResolveWorkflowPolicy: matched result must have details.policy",
+  );
+  assert.ok(
+    typeof matchedResult.details.policy.category === "string",
+    "verifyResolveWorkflowPolicy: matched policy must have category",
+  );
+  assert.ok(
+    typeof matchedResult.details.policy.identityStrategy === "string",
+    "verifyResolveWorkflowPolicy: matched policy must have identityStrategy",
+  );
+  assert.ok(
+    typeof matchedResult.details.policy.branchRequired === "boolean",
+    "verifyResolveWorkflowPolicy: matched policy must have branchRequired",
+  );
+  assert.ok(
+    typeof matchedResult.details.policy.finalization === "string",
+    "verifyResolveWorkflowPolicy: matched policy must have finalization",
+  );
+  assert.ok(
+    matchedResult.details.branch,
+    "verifyResolveWorkflowPolicy: matched result must have details.branch",
+  );
+
+  // Case 2: unmatched command
+  const unmatchedContext = {
+    commandName: "bmad-bmm-something-new",
+    arguments: "",
+    sessionID: "s-policy-test-2",
+    detectedAt: "2026-05-08T00:00:00.000Z",
+    phase: "start",
+  };
+  const unmatchedResult = resolveWorkflowPolicy(unmatchedContext, DEFAULT_PLUGIN_CONFIG);
+  assert.equal(
+    unmatchedResult.outcome,
+    "ask",
+    "verifyResolveWorkflowPolicy: unmatched command must resolve to outcome 'ask'",
+  );
+  assert.ok(
+    unmatchedResult.details && unmatchedResult.details.fallback,
+    "verifyResolveWorkflowPolicy: unmatched result must have details.fallback",
+  );
+  assert.equal(
+    typeof unmatchedResult.details.fallback.category,
+    "string",
+    "verifyResolveWorkflowPolicy: fallback policy must have category",
+  );
+
+  // Case 3: null context
+  const nullResult = resolveWorkflowPolicy(null, DEFAULT_PLUGIN_CONFIG);
+  assert.equal(
+    nullResult.outcome,
+    "skip",
+    "verifyResolveWorkflowPolicy: null context must resolve to outcome 'skip'",
+  );
+  assert.equal(
+    nullResult.details.commandName,
+    null,
+    "verifyResolveWorkflowPolicy: null context must have details.commandName === null",
+  );
+}
+
+/**
+ * Story 1.3: Verify config.validation.failed audit payload shape.
+ * When an invalid project config layer is provided, the wrapper must emit
+ * a config.validation.failed audit entry with event, timestamp, and details keys.
+ */
+async function verifyConfigValidationFailedAuditPayload() {
+  const wrapperModule = await import(`${wrapperModuleUrl}?vf=${Date.now()}`);
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-auditfail-"));
+  const projectConfigDir = path.join(tempRoot, ".opencode");
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+  const commandsDir = path.join(tempRoot, ".opencode", "commands");
+  fs.mkdirSync(commandsDir, { recursive: true });
+  fs.writeFileSync(path.join(commandsDir, "bmad-bmm-quick-dev.md"), "# quick dev\n", "utf8");
+
+  // Write invalid project config to trigger validation failure
+  fs.writeFileSync(
+    path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+    JSON.stringify({ branch: { longLivedBranches: 99 } }),
+    "utf8",
+  );
+
+  try {
+    const mock = createMockClient();
+    await wrapperModule.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: tempRoot,
+    });
+
+    const validationFailedLogs = mock.logs.filter(
+      (l) => l.body?.message === "config.validation.failed",
+    );
+    assert.equal(
+      validationFailedLogs.length,
+      1,
+      "verifyConfigValidationFailedAuditPayload: must emit exactly one config.validation.failed audit event",
+    );
+    const payload = validationFailedLogs[0].body.extra;
+    assert.equal(
+      typeof payload.event,
+      "string",
+      "verifyConfigValidationFailedAuditPayload: audit payload must have 'event' string",
+    );
+    assert.equal(
+      payload.event,
+      "config.validation.failed",
+      "verifyConfigValidationFailedAuditPayload: event must equal 'config.validation.failed'",
+    );
+    assert.equal(
+      typeof payload.timestamp,
+      "string",
+      "verifyConfigValidationFailedAuditPayload: audit payload must have 'timestamp' string",
+    );
+    assert.ok(
+      payload.details && typeof payload.details === "object",
+      "verifyConfigValidationFailedAuditPayload: audit payload must have 'details' object",
+    );
+    assert.ok(
+      Array.isArray(payload.details.droppedLayers),
+      "verifyConfigValidationFailedAuditPayload: details must have 'droppedLayers' array",
+    );
+    assert.ok(
+      Array.isArray(payload.details.errors),
+      "verifyConfigValidationFailedAuditPayload: details must have 'errors' array",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 async function verifyBootstrapFailureShape() {
   const wrapperModule = await import(`${wrapperModuleUrl}?invalid=${Date.now()}`);
   let error = null;
@@ -633,6 +1181,14 @@ async function verifyBootstrapFailureShape() {
 main()
   .then(() => verifyBootstrapFailureShape())
   .then(() => verifyMissingLegacyBootstrapDependencyFails())
+  .then(() => verifyConfigMergePrecedence())
+  .then(() => verifyValidationFallback())
+  .then(() => verifyValidationFallbackLowerLayer())
+  .then(() => verifyParseFailureSurfacing())
+  .then(() => verifyForwardCompatExtensionKeys())
+  .then(() => verifySchemaVersionEnforcement())
+  .then(() => verifyResolveWorkflowPolicy())
+  .then(() => verifyConfigValidationFailedAuditPayload())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;

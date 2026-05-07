@@ -1,6 +1,6 @@
 # Story 1.3: Load Merged Configuration and Resolve Workflow Policy
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -31,43 +31,54 @@ so that workflow behavior matches team rules without manual code changes.
 
 ## Tasks / Subtasks
 
-- [ ] Author the runtime configuration JSON Schema and Ajv-backed validator (AC: 1, 4)
-  - [ ] Create `src/config/schema/runtime-config.schema.json` describing the full effective configuration shape: `branch.pattern`, `branch.defaultType`, `branch.fallbackTicket`, `branch.longLivedBranches[]`, `branch.defaultMergeTarget`, `branch.validationRegex`, `branch.commandTypeMap`, `workflowPolicy[<commandName>]` with required keys (`category`, `identityStrategy`, `branchRequired`, `finalization`) plus optional `artifactKey`, and the `audit` block. Include a `schemaVersion` integer field; defaults to `1`.
-  - [ ] Create `src/config/validate-config.js` that compiles the schema once with Ajv 8.17.1 (`strict: true`, `allErrors: true`) and exports `validateRuntimeConfig(config)` returning `{ valid: boolean, errors: AjvError[] }`. Do not throw; the loader decides recovery.
-  - [ ] Add Ajv 8.17.1 to `package.json` dependencies (exact version per architecture decision). Confirm `npm install` completes and the lockfile is updated.
-  - [ ] Export the schema document and a `RUNTIME_CONFIG_SCHEMA_VERSION = 1` constant from `src/config/validate-config.js` so downstream stories and tests share one source of truth.
+- [x] Author the runtime configuration JSON Schema and Ajv-backed validator (AC: 1, 4)
+  - [x] Create `src/config/schema/runtime-config.schema.json` describing the full effective configuration shape: `branch.pattern`, `branch.defaultType`, `branch.fallbackTicket`, `branch.longLivedBranches[]`, `branch.defaultMergeTarget`, `branch.validationRegex`, `branch.commandTypeMap`, `workflowPolicy[<commandName>]` with required keys (`category`, `identityStrategy`, `branchRequired`, `finalization`) plus optional `artifactKey`, and the `audit` block. Include a `schemaVersion` integer field; defaults to `1`.
+  - [x] Create `src/config/validate-config.js` that compiles the schema once with Ajv 8.17.1 (`strict: true`, `allErrors: true`) and exports `validateRuntimeConfig(config)` returning `{ valid: boolean, errors: AjvError[] }`. Do not throw; the loader decides recovery.
+  - [x] Add Ajv 8.17.1 to `package.json` dependencies (exact version per architecture decision). Confirm `npm install` completes and the lockfile is updated.
+  - [x] Export the schema document and a `RUNTIME_CONFIG_SCHEMA_VERSION = 1` constant from `src/config/validate-config.js` so downstream stories and tests share one source of truth.
 
-- [ ] Refactor `loadRuntimeConfig` into a deterministic merge pipeline (AC: 1, 2, 4)
-  - [ ] In `src/config/load-config.js`, split the current logic into named helpers: `readGlobalConfig`, `readProjectConfig`, `readLegacyConfigs`, `mergeConfigs(layers)` (already exists as `mergeObjects` — keep the implementation and re-export under the new name), and `validateAndRecover(layers)`.
-  - [ ] Apply this fixed precedence (lowest to highest, last write wins): `DEFAULT_PLUGIN_CONFIG` → `globalConfig` → `legacyProjectConfig` → `legacyWorkflowProjectConfig` → `projectConfig`. Document the order in a JSDoc block on `loadRuntimeConfig`.
-  - [ ] After every merge, run `validateRuntimeConfig` on the candidate. If validation fails, drop the highest layer and retry; record each rejection so the caller can emit `config.validation.failed`. If all layers fail, the merge result equals the cloned `DEFAULT_PLUGIN_CONFIG`.
-  - [ ] Extend the returned object with a `validation` field: `{ valid: boolean, droppedLayers: ["projectConfig" | "legacyWorkflowProjectConfig" | "legacyProjectConfig" | "globalConfig"], errors: AjvError[] }`. The existing `config`, `paths`, and `sources` fields stay intact for backward compatibility with `src/index.js` and `src/audit/logger.js`.
-  - [ ] Do NOT modify `ensureLegacyProjectConfigCompatibility` or its bridge-file write semantics in this story; that behavior is owned by Story 4.2 per `sprint-change-proposal-2026-05-08.md`. Story 1.3 is a read-only resolver.
+- [x] Refactor `loadRuntimeConfig` into a deterministic merge pipeline (AC: 1, 2, 4)
+  - [x] In `src/config/load-config.js`, split the current logic into named helpers: `readGlobalConfig`, `readProjectConfig`, `readLegacyConfigs`, `mergeConfigs(layers)` (already exists as `mergeObjects` — keep the implementation and re-export under the new name), and `validateAndRecover(layers)`.
+  - [x] Apply this fixed precedence (lowest to highest, last write wins): `DEFAULT_PLUGIN_CONFIG` → `globalConfig` → `legacyProjectConfig` → `legacyWorkflowProjectConfig` → `projectConfig`. Document the order in a JSDoc block on `loadRuntimeConfig`.
+  - [x] After every merge, run `validateRuntimeConfig` on the candidate. If validation fails, drop the highest layer and retry; record each rejection so the caller can emit `config.validation.failed`. If all layers fail, the merge result equals the cloned `DEFAULT_PLUGIN_CONFIG`.
+  - [x] Extend the returned object with a `validation` field: `{ valid: boolean, droppedLayers: ["projectConfig" | "legacyWorkflowProjectConfig" | "legacyProjectConfig" | "globalConfig"], errors: AjvError[] }`. The existing `config`, `paths`, and `sources` fields stay intact for backward compatibility with `src/index.js` and `src/audit/logger.js`.
+  - [x] Do NOT modify `ensureLegacyProjectConfigCompatibility` or its bridge-file write semantics in this story; that behavior is owned by Story 4.2 per `sprint-change-proposal-2026-05-08.md`. Story 1.3 is a read-only resolver.
 
-- [ ] Implement `resolveWorkflowPolicy` as the policy resolver service (AC: 1, 3)
-  - [ ] Create `src/services/workflow/resolve-workflow-policy.js` exporting `resolveWorkflowPolicy(workflowContext, runtimeConfig)`. The function is pure (no I/O, no logger calls) and returns the standard policy result envelope `{ outcome, reason, message, details }` with `outcome: "allow" | "deny" | "ask" | "skip"` per the architecture's "API Response Formats" rule.
-  - [ ] When `workflowContext` is `null` or has no recognized `commandName`, return `{ outcome: "skip", reason: "no-workflow-context", message: "No BMAD workflow command detected.", details: { commandName: null } }`.
-  - [ ] When `commandName` is recognized but missing from `workflowPolicy`, return a default `{ outcome: "ask", reason: "policy-default-fallback", message: "No explicit policy for <commandName>; using safe defaults.", details: { commandName, fallback: { category: "uncategorized", identityStrategy: "ticket-or-args", branchRequired: false, finalization: "no-forced-finalization" } } }`. Do not throw.
-  - [ ] When `commandName` matches, return `{ outcome: "allow", reason: "policy-resolved", message: "Resolved workflow policy for <commandName>.", details: { policy: <effectivePolicy>, branch: { defaultType, commandType, longLivedBranches, fallbackTicket, defaultMergeTarget, pattern, validationRegex } } }` where `commandType` is `branch.commandTypeMap[commandName]` (falls back to `branch.defaultType`).
-  - [ ] Export an internal `buildSafeDefaultPolicy()` helper alongside the resolver so tests and future stories can assert on the same canonical fallback object.
-  - [ ] Do NOT mutate `runtimeConfig`. The resolver returns fresh nested objects so callers cannot accidentally alter the loaded config.
+- [x] Implement `resolveWorkflowPolicy` as the policy resolver service (AC: 1, 3)
+  - [x] Create `src/services/workflow/resolve-workflow-policy.js` exporting `resolveWorkflowPolicy(workflowContext, runtimeConfig)`. The function is pure (no I/O, no logger calls) and returns the standard policy result envelope `{ outcome, reason, message, details }` with `outcome: "allow" | "deny" | "ask" | "skip"` per the architecture's "API Response Formats" rule.
+  - [x] When `workflowContext` is `null` or has no recognized `commandName`, return `{ outcome: "skip", reason: "no-workflow-context", message: "No BMAD workflow command detected.", details: { commandName: null } }`.
+  - [x] When `commandName` is recognized but missing from `workflowPolicy`, return a default `{ outcome: "ask", reason: "policy-default-fallback", message: "No explicit policy for <commandName>; using safe defaults.", details: { commandName, fallback: { category: "uncategorized", identityStrategy: "ticket-or-args", branchRequired: false, finalization: "no-forced-finalization" } } }`. Do not throw.
+  - [x] When `commandName` matches, return `{ outcome: "allow", reason: "policy-resolved", message: "Resolved workflow policy for <commandName>.", details: { policy: <effectivePolicy>, branch: { defaultType, commandType, longLivedBranches, fallbackTicket, defaultMergeTarget, pattern, validationRegex } } }` where `commandType` is `branch.commandTypeMap[commandName]` (falls back to `branch.defaultType`).
+  - [x] Export an internal `buildSafeDefaultPolicy()` helper alongside the resolver so tests and future stories can assert on the same canonical fallback object.
+  - [x] Do NOT mutate `runtimeConfig`. The resolver returns fresh nested objects so callers cannot accidentally alter the loaded config.
 
-- [ ] Wire validation diagnostics and policy resolver into bootstrap (AC: 1, 3, 4)
-  - [ ] In `src/index.js`, after `loadRuntimeConfig` returns, inspect `runtimeConfig.validation`. If `validation.valid === false` or `droppedLayers.length > 0`, emit one structured `config.validation.failed` audit event with payload `{ event: "config.validation.failed", timestamp: <ISO-8601>, workflow: null, command: null, details: { droppedLayers, errors: <ajv errors normalized to { instancePath, message, params }> } }`. Bootstrap MUST continue (best-effort audit) regardless of audit success.
-  - [ ] Pass the validated `runtimeConfig` and a bound `resolveWorkflowPolicy` reference into the hook factory chain so Story 1.4 (branch strategy) and Story 2.x (approval) can consume the resolver without re-loading config. Concrete shape: extend the existing wrapper bootstrap to expose `runtimeConfig` and `resolvePolicy(workflowContext)` on a `pluginContext` object passed to each hook factory; do not introduce a new export from `src/index.js`.
-  - [ ] Do not call `resolveWorkflowPolicy` from `command.execute.before` itself in this story — Story 1.4 owns that. Story 1.3 only ensures the resolver is constructible and reachable from the hook layer for the next story.
+- [x] Wire validation diagnostics and policy resolver into bootstrap (AC: 1, 3, 4)
+  - [x] In `src/index.js`, after `loadRuntimeConfig` returns, inspect `runtimeConfig.validation`. If `validation.valid === false` or `droppedLayers.length > 0`, emit one structured `config.validation.failed` audit event with payload `{ event: "config.validation.failed", timestamp: <ISO-8601>, workflow: null, command: null, details: { droppedLayers, errors: <ajv errors normalized to { instancePath, message, params }> } }`. Bootstrap MUST continue (best-effort audit) regardless of audit success.
+  - [x] Pass the validated `runtimeConfig` and a bound `resolveWorkflowPolicy` reference into the hook factory chain so Story 1.4 (branch strategy) and Story 2.x (approval) can consume the resolver without re-loading config. Concrete shape: extend the existing wrapper bootstrap to expose `runtimeConfig` and `resolvePolicy(workflowContext)` on a `pluginContext` object passed to each hook factory; do not introduce a new export from `src/index.js`.
+  - [x] Do not call `resolveWorkflowPolicy` from `command.execute.before` itself in this story — Story 1.4 owns that. Story 1.3 only ensures the resolver is constructible and reachable from the hook layer for the next story.
 
-- [ ] Expand regression coverage for merge precedence, validation fallback, and resolver contract (AC: 1, 2, 3, 4)
-  - [ ] Extend `tests/regression.test.js` to add a `verifyConfigMergePrecedence()` step that creates a temp workspace with both global and project JSONC files (write the global file under a sandboxed home dir using a stub `homedir` adapter, or read directly via the FS adapter for the project layer) and asserts that project values override global values, and that legacy files are read when no modern project file exists.
-  - [ ] Add a `verifyValidationFallback()` step that supplies an intentionally invalid project config (e.g., `branch.longLivedBranches: 42`), runs `loadRuntimeConfig`, and asserts: (a) returned `config` equals the validated lower layer, (b) `validation.droppedLayers` includes `"projectConfig"`, (c) `validation.errors` is non-empty.
-  - [ ] Add a `verifyResolveWorkflowPolicy()` step that imports `resolveWorkflowPolicy` and asserts three cases: matched command (`bmad-bmm-dev-story` → `outcome: "allow"`, policy keys present), unmatched command (`bmad-bmm-something-new` → `outcome: "ask"`, fallback policy shape), and null context (`outcome: "skip"`).
-  - [ ] Audit-payload assertion: confirm the wrapper's audit log includes a `config.validation.failed` entry with `event`, `timestamp`, and `details` keys when an invalid layer is provided; do not assert exact timestamp values.
-  - [ ] Preserve all existing legacy-parity assertions; the new tests must not regress the deepEqual `normalizeOutputParts` checks established in Stories 1.1 and 1.2.
+- [x] Expand regression coverage for merge precedence, validation fallback, and resolver contract (AC: 1, 2, 3, 4)
+  - [x] Extend `tests/regression.test.js` to add a `verifyConfigMergePrecedence()` step that creates a temp workspace with both global and project JSONC files (write the global file under a sandboxed home dir using a stub `homedir` adapter, or read directly via the FS adapter for the project layer) and asserts that project values override global values, and that legacy files are read when no modern project file exists.
+  - [x] Add a `verifyValidationFallback()` step that supplies an intentionally invalid project config (e.g., `branch.longLivedBranches: 42`), runs `loadRuntimeConfig`, and asserts: (a) returned `config` equals the validated lower layer, (b) `validation.droppedLayers` includes `"projectConfig"`, (c) `validation.errors` is non-empty.
+  - [x] Add a `verifyResolveWorkflowPolicy()` step that imports `resolveWorkflowPolicy` and asserts three cases: matched command (`bmad-bmm-dev-story` → `outcome: "allow"`, policy keys present), unmatched command (`bmad-bmm-something-new` → `outcome: "ask"`, fallback policy shape), and null context (`outcome: "skip"`).
+  - [x] Audit-payload assertion: confirm the wrapper's audit log includes a `config.validation.failed` entry with `event`, `timestamp`, and `details` keys when an invalid layer is provided; do not assert exact timestamp values.
+  - [x] Preserve all existing legacy-parity assertions; the new tests must not regress the deepEqual `normalizeOutputParts` checks established in Stories 1.1 and 1.2.
 
-- [ ] Verify build and runtime contract (AC: 1, 2, 3, 4)
-  - [ ] Run `npm install` once (Ajv 8.17.1 added) and confirm the lockfile updates cleanly.
-  - [ ] Run `npm run build && npm test` from a clean checkout; both must pass and the bundled `dist/devai-aidd-guard.js` must include the new validator and resolver modules (esbuild picks them up automatically once imported from `src/index.js`).
-  - [ ] Manually inspect the generated bundle once to confirm Ajv is bundled (no runtime require of an external dep at plugin load); record the verification in `Completion Notes List`.
+- [x] Verify build and runtime contract (AC: 1, 2, 3, 4)
+  - [x] Run `npm install` once (Ajv 8.17.1 added) and confirm the lockfile updates cleanly.
+  - [x] Run `npm run build && npm test` from a clean checkout; both must pass and the bundled `dist/devai-aidd-guard.js` must include the new validator and resolver modules (esbuild picks them up automatically once imported from `src/index.js`).
+  - [x] Manually inspect the generated bundle once to confirm Ajv is bundled (no runtime require of an external dep at plugin load); record the verification in `Completion Notes List`.
+
+### Review Follow-ups (AI)
+
+- [x] [AI-Review][Critical] AI-1 `validateAndRecover` 알고리즘 재설계 — 각 레이어 개별 검증 후 누적 병합 (AC: 4)
+- [x] [AI-Review][High] AI-2 `parseJsonc` 실패 surfacing — JSON parse 에러를 validation.errors에 추가 (AC: 4)
+- [x] [AI-Review][High] AI-3 스키마 `additionalProperties` 정책 재검토 — 확장 가능 영역에 forward-compatibility 부여 (AC: 1)
+- [x] [AI-Review][High] AI-4 invalid lower layer 회귀 테스트 추가 — `verifyValidationFallbackLowerLayer()` 추가 (AC: 4)
+- [x] [AI-Review][High] AI-5 `schemaVersion` 사용 정책 명시 — schema에 `schemaVersion.const = 1` 강제 (AC: 1)
+- [x] [AI-Review][Medium] AI-6 `package-lock.json` 커밋 가능 상태 정리 — File List에 명확히 포함
+- [x] [AI-Review][Medium] AI-7 검증 에러 디듭 처리 — 새 알고리즘에서 각 레이어를 1회만 검증하므로 자연스럽게 해결
+- [x] [AI-Review][Medium] AI-8 `pluginContext`를 모든 hook factory에 일관 전달 — `src/index.js:111-117`의 hook factory 6개 호출 모두에 `pluginContext` 인자를 추가하고 `permission-asked.js`/`file-edited.js`의 시그니처를 두 번째 인자(`_pluginInjections = {}`)로 확장. story task 명세("passed to each hook factory") 충실 이행 (AC: 1, 3)
 
 ## Dev Notes
 
@@ -193,14 +204,101 @@ Story 1.3은 Epic 1의 정책 백본이다. Story 1.1은 부트스트랩과 훅 
 - 회귀 베이스라인: [Source: tests/regression.test.js]
 - 외부 라이브러리 문서: [Ajv JSON Schema docs](https://ajv.js.org/json-schema.html), [Ajv API docs](https://ajv.js.org/api.html), [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12/schema)
 
+## Senior Developer Review (AI)
+
+**Review Date**: 2026-05-08
+**Review Outcome**: Changes Requested
+**총 이슈**: Critical 1, High 4, Medium 3, Low 4 (`1-3-code-review-action-items.md` 참조)
+**Scope**: P0(4) + P1(3) = 7개 항목 처리
+
+### Action Items
+
+- [x] [Critical] AI-1 `validateAndRecover`가 invalid lower 레이어 발견 시 valid upper 레이어까지 함께 드롭 — `src/config/load-config.js:149-200`
+- [x] [High] AI-2 `parseJsonc`의 silent fallback이 audit 신호 없음 — `src/config/load-config.js:23-29`
+- [x] [High] AI-3 모든 객체에 `additionalProperties: false`로 미래 호환성 손상 위험 — `src/config/schema/runtime-config.schema.json`
+- [x] [High] AI-4 invalid lower layer 시나리오 회귀 테스트 부재 — `tests/regression.test.js`
+- [x] [High] AI-5 `RUNTIME_CONFIG_SCHEMA_VERSION` export가 분기 로직에서 미사용 — `src/config/validate-config.js:4`
+- [x] [Medium] AI-6 `package-lock.json` untracked 상태 — File List 정합성 정리
+- [x] [Medium] AI-7 동일 invalid layer가 retry마다 audit `details.errors`에 누적
+
+P2 항목(AI-8~AI-14)은 Story 1.4+에서 정리하기로 합의 (현재 처리 범위 외).
+
+### Second-Pass Review (2026-05-08, Opus 4.7)
+
+**Re-Review Date**: 2026-05-08
+**Re-Review Outcome**: Approved (Done)
+**잔여 이슈**: HIGH 0, MEDIUM 0, LOW 6 (Critical 0)
+
+#### Action Items (resolved this pass)
+
+- [x] [Medium] AI-8 `pluginContext`를 모든 hook factory에 일관 전달 — `src/index.js:111-117` 6개 hook factory 호출에 `pluginContext` 인자 추가 + `src/hooks/permission-asked.js`/`src/hooks/file-edited.js` 시그니처를 `_pluginInjections = {}`로 확장. 명세 문구 "passed to each hook factory" 이행. `npm run build && npm test` 재통과.
+
+#### Acknowledged LOW (intentional / out-of-scope)
+
+- L-1 schema 이중 정의 (json + 인라인) — 번들 호환성 사유로 의도, sync 의무는 Dev Note에 기록됨
+- L-2 `mergeObjects`의 base array + override object 혼합 방어 — 실 입력에서 미발생, 향후 필요 시 별도 가드
+- L-3 `normalizeConfig` lowercase 변환 — 의도된 동작, 명세 부합
+- L-4 `schemaVersion` optional → 점진적 도입 (의도)
+- L-5 `validation.recovered` 추가 필드 — backward-compat OK
+- L-6 `additionalProperties: true` forward-compat 결정 (AI-3에서 의도) — typo 미감지 trade-off 수용
+
 ## Dev Agent Record
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-sonnet-4-6, claude-opus-4-7 (review follow-ups)
 
 ### Debug Log References
 
+- 초기 load-config.js 파일이 validate-config.js import 없이 구 버전이었음 → 전체 리팩터 수행
+- validate-config.js: readFileSync 기반 스키마 로드는 esbuild 번들 시 dist/schema 경로 오류 발생 → 스키마를 JS 객체로 인라인
+- Ajv 8.17.1: createRequire CJS 로드는 번들에 외부 require가 남음 → `import Ajv2020 from 'ajv/dist/2020.js'` ESM 정적 import로 변경 (Ajv 293kb 번들 인라인 확인)
+- validateAndRecover: normalizeConfig 후 검증 시 longLivedBranches:42 등 잘못된 값이 교정된 후 통과 → 원본 mergeConfigs 결과를 먼저 검증, 통과 후 normalizeConfig 적용하도록 수정
+
 ### Completion Notes List
 
+**초기 구현 (2026-05-08)**
+
+- ✅ `src/config/schema/runtime-config.schema.json` 생성 — JSON Schema Draft 2020-12 형식으로 전체 설정 구조 정의
+- ✅ `src/config/validate-config.js` 생성 — Ajv2020 (strict: true, allErrors: true), 스키마 인라인으로 번들 호환성 확보
+- ✅ `package.json` dependencies에 `"ajv": "8.17.1"` 추가 및 lockfile 갱신
+- ✅ `src/config/load-config.js` 전체 리팩터: readGlobalConfig/readProjectConfig/readLegacyConfigs/mergeConfigs/validateAndRecover 명명된 헬퍼로 분리, validation 필드 반환
+- ✅ `src/services/workflow/resolve-workflow-policy.js` 생성 — 순수 함수, 표준 봉투 {outcome, reason, message, details} 반환
+- ✅ `src/index.js` 업데이트: config.validation.failed audit 이벤트 emit, pluginContext({runtimeConfig, resolvePolicy}) 훅 팩토리 전달
+- ✅ `tests/regression.test.js` 4개 신규 검증 함수 추가: verifyConfigMergePrecedence, verifyValidationFallback, verifyResolveWorkflowPolicy, verifyConfigValidationFailedAuditPayload
+- ✅ `npm run build && npm test` 모두 통과, 기존 회귀 테스트 모두 보존
+- ✅ dist/devai-aidd-guard.js 번들 Ajv 인라인 확인: createRequire 없음, ajv 관련 코드 197줄 포함, 293.2kb
+
+**Review Follow-ups (2026-05-08, Opus 4.7)**
+
+- ✅ Resolved review finding [Critical]: AI-1 `validateAndRecover` 알고리즘 재설계 완료. 각 레이어를 정확한 우선순위 순서(global → legacyProject → legacyWorkflow → project)로 누적 병합하면서 개별 검증. 실패한 레이어만 droppedLayers에 추가되고 `tagErrorsWithLayer`로 errors에 layer 이름이 첨부됨. invalid `globalConfig` + valid `projectConfig` 시 더 이상 `projectConfig`가 손실되지 않음.
+- ✅ Resolved review finding [High]: AI-2 `parseJsoncResult`로 변경하여 parse 실패를 tagged result로 surfacing. `readConfigFile`이 `parseErrors` 배열에 `{instancePath, message, params:{source:"parseJsonc", layer}}` 항목을 추가하고, `loadRuntimeConfig`가 schema errors와 함께 audit으로 전달.
+- ✅ Resolved review finding [High]: AI-3 스키마 `additionalProperties` 재정비. 최상위는 strict 유지(섹션명 typo 방어), 확장 가능 영역(branch, audit, workflowPolicy[command])은 `additionalProperties: true`로 forward-compat 확보. JSON 파일과 인라인 스키마 동기화.
+- ✅ Resolved review finding [High]: AI-4 `verifyValidationFallbackLowerLayer()` 추가. invalid `globalConfig` + valid `projectConfig` 시나리오를 검증해서 AI-1의 회귀 방지. `verifyParseFailureSurfacing()`, `verifyForwardCompatExtensionKeys()`, `verifySchemaVersionEnforcement()`도 함께 추가.
+- ✅ Resolved review finding [High]: AI-5 schema에 `schemaVersion.const = RUNTIME_CONFIG_SCHEMA_VERSION` 추가. 잘못된 버전(예: 999)은 검증 실패. `verifySchemaVersionEnforcement()`로 방어 검증.
+- ✅ Resolved review finding [Medium]: AI-6 `package-lock.json` 추적 가능 상태 확인. lockfileVersion 3, ajv 8.17.1 정상 잠금. File List에 명시.
+- ✅ Resolved review finding [Medium]: AI-7 새 알고리즘에서 각 레이어가 정확히 1회만 검증되므로 retry-loop 누적 디듭 문제가 자연스럽게 해결됨. `tagErrorsWithLayer`로 `params.layer`가 부착되어 audit 소비자가 레이어별 그룹화 가능.
+- ✅ `validation` 필드에 `recovered: boolean` 추가 — "검증 통과"와 "회복 성공"의 의미 분리(AI-14 권고를 부분 반영하지만 호환성 위해 `valid` 시맨틱 유지).
+- ✅ `npm run build && npm test` 모두 재통과. 새 4개 회귀 검증 + 기존 검증 모두 통과. 번들 크기 294.1kb (Ajv 인라인 유지).
+
 ### File List
+
+- `src/config/schema/runtime-config.schema.json` (신규, review 후 추가 수정 — `additionalProperties` 정책 재조정, `schemaVersion.const` 추가)
+- `src/config/validate-config.js` (신규, review 후 추가 수정 — 스키마 인라인 객체에 `additionalProperties` / `schemaVersion.const` 정책 동기화)
+- `src/config/load-config.js` (수정 — 전체 리팩터, review 후 `validateAndRecover` 알고리즘 재설계 + `parseJsoncResult` 도입 + `tagErrorsWithLayer` 추가)
+- `src/services/workflow/resolve-workflow-policy.js` (신규)
+- `src/index.js` (수정 — validation audit emit, pluginContext 추가; second-pass에서 6개 hook factory 호출 모두에 pluginContext 일관 전달)
+- `src/hooks/permission-asked.js` (수정 — second-pass: `_pluginInjections = {}` 두 번째 인자 추가, 명세 일관성)
+- `src/hooks/file-edited.js` (수정 — second-pass: `_pluginInjections = {}` 두 번째 인자 추가, 명세 일관성)
+- `package.json` (수정 — ajv 8.17.1 의존성 추가)
+- `package-lock.json` (수정 — npm install 결과; lockfileVersion 3, ajv 8.17.1 잠금)
+- `tests/regression.test.js` (수정 — 신규 검증 함수 8개: verifyConfigMergePrecedence, verifyValidationFallback, verifyValidationFallbackLowerLayer, verifyParseFailureSurfacing, verifyForwardCompatExtensionKeys, verifySchemaVersionEnforcement, verifyResolveWorkflowPolicy, verifyConfigValidationFailedAuditPayload)
+- `dist/devai-aidd-guard.js` (빌드 산출물)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` (수정 — 1-3 상태 흐름: ready-for-dev → in-progress → review → in-progress(재처리) → review)
+- `_bmad-output/implementation-artifacts/1-3-code-review-action-items.md` (참조용, 신규 — Critical/High/Medium/Low 14개 액션 아이템)
+
+## Change Log
+
+- 2026-05-08: Story 1.3 구현 완료 — JSON Schema + Ajv 검증기, 결정적 merge pipeline, 정책 resolver, bootstrap 통합, 회귀 테스트 4개 추가
+- 2026-05-08: Addressed code review findings — 7 items resolved (P0: 4 Critical/High, P1: 3 Medium). `validateAndRecover` 알고리즘 재설계로 lower 레이어 invalid 시 upper 레이어 보존. parse 실패 surfacing, schema forward-compat, schemaVersion enforce, regression 4개 추가.
+- 2026-05-08: Second-pass code review — AI-8 처리 (pluginContext를 6개 hook factory 호출 모두에 일관 전달, permission-asked/file-edited 시그니처 확장). Status: review → done. 빌드 294.2kb, 테스트 통과.
