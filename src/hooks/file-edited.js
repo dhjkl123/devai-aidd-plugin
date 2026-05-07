@@ -1,5 +1,10 @@
-export function createFileEditedHook() {
-  return async () => {
-    // TODO: the legacy plugin relies on tool hooks for edit tracking and has no standalone file.edited handler.
+export function createFileEditedHook(legacyHandlers) {
+  return async (input) => {
+    const handler = legacyHandlers["file.edited"];
+    if (typeof handler !== "function") {
+      return;
+    }
+
+    return handler(input);
   };
 }
