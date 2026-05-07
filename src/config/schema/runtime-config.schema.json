@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime-config.schema.json",
+  "title": "DevAI AIDD Guard Runtime Configuration",
+  "description": "Full effective configuration shape for the devai-aidd-guard plugin.",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "default": 1,
+      "description": "Schema version identifier. Bumping this constant requires a corresponding migration step."
+    },
+    "branch": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Branch name pattern template."
+        },
+        "defaultType": {
+          "type": "string",
+          "description": "Default branch type (e.g. feat, fix, chore)."
+        },
+        "fallbackTicket": {
+          "type": "string",
+          "description": "Fallback ticket identifier when none is detected."
+        },
+        "longLivedBranches": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of long-lived branch names (e.g. main, master)."
+        },
+        "defaultMergeTarget": {
+          "type": "string",
+          "description": "Default merge target branch."
+        },
+        "validationRegex": {
+          "type": "string",
+          "description": "Regex pattern for branch name validation."
+        },
+        "commandTypeMap": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Mapping of command names to branch type slugs."
+        }
+      },
+      "additionalProperties": true
+    },
+    "workflowPolicy": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Policy category (e.g. implementation, planning, research, docs, review)."
+          },
+          "identityStrategy": {
+            "type": "string",
+            "description": "Identity resolution strategy for the workflow."
+          },
+          "branchRequired": {
+            "type": "boolean",
+            "description": "Whether a branch is required for this workflow."
+          },
+          "finalization": {
+            "type": "string",
+            "description": "Finalization behavior (e.g. commit-and-push, commit-optional-push, no-forced-finalization)."
+          },
+          "artifactKey": {
+            "type": "string",
+            "description": "Optional artifact key for singleton artifact strategies."
+          }
+        },
+        "required": ["category", "identityStrategy", "branchRequired", "finalization"],
+        "additionalProperties": true
+      },
+      "description": "Per-command workflow policy mappings."
+    },
+    "audit": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "logToClient": { "type": "boolean" },
+        "logToFile": { "type": "boolean" },
+        "logFilePath": { "type": "string" },
+        "httpEndpoint": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
