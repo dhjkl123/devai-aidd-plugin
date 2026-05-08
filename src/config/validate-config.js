@@ -128,6 +128,31 @@ export const RUNTIME_CONFIG_SCHEMA = {
 const ajv = new Ajv2020({ strict: true, allErrors: true });
 const _validate = ajv.compile(RUNTIME_CONFIG_SCHEMA);
 
+function validateBranchRegexSemantics(config) {
+  const validationRegex = config?.branch?.validationRegex;
+  if (typeof validationRegex !== "string" || validationRegex.length === 0) {
+    return [];
+  }
+
+  try {
+    new RegExp(validationRegex);
+    return [];
+  } catch (error) {
+    return [
+      {
+        instancePath: "/branch/validationRegex",
+        schemaPath: "#/properties/branch/properties/validationRegex",
+        keyword: "format",
+        params: {
+          reason: "invalid-regex",
+          error: error instanceof Error ? error.message : String(error),
+        },
+        message: "must be a valid regular expression",
+      },
+    ];
+  }
+}
+
 /**
  * Validates a runtime configuration object against the JSON Schema.
  * Does not throw — the caller decides how to handle failures.
@@ -137,8 +162,11 @@ const _validate = ajv.compile(RUNTIME_CONFIG_SCHEMA);
  */
 export function validateRuntimeConfig(config) {
   const valid = _validate(config);
+  const schemaErrors = valid ? [] : (_validate.errors || []).slice();
+  const semanticErrors = validateBranchRegexSemantics(config);
+
   return {
-    valid: Boolean(valid),
-    errors: valid ? [] : (_validate.errors || []).slice(),
+    valid: Boolean(valid) && semanticErrors.length === 0,
+    errors: [...schemaErrors, ...semanticErrors],
   };
 }
