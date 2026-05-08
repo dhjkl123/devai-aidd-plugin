@@ -17,6 +17,7 @@ import { createPermissionAskedHook } from "./hooks/permission-asked.js";
 import { createFileEditedHook } from "./hooks/file-edited.js";
 import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-policy.js";
 import { runGitCommand } from "./services/git/run-git-command.js";
+import { buildRecoveryPrompt } from "./services/approval/build-recovery-prompt.js";
 
 const SUPPORTED_RUNTIME = "Node.js ESM plugin runtime (Node 22 target)";
 
@@ -104,11 +105,99 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
 
     // Build pluginContext so downstream hook factories (Story 1.4+) and
     // approval hooks (Epic 2) can consume the resolver without re-loading config.
+    //
+    // requestApproval(request) — prompt adapter; delegates to runtime client.
+    // Story 2.3 will wire the outcome back. Failure here is best-effort (FR22).
+    //
+    // The runtime client dependency is only created here in bootstrap; services
+    // never hold a direct reference to `client`.
     const pluginContext = {
       runtimeConfig,
       directory,
       gitRunner: runGitCommand,
       resolvePolicy: (workflowContext) => resolveWorkflowPolicy(workflowContext, runtimeConfig.config),
+
+      // Prompt adapter — delegates to runtime client.session.promptAsync.
+      // Injected here so hook tests can substitute a mock without touching client.
+      //
+      // Story 2.2: prompt body and metadata are derived from the canonical
+      // explanation payload built by buildApprovalRequest — this adapter must
+      // not recompose strings, only forward what the request already contains.
+      async requestApproval(request) {
+        if (client?.session?.promptAsync) {
+          const promptText =
+            Array.isArray(request.prompt?.lines) && request.prompt.lines.length > 0
+              ? [request.prompt.title, "", ...request.prompt.lines].join("\n")
+              : request.prompt?.summary || `Approval required: ${request.actionType}`;
+
+          await client.session.promptAsync({
+            sessionID: request.sessionID,
+            parts: [
+              {
+                type: "text",
+                text: promptText,
+                metadata: {
+                  requestId: request.id,
+                  // Story 2.3 (LOW-2): echo actionId on the prompt so the
+                  // permission-asked ingress can resolve via either the
+                  // request's id or its actionId without forcing the runtime
+                  // to know about the requestId-only path.
+                  actionId: request.actionId,
+                  actionType: request.actionType,
+                  phase: request.phase,
+                  workflow: request.workflow,
+                  explanation: request.metadata?.explanation,
+                  sensitivity: request.metadata?.sensitivity,
+                  detailLevel: request.metadata?.detailLevel,
+                },
+              },
+            ],
+          });
+        }
+      },
+
+      // Story 2.5 (MEDIUM review): prompt-delivery adapter for recovery gates.
+      // Mirrors `requestApproval` so a recovery gate's `options[]` reaches the
+      // user immediately. Without this, AC1 — "those options are explained in
+      // a way the user can act on immediately" — would only be data-shape
+      // complete and the gate would stay open indefinitely. Failure is
+      // best-effort (FR22): the orchestrator already persisted the gate before
+      // delivery, so a runtime client misbehavior must not throw out of the
+      // hook that triggered it.
+      async requestRecoveryDecision(gate) {
+        if (
+          client?.session?.promptAsync &&
+          gate &&
+          Array.isArray(gate.options) &&
+          gate.options.length > 0
+        ) {
+          const prompt = buildRecoveryPrompt(gate);
+          const promptText =
+            Array.isArray(prompt.lines) && prompt.lines.length > 0
+              ? [prompt.title, "", ...prompt.lines].join("\n")
+              : prompt.summary;
+
+          await client.session.promptAsync({
+            sessionID: gate.sessionID,
+            parts: [
+              {
+                type: "text",
+                text: promptText,
+                metadata: {
+                  recoveryGateId: gate.gateId,
+                  actionId: gate.actionId ?? null,
+                  actionKind: gate.actionKind ?? null,
+                  attempt: gate.attempt ?? 1,
+                  recoverable: gate.recoverable === true,
+                  choices: prompt.choices,
+                  recommendedChoice: prompt.recommendedChoice,
+                  source: gate.source ?? null,
+                },
+              },
+            ],
+          });
+        }
+      },
     };
 
     return {
@@ -119,9 +208,21 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         pluginContext,
         branchConfig,
       }),
-      "tool.execute.before": createToolExecuteBeforeHook(legacyHandlers, { workflowState, pluginContext }),
-      "tool.execute.after": createToolExecuteAfterHook(legacyHandlers, { workflowState, pluginContext }),
-      "permission.asked": createPermissionAskedHook(legacyHandlers, { pluginContext }),
+      // Story 2.3 (LOW): tool.execute.before / tool.execute.after only consume
+      // workflowState today (phase advancement). pluginContext is unused by
+      // these factories — keep the injection surface minimal so the contract
+      // matches the consumer (mirrors the LOW-3 cleanup on permission.asked).
+      "tool.execute.before": createToolExecuteBeforeHook(legacyHandlers, { workflowState }),
+      "tool.execute.after": createToolExecuteAfterHook(legacyHandlers, { workflowState }),
+      "permission.asked": createPermissionAskedHook(legacyHandlers, {
+        // Story 2.5 (MEDIUM review): pluginContext is now consumed so the
+        // hook can deliver recovery prompts via `requestRecoveryDecision`
+        // and route the user's response back into `selectRecoveryChoice` /
+        // `confirmManualResolution`. Approval ingress remains unchanged.
+        workflowState,
+        audit,
+        pluginContext,
+      }),
       "file.edited": createFileEditedHook(legacyHandlers, { pluginContext }),
       event: createSessionHook(legacyHandlers, { workflowState, pluginContext }),
     };

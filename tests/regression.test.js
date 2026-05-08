@@ -34,6 +34,30 @@ const branchServiceModuleUrl = pathToFileURL(
 const readinessServiceModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "git", "check-repository-readiness.js"),
 ).href;
+const classifyGitExecutionFailureModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "git", "classify-git-execution-failure.js"),
+).href;
+const gitExecutorModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "git", "git-executor.js"),
+).href;
+const commitServiceModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "git", "commit-service.js"),
+).href;
+const pushServiceModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "git", "push-service.js"),
+).href;
+const recoveryStateModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "recovery-state.js"),
+).href;
+const classifyRecoveryModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "classify-recovery.js"),
+).href;
+const buildRecoveryOptionsModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "build-recovery-options.js"),
+).href;
+const recoveryOrchestratorModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "recovery-orchestrator.js"),
+).href;
 const builtModulePath = path.join(projectRoot, "dist", "devai-aidd-guard.js");
 const builtModuleUrl = pathToFileURL(builtModulePath).href;
 const legacyModulePath = path.join(
@@ -285,15 +309,13 @@ async function main() {
       "built command.execute.before output differs from legacy",
     );
 
-    assert.deepEqual(
-      wrapper.mock.prompts.map(summarizePrompt),
-      legacy.mock.prompts.map(summarizePrompt),
-      "wrapper prompts differ from legacy",
-    );
+    // Story 2.1: wrapper and built now emit approval prompts (legacy does not).
+    // Parity is asserted between wrapper and built — not against legacy which
+    // has no approval layer.
     assert.deepEqual(
       built.mock.prompts.map(summarizePrompt),
-      legacy.mock.prompts.map(summarizePrompt),
-      "built prompts differ from legacy",
+      wrapper.mock.prompts.map(summarizePrompt),
+      "built prompts differ from wrapper (approval prompt parity)",
     );
 
     await runToolReadBefore(legacy.handlers);
@@ -1894,6 +1916,4952 @@ async function verifyBootstrapFailureShape() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Story 2.1: Present Approval Requests for Planned Git Actions
+// ─────────────────────────────────────────────────────────────────────────────
+
+const approvalServiceModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "approval-policy-service.js"),
+).href;
+const classifyGitActionModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "classify-git-action.js"),
+).href;
+const buildApprovalRequestModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "build-approval-request.js"),
+).href;
+const buildApprovalExplanationModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "build-approval-explanation.js"),
+).href;
+const redactApprovalFieldsModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "redact-approval-fields.js"),
+).href;
+const approvalResolutionStateModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "approval-resolution-state.js"),
+).href;
+const buildApprovalResolutionModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "build-approval-resolution.js"),
+).href;
+const consumeApprovalOutcomeModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "approval", "consume-approval-outcome.js"),
+).href;
+const permissionAskedModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "hooks", "permission-asked.js"),
+).href;
+
+/**
+ * Story 2.1: classifyGitAction — unit contract tests.
+ * Verifies that proposals map to the correct actionType.
+ */
+async function verifyClassifyGitActionContracts() {
+  const { classifyGitAction, isAllowedActionType } = await import(
+    `${classifyGitActionModuleUrl}?v=${Date.now()}`
+  );
+
+  // Branch create
+  const branchCreate = classifyGitAction({ kind: "branch", action: "create", name: "feat/ABC-1" });
+  assert.equal(
+    branchCreate?.actionType,
+    "branch/create",
+    "classifyGitAction: branch+create must map to branch/create",
+  );
+  assert.equal(
+    branchCreate?.requiresApproval,
+    true,
+    "classifyGitAction: requiresApproval must always be true",
+  );
+
+  // Branch switch
+  const branchSwitch = classifyGitAction({ kind: "branch", action: "switch", name: "feat/ABC-2" });
+  assert.equal(
+    branchSwitch?.actionType,
+    "branch/switch",
+    "classifyGitAction: branch+switch must map to branch/switch",
+  );
+
+  // Init proposal
+  const init = classifyGitAction({ kind: "init", directory: "/tmp/repo" });
+  assert.equal(
+    init?.actionType,
+    "init",
+    "classifyGitAction: init kind must map to init actionType",
+  );
+
+  // Unknown kind → null
+  const unknown = classifyGitAction({ kind: "unknown-future" });
+  assert.equal(
+    unknown,
+    null,
+    "classifyGitAction: unknown proposal kind must return null",
+  );
+
+  // Null / missing proposal → null
+  assert.equal(classifyGitAction(null), null, "classifyGitAction: null must return null");
+  assert.equal(classifyGitAction(undefined), null, "classifyGitAction: undefined must return null");
+
+  // isAllowedActionType
+  assert.equal(isAllowedActionType("branch/create"), true);
+  assert.equal(isAllowedActionType("branch/switch"), true);
+  assert.equal(isAllowedActionType("init"), true);
+  assert.equal(isAllowedActionType("commit"), true);
+  assert.equal(isAllowedActionType("push"), true);
+  assert.equal(isAllowedActionType("nope"), false, "isAllowedActionType: unknown type must be false");
+}
+
+/**
+ * Story 2.1: buildApprovalRequest — unit contract tests.
+ * Verifies the output shape and deterministic ID.
+ */
+async function verifyBuildApprovalRequestContracts() {
+  const { buildApprovalRequest } = await import(
+    `${buildApprovalRequestModuleUrl}?v=${Date.now()}`
+  );
+
+  const proposal = { kind: "branch", action: "create", name: "feat/ABC-1" };
+  const req = buildApprovalRequest({
+    sessionID: "s-approval-1",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    actionLabel: "Create branch: feat/ABC-1",
+    proposal,
+  });
+
+  assert.equal(typeof req.id, "string", "buildApprovalRequest: id must be a string");
+  assert.equal(req.sessionID, "s-approval-1", "buildApprovalRequest: sessionID preserved");
+  assert.equal(req.workflow, "bmad-bmm-quick-dev", "buildApprovalRequest: workflow preserved");
+  assert.equal(req.command, "bmad-bmm-quick-dev", "buildApprovalRequest: command preserved");
+  assert.equal(req.phase, "start", "buildApprovalRequest: phase preserved");
+  assert.equal(req.actionType, "branch/create", "buildApprovalRequest: actionType preserved");
+  assert.equal(req.status, "awaitingApproval", "buildApprovalRequest: status must be awaitingApproval");
+  assert.deepEqual(req.proposal, proposal, "buildApprovalRequest: proposal preserved");
+  assert.ok(req.prompt && typeof req.prompt === "object", "buildApprovalRequest: prompt must be an object");
+  assert.equal(typeof req.prompt.summary, "string", "buildApprovalRequest: prompt.summary must be a string");
+  assert.ok(req.metadata && typeof req.metadata === "object", "buildApprovalRequest: metadata must be an object");
+  assert.equal(req.metadata.proposalKind, "branch", "buildApprovalRequest: metadata.proposalKind preserved");
+  assert.equal(typeof req.createdAt, "string", "buildApprovalRequest: createdAt must be a string");
+
+  // Deterministic ID — same inputs produce the same id
+  const req2 = buildApprovalRequest({
+    sessionID: "s-approval-1",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    actionLabel: "Create branch: feat/ABC-1",
+    proposal,
+  });
+  assert.equal(req.id, req2.id, "buildApprovalRequest: same inputs must produce the same deterministic id");
+
+  // Different proposal → different ID
+  const req3 = buildApprovalRequest({
+    sessionID: "s-approval-1",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/switch",
+    actionLabel: "Switch to branch: feat/ABC-2",
+    proposal: { kind: "branch", action: "switch", name: "feat/ABC-2" },
+  });
+  assert.notEqual(req.id, req3.id, "buildApprovalRequest: different proposals must produce different ids");
+
+  // L5: same target name but different `current` (starting branch) → different ids.
+  const reqFromMain = buildApprovalRequest({
+    sessionID: "s-approval-1",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    actionLabel: "Create branch: feat/SAME-TARGET",
+    proposal: { kind: "branch", action: "create", name: "feat/SAME-TARGET", current: "main" },
+  });
+  const reqFromDevelop = buildApprovalRequest({
+    sessionID: "s-approval-1",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    actionLabel: "Create branch: feat/SAME-TARGET",
+    proposal: { kind: "branch", action: "create", name: "feat/SAME-TARGET", current: "develop" },
+  });
+  assert.notEqual(
+    reqFromMain.id,
+    reqFromDevelop.id,
+    "buildApprovalRequest: same target name with different `current` must produce different ids",
+  );
+}
+
+/**
+ * Story 2.1: approvalPolicyService — unit contract tests.
+ */
+async function verifyApprovalPolicyServiceContracts() {
+  const { getPendingApproval, selectNextPlannedAction, evaluateRequestGate } = await import(
+    `${approvalServiceModuleUrl}?v=${Date.now()}`
+  );
+
+  // getPendingApproval: null when no current
+  assert.equal(getPendingApproval({}), null, "getPendingApproval: missing approvalCurrent returns null");
+  assert.equal(getPendingApproval({ approvalCurrent: null }), null, "getPendingApproval: null returns null");
+  const fakeRequest = { id: "req-1", status: "awaitingApproval" };
+  assert.deepEqual(
+    getPendingApproval({ approvalCurrent: fakeRequest }),
+    fakeRequest,
+    "getPendingApproval: returns existing pending request",
+  );
+
+  // selectNextPlannedAction: priority order
+  assert.equal(selectNextPlannedAction(null), null, "selectNextPlannedAction: null state returns null");
+  assert.equal(selectNextPlannedAction({}), null, "selectNextPlannedAction: no proposals returns null");
+
+  const initProposal = { kind: "init", directory: "/tmp" };
+  const branchProposal = { kind: "branch", action: "create", name: "feat/X" };
+
+  assert.deepEqual(
+    selectNextPlannedAction({ initProposal }),
+    initProposal,
+    "selectNextPlannedAction: initProposal alone selected",
+  );
+  assert.deepEqual(
+    selectNextPlannedAction({ branchProposal }),
+    branchProposal,
+    "selectNextPlannedAction: branchProposal alone selected",
+  );
+  assert.deepEqual(
+    selectNextPlannedAction({ initProposal, branchProposal }),
+    initProposal,
+    "selectNextPlannedAction: initProposal takes priority over branchProposal",
+  );
+
+  // evaluateRequestGate
+  // Case: no proposals → skip
+  const noProposals = evaluateRequestGate({});
+  assert.equal(noProposals.outcome, "skip", "evaluateRequestGate: no proposals must skip");
+  assert.equal(noProposals.reason, "no-planned-git-action");
+
+  // Case: pending approval → skip
+  const withPending = evaluateRequestGate({ approvalCurrent: fakeRequest, branchProposal });
+  assert.equal(withPending.outcome, "skip", "evaluateRequestGate: pending approval must skip");
+  assert.equal(withPending.reason, "approval-already-pending");
+
+  // Case: proposal available, no pending → allow
+  const withProposal = evaluateRequestGate({ branchProposal });
+  assert.equal(withProposal.outcome, "allow", "evaluateRequestGate: available proposal must allow");
+  assert.equal(withProposal.reason, "ready-to-publish");
+}
+
+/**
+ * Story 2.1: workflowState approval fields — isolation tests.
+ * Verifies that get() returns copies of approvalCurrent and approvalHistory.
+ */
+async function verifyWorkflowStateApprovalIsolation() {
+  const { createWorkflowStateStore } = await import(
+    `${workflowStateModuleUrl}?approval-isolation=${Date.now()}`
+  );
+
+  const store = createWorkflowStateStore();
+  const approvalRequest = { id: "req-iso-1", status: "awaitingApproval", sessionID: "s-iso" };
+  store.set("s-iso", {
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: approvalRequest,
+    approvalHistory: [approvalRequest],
+  });
+
+  // Mutating returned approvalCurrent must not leak into the store
+  const snapshot1 = store.get("s-iso");
+  snapshot1.approvalCurrent.status = "tampered";
+  assert.equal(
+    store.get("s-iso")?.approvalCurrent?.status,
+    "awaitingApproval",
+    "workflowState: external mutation of returned approvalCurrent must not reach the store",
+  );
+
+  // Mutating returned approvalHistory must not leak into the store
+  const snapshot2 = store.get("s-iso");
+  snapshot2.approvalHistory.push({ id: "injected" });
+  assert.equal(
+    store.get("s-iso")?.approvalHistory?.length,
+    1,
+    "workflowState: external mutation of returned approvalHistory must not reach the store",
+  );
+
+  // approvalHistory append — previous snapshot must not be contaminated
+  const snapBefore = store.get("s-iso");
+  const newRequest = { id: "req-iso-2", status: "awaitingApproval" };
+  store.set("s-iso", {
+    ...store.get("s-iso"),
+    approvalCurrent: newRequest,
+    approvalHistory: [...(store.get("s-iso").approvalHistory || []), newRequest],
+  });
+  assert.equal(
+    snapBefore.approvalHistory?.length,
+    1,
+    "workflowState: previous snapshot must not be contaminated after new append",
+  );
+  assert.equal(
+    store.get("s-iso")?.approvalHistory?.length,
+    2,
+    "workflowState: approvalHistory must grow after append",
+  );
+}
+
+/**
+ * Story 2.1: hook integration — branchProposal only → approvalCurrent.actionType.
+ * Tests implementation workflow where only a branch proposal exists.
+ */
+async function verifyApprovalRequestFromBranchProposal() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?approval-branch=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?approval-branch=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+  const prompts = [];
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+        requestApproval(request) {
+          prompts.push(request);
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  try {
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 test", sessionID: "s-branch-approval" },
+      { parts: [] },
+    );
+
+    const state = workflowState.get("s-branch-approval");
+
+    // Branch proposal must exist
+    assert.ok(state?.branchProposal, "verifyApprovalRequestFromBranchProposal: branchProposal must exist");
+
+    // approvalCurrent must be set with branch actionType
+    assert.ok(
+      state?.approvalCurrent,
+      "verifyApprovalRequestFromBranchProposal: approvalCurrent must be set after branch proposal",
+    );
+    assert.ok(
+      state.approvalCurrent.actionType === "branch/create" ||
+        state.approvalCurrent.actionType === "branch/switch",
+      "verifyApprovalRequestFromBranchProposal: approvalCurrent.actionType must be branch/create or branch/switch",
+    );
+    assert.equal(
+      state.approvalCurrent.status,
+      "awaitingApproval",
+      "verifyApprovalRequestFromBranchProposal: approvalCurrent.status must be awaitingApproval",
+    );
+    assert.equal(
+      state.approvalCurrent.sessionID,
+      "s-branch-approval",
+      "verifyApprovalRequestFromBranchProposal: approvalCurrent.sessionID must match",
+    );
+
+    // approvalHistory must have one entry
+    assert.equal(
+      state.approvalHistory?.length,
+      1,
+      "verifyApprovalRequestFromBranchProposal: approvalHistory must have one entry",
+    );
+
+    // approval.requested audit event must be emitted
+    const approvalRequestedLogs = logs.filter((l) => l.message === "approval.requested");
+    assert.equal(
+      approvalRequestedLogs.length,
+      1,
+      "verifyApprovalRequestFromBranchProposal: must emit one approval.requested audit event",
+    );
+    const auditExtra = approvalRequestedLogs[0].extra;
+    assert.equal(auditExtra.event, "approval.requested");
+    assert.equal(typeof auditExtra.timestamp, "string");
+    assert.equal(typeof auditExtra.workflow, "string");
+    assert.equal(typeof auditExtra.command, "string");
+    assert.equal(auditExtra.outcome, "ask");
+    assert.equal(typeof auditExtra.details.requestId, "string");
+    assert.ok(
+      auditExtra.details.actionType === "branch/create" || auditExtra.details.actionType === "branch/switch",
+    );
+    assert.equal(typeof auditExtra.details.sessionID, "string");
+
+    // requestApproval adapter must have been called
+    assert.equal(
+      prompts.length,
+      1,
+      "verifyApprovalRequestFromBranchProposal: requestApproval adapter must be called once",
+    );
+    assert.equal(prompts[0].sessionID, "s-branch-approval");
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.1: hook integration — initProposal only → approvalCurrent.actionType === "init".
+ * Also: branch approval request must NOT be created when initProposal is present.
+ */
+async function verifyApprovalRequestFromInitProposal() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?approval-init=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?approval-init=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const noGitWorkspace = createGitWorkspace(); // non-git → initProposal
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: noGitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  try {
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 init-test", sessionID: "s-init-approval" },
+      { parts: [] },
+    );
+
+    const state = workflowState.get("s-init-approval");
+
+    // initProposal must be set, branchProposal must not
+    assert.ok(
+      state?.initProposal,
+      "verifyApprovalRequestFromInitProposal: initProposal must exist in state",
+    );
+    assert.equal(
+      state?.branchProposal,
+      undefined,
+      "verifyApprovalRequestFromInitProposal: branchProposal must not exist when initProposal is present",
+    );
+
+    // approvalCurrent must be for init, not branch
+    assert.equal(
+      state?.approvalCurrent?.actionType,
+      "init",
+      "verifyApprovalRequestFromInitProposal: approvalCurrent.actionType must be init",
+    );
+    assert.equal(
+      state?.approvalCurrent?.status,
+      "awaitingApproval",
+      "verifyApprovalRequestFromInitProposal: approvalCurrent.status must be awaitingApproval",
+    );
+
+    // approval.requested audit must reference init
+    const approvalLogs = logs.filter((l) => l.message === "approval.requested");
+    assert.equal(
+      approvalLogs.length,
+      1,
+      "verifyApprovalRequestFromInitProposal: must emit one approval.requested event",
+    );
+    assert.equal(
+      approvalLogs[0].extra.details.actionType,
+      "init",
+      "verifyApprovalRequestFromInitProposal: audit actionType must be init",
+    );
+    assert.equal(
+      approvalLogs[0].extra.details.proposalKind,
+      "init",
+      "verifyApprovalRequestFromInitProposal: audit proposalKind must be init",
+    );
+  } finally {
+    fs.rmSync(noGitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.1: pending approval idempotency.
+ * Second command.execute.before call must NOT emit a new approval.requested event.
+ */
+async function verifyApprovalIdempotency() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?approval-idem=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?approval-idem=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  try {
+    // First call → should emit approval.requested
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 idem-test", sessionID: "s-idem" },
+      { parts: [] },
+    );
+    const firstApprovalLogs = logs.filter((l) => l.message === "approval.requested");
+    assert.equal(
+      firstApprovalLogs.length,
+      1,
+      "verifyApprovalIdempotency: first call must emit one approval.requested",
+    );
+
+    const stateAfterFirst = workflowState.get("s-idem");
+    assert.ok(stateAfterFirst?.approvalCurrent, "verifyApprovalIdempotency: approvalCurrent must be set after first call");
+    const firstRequestId = stateAfterFirst.approvalCurrent.id;
+
+    // Second call with same sessionID — pending approval exists → must NOT emit again
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 idem-test", sessionID: "s-idem" },
+      { parts: [] },
+    );
+    const secondApprovalLogs = logs.filter((l) => l.message === "approval.requested");
+    assert.equal(
+      secondApprovalLogs.length,
+      1,
+      "verifyApprovalIdempotency: second call with pending approval must NOT emit a new approval.requested",
+    );
+
+    // approvalHistory must still be 1 after the second call (pending gate blocks new entry)
+    const stateAfterSecond = workflowState.get("s-idem");
+    assert.equal(
+      stateAfterSecond?.approvalHistory?.length,
+      1,
+      "verifyApprovalIdempotency: approvalHistory must remain length 1 when gate blocks second request",
+    );
+    // Request ID must remain stable
+    assert.equal(
+      stateAfterSecond?.approvalCurrent?.id,
+      firstRequestId,
+      "verifyApprovalIdempotency: approvalCurrent.id must not change on second blocked call",
+    );
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.1: non-workflow and planning commands → no approval state created.
+ */
+async function verifyNoApprovalForNonWorkflowAndPlanning() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?approval-nwf=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?approval-nwf=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const noGitWorkspace = createGitWorkspace();
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  try {
+    // Non-workflow command → no workflow state → no approval
+    await hook(
+      { command: "/non-workflow-command", arguments: "", sessionID: "s-nwf-approval" },
+      { parts: [] },
+    );
+    assert.equal(
+      workflowState.get("s-nwf-approval"),
+      undefined,
+      "verifyNoApprovalForNonWorkflowAndPlanning: non-workflow command must not create workflow state",
+    );
+    const nwfApprovalLogs = logs.filter((l) => l.message === "approval.requested");
+    assert.equal(
+      nwfApprovalLogs.length,
+      0,
+      "verifyNoApprovalForNonWorkflowAndPlanning: non-workflow command must not emit approval.requested",
+    );
+
+    // Planning workflow (branchRequired=false) → no branch proposal → no approval
+    await hook(
+      { command: "/bmad-bmm-create-prd", arguments: "", sessionID: "s-planning-approval" },
+      { parts: [] },
+    );
+    const planningState = workflowState.get("s-planning-approval");
+    assert.ok(
+      planningState?.approvalCurrent == null,
+      "verifyNoApprovalForNonWorkflowAndPlanning: planning workflow must not create approvalCurrent (must be null or undefined)",
+    );
+    const planningApprovalLogs = logs.filter((l) => l.message === "approval.requested");
+    assert.equal(
+      planningApprovalLogs.length,
+      0,
+      "verifyNoApprovalForNonWorkflowAndPlanning: planning workflow must not emit approval.requested",
+    );
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+    fs.rmSync(noGitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.1: approval request payload shape — sessionID, workflow, actionType, proposal.kind.
+ */
+async function verifyApprovalRequestPayloadShape() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?approval-shape=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?approval-shape=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const workflowState = createWorkflowStateStore();
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+      },
+      audit: { async info() {} },
+    },
+  );
+
+  try {
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 shape-test", sessionID: "s-shape" },
+      { parts: [] },
+    );
+
+    const state = workflowState.get("s-shape");
+    const req = state?.approvalCurrent;
+    assert.ok(req, "verifyApprovalRequestPayloadShape: approvalCurrent must exist");
+    assert.equal(req.sessionID, "s-shape", "payload: sessionID preserved");
+    assert.equal(req.workflow, "bmad-bmm-quick-dev", "payload: workflow preserved");
+    assert.ok(
+      req.actionType === "branch/create" || req.actionType === "branch/switch",
+      "payload: actionType must be branch/create or branch/switch",
+    );
+    assert.equal(req.proposal?.kind, "branch", "payload: proposal.kind must be branch");
+    assert.equal(typeof req.id, "string", "payload: id must be string");
+    assert.equal(req.status, "awaitingApproval", "payload: status must be awaitingApproval");
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.1: built artifact parity for approval.requested event and approvalCurrent stash.
+ * Both wrapper (src/index.js) and built (dist/devai-aidd-guard.js) must produce the
+ * same approvalCurrent shape for the same input.
+ */
+async function verifyApprovalBuiltArtifactParity() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?approval-parity=${Date.now()}`);
+  const builtMod = await import(`${builtModuleUrl}?approval-parity=${Date.now()}`);
+
+  const noGitForWrapper = createGitWorkspace();
+  const noGitForBuilt = createGitWorkspace();
+
+  try {
+    const wrapperMock = createMockClient();
+    const wrapperHandlers = await wrapperMod.DevaiAiddGuardPlugin({
+      client: wrapperMock.client,
+      directory: noGitForWrapper,
+    });
+
+    const builtFactory = builtMod.DevaiAiddGuardPlugin || builtMod.DevaiGitWorkflowPlugin || builtMod.default;
+    const builtMock = createMockClient();
+    const builtHandlers = await builtFactory({
+      client: builtMock.client,
+      directory: noGitForBuilt,
+    });
+
+    await wrapperHandlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 parity", sessionID: "s-parity" },
+      { parts: [] },
+    );
+    await builtHandlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 parity", sessionID: "s-parity" },
+      { parts: [] },
+    );
+
+    // Both must emit approval.requested
+    const wrapperApprovalLogs = wrapperMock.logs.filter(
+      (l) => l.body?.message === "approval.requested",
+    );
+    const builtApprovalLogs = builtMock.logs.filter(
+      (l) => l.body?.message === "approval.requested",
+    );
+    assert.equal(
+      wrapperApprovalLogs.length,
+      1,
+      "verifyApprovalBuiltArtifactParity: wrapper must emit one approval.requested",
+    );
+    assert.equal(
+      builtApprovalLogs.length,
+      1,
+      "verifyApprovalBuiltArtifactParity: built must emit one approval.requested",
+    );
+
+    // Both must emit approval prompts
+    assert.equal(
+      wrapperMock.prompts.length,
+      1,
+      "verifyApprovalBuiltArtifactParity: wrapper must emit one approval prompt",
+    );
+    assert.equal(
+      builtMock.prompts.length,
+      1,
+      "verifyApprovalBuiltArtifactParity: built must emit one approval prompt",
+    );
+
+    // audit payload shapes must match
+    const wrapperAudit = wrapperApprovalLogs[0].body.extra;
+    const builtAudit = builtApprovalLogs[0].body.extra;
+    assert.equal(wrapperAudit.event, builtAudit.event, "parity: event");
+    assert.equal(wrapperAudit.outcome, builtAudit.outcome, "parity: outcome");
+    assert.equal(wrapperAudit.details.actionType, builtAudit.details.actionType, "parity: actionType");
+    assert.equal(wrapperAudit.details.proposalKind, builtAudit.details.proposalKind, "parity: proposalKind");
+  } finally {
+    fs.rmSync(noGitForWrapper, { recursive: true, force: true });
+    fs.rmSync(noGitForBuilt, { recursive: true, force: true });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Story 2.1 — Code Review Fixes (H1, H2, M1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * H1: requestApproval throw must emit approval.prompt.delivery.failed audit
+ * and the workflow must continue (legacy handler still invoked, no exception
+ * surfaces to the caller).
+ */
+async function verifyApprovalPromptDeliveryFailureAudit() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?h1=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?h1=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+  let legacyHandlerCalled = false;
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    {
+      "command.execute.before": async () => {
+        legacyHandlerCalled = true;
+      },
+    },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+        async requestApproval() {
+          throw new Error("simulated prompt delivery failure");
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  let surfacedError = null;
+  try {
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 h1", sessionID: "s-h1" },
+      { parts: [] },
+    );
+  } catch (e) {
+    surfacedError = e;
+  }
+
+  try {
+    assert.equal(
+      surfacedError,
+      null,
+      "verifyApprovalPromptDeliveryFailureAudit: prompt failure must NOT surface to caller (FR22)",
+    );
+    assert.equal(
+      legacyHandlerCalled,
+      true,
+      "verifyApprovalPromptDeliveryFailureAudit: legacy handler must still be invoked after prompt failure",
+    );
+
+    const failureLogs = logs.filter((l) => l.message === "approval.prompt.delivery.failed");
+    assert.equal(
+      failureLogs.length,
+      1,
+      "verifyApprovalPromptDeliveryFailureAudit: must emit one approval.prompt.delivery.failed event",
+    );
+    const payload = failureLogs[0].extra;
+    assert.equal(payload.event, "approval.prompt.delivery.failed");
+    assert.equal(typeof payload.timestamp, "string");
+    assert.equal(payload.workflow, "bmad-bmm-quick-dev");
+    assert.equal(payload.command, "bmad-bmm-quick-dev");
+    assert.equal(
+      payload.outcome,
+      "skip",
+      "verifyApprovalPromptDeliveryFailureAudit: prompt failure must use outcome=skip (user was never asked)",
+    );
+    assert.equal(
+      payload.details.reason,
+      "prompt-delivery-failed",
+      "verifyApprovalPromptDeliveryFailureAudit: details.reason must be machine-readable",
+    );
+    assert.equal(typeof payload.details.requestId, "string");
+    assert.ok(
+      payload.details.actionType === "branch/create" || payload.details.actionType === "branch/switch",
+    );
+    assert.equal(payload.details.sessionID, "s-h1");
+    assert.equal(
+      payload.details.error,
+      "simulated prompt delivery failure",
+      "verifyApprovalPromptDeliveryFailureAudit: error message must be captured",
+    );
+
+    // approvalCurrent must remain stashed despite prompt failure.
+    const state = workflowState.get("s-h1");
+    assert.ok(
+      state?.approvalCurrent,
+      "verifyApprovalPromptDeliveryFailureAudit: approvalCurrent must remain stashed after prompt failure",
+    );
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * H2: full priorState carry-over — arbitrary fields stashed by future stories
+ * (e.g., Story 2.3's approvalResolved/approvalDecision) must survive a second
+ * command.execute.before invocation on the same sessionID.
+ */
+async function verifyPriorStateCarryOver() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?h2=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?h2=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const workflowState = createWorkflowStateStore();
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+      },
+      audit: { async info() {} },
+    },
+  );
+
+  try {
+    // First call seeds state.
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 h2", sessionID: "s-h2" },
+      { parts: [] },
+    );
+
+    // Inject a future-story field directly into the store.
+    const seeded = workflowState.get("s-h2");
+    workflowState.set("s-h2", {
+      ...seeded,
+      approvalDecision: { outcome: "accept", at: "2026-05-08T00:00:00.000Z" },
+      futureCustomField: { story: "2.3", marker: "must-survive" },
+    });
+
+    // Second command.execute.before — must spread priorState first so the
+    // injected fields persist through re-entry.
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 h2", sessionID: "s-h2" },
+      { parts: [] },
+    );
+
+    const finalState = workflowState.get("s-h2");
+    assert.deepEqual(
+      finalState?.approvalDecision,
+      { outcome: "accept", at: "2026-05-08T00:00:00.000Z" },
+      "verifyPriorStateCarryOver: future approvalDecision field must survive re-entry",
+    );
+    assert.deepEqual(
+      finalState?.futureCustomField,
+      { story: "2.3", marker: "must-survive" },
+      "verifyPriorStateCarryOver: arbitrary future custom fields must survive re-entry",
+    );
+
+    // approvalCurrent and approvalHistory must also remain consistent.
+    assert.ok(
+      finalState?.approvalCurrent,
+      "verifyPriorStateCarryOver: approvalCurrent must remain after re-entry",
+    );
+    assert.ok(
+      Array.isArray(finalState?.approvalHistory),
+      "verifyPriorStateCarryOver: approvalHistory must remain an array",
+    );
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * M1: structuredClone-based nested isolation. Mutating a nested field reachable
+ * through approvalCurrent (e.g., proposal.action) must not contaminate the store.
+ */
+async function verifyWorkflowStateNestedDeepIsolation() {
+  const { createWorkflowStateStore } = await import(
+    `${workflowStateModuleUrl}?m1=${Date.now()}`
+  );
+
+  const store = createWorkflowStateStore();
+  const seedRequest = {
+    id: "req-m1-1",
+    status: "awaitingApproval",
+    sessionID: "s-m1",
+    proposal: { kind: "branch", action: "create", name: "feat/X" },
+    metadata: { proposalKind: "branch", nested: { tag: "original" } },
+  };
+  store.set("s-m1", {
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: seedRequest,
+    approvalHistory: [seedRequest],
+  });
+
+  // (a) Mutate nested proposal field on the returned snapshot.
+  const snapshot = store.get("s-m1");
+  snapshot.approvalCurrent.proposal.action = "switch";
+  snapshot.approvalCurrent.metadata.nested.tag = "tampered";
+
+  const reFetched = store.get("s-m1");
+  assert.equal(
+    reFetched.approvalCurrent.proposal.action,
+    "create",
+    "verifyWorkflowStateNestedDeepIsolation: nested mutation of approvalCurrent.proposal.action must not reach store",
+  );
+  assert.equal(
+    reFetched.approvalCurrent.metadata.nested.tag,
+    "original",
+    "verifyWorkflowStateNestedDeepIsolation: nested mutation of approvalCurrent.metadata.nested.tag must not reach store",
+  );
+
+  // (b) Mutate nested field inside approvalHistory[0].
+  const histSnapshot = store.get("s-m1");
+  histSnapshot.approvalHistory[0].proposal.name = "feat/Tampered";
+
+  const reFetched2 = store.get("s-m1");
+  assert.equal(
+    reFetched2.approvalHistory[0].proposal.name,
+    "feat/X",
+    "verifyWorkflowStateNestedDeepIsolation: nested mutation of approvalHistory[0].proposal.name must not reach store",
+  );
+}
+
+/**
+ * L4 (Story 2.1 second review): stale Git-evaluation fields (branchProposal /
+ * initProposal / readiness) must NOT survive re-entry — they are recomputed
+ * every call. Approval state and arbitrary future fields still carry over.
+ */
+async function verifyStaleGitFieldsInvalidatedOnReentry() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?l4=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?l4=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const workflowState = createWorkflowStateStore();
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+      },
+      audit: { async info() {} },
+    },
+  );
+
+  try {
+    // First call seeds branchProposal/readiness.
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 l4-first", sessionID: "s-l4" },
+      { parts: [] },
+    );
+    const seeded = workflowState.get("s-l4");
+    assert.ok(seeded?.branchProposal, "verifyStaleGitFieldsInvalidatedOnReentry: branchProposal must seed on first call");
+    assert.ok(seeded?.readiness, "verifyStaleGitFieldsInvalidatedOnReentry: readiness must seed on first call");
+
+    // Inject a stale phantom proposal — must NOT survive next entry.
+    workflowState.set("s-l4", {
+      ...seeded,
+      branchProposal: { kind: "branch", action: "create", name: "feat/STALE-PHANTOM", reason: "stale" },
+      futureCustomField: { story: "2.3", marker: "must-survive" },
+    });
+
+    // Second entry recomputes — stale phantom must be wiped, future field preserved.
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 l4-second", sessionID: "s-l4" },
+      { parts: [] },
+    );
+    const reComputed = workflowState.get("s-l4");
+    assert.notEqual(
+      reComputed?.branchProposal?.name,
+      "feat/STALE-PHANTOM",
+      "verifyStaleGitFieldsInvalidatedOnReentry: stale branchProposal must be invalidated on re-entry",
+    );
+    assert.deepEqual(
+      reComputed?.futureCustomField,
+      { story: "2.3", marker: "must-survive" },
+      "verifyStaleGitFieldsInvalidatedOnReentry: arbitrary future fields must still carry over",
+    );
+    assert.ok(
+      reComputed?.approvalCurrent,
+      "verifyStaleGitFieldsInvalidatedOnReentry: approvalCurrent (pending) must still carry over",
+    );
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Story 2.2: Explain Intent and Expected Impact in Approval Prompts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Story 2.2: redaction helpers — branch label, directory label, remote label.
+ * These are pure helpers and the only place URL/path filtering should live
+ * before reaching prompt body or audit metadata.
+ */
+async function verifyApprovalRedactionHelpers() {
+  const { redactBranchLabel, redactDirectoryLabel, redactRemoteLabel } =
+    await import(`${redactApprovalFieldsModuleUrl}?v=${Date.now()}`);
+
+  // Branch label: only string + non-empty allowed; passes through otherwise.
+  assert.equal(redactBranchLabel("feat/ABC-1"), "feat/ABC-1", "redactBranchLabel: passes safe slug");
+  assert.equal(redactBranchLabel(""), null, "redactBranchLabel: empty → null");
+  assert.equal(redactBranchLabel(null), null, "redactBranchLabel: null → null");
+  assert.equal(redactBranchLabel(undefined), null, "redactBranchLabel: undefined → null");
+
+  // Directory label: never returns the raw path.
+  const safeDir = redactDirectoryLabel("/Users/secret/private/project");
+  assert.equal(
+    safeDir,
+    "current working directory",
+    "redactDirectoryLabel: must NEVER return the raw absolute path",
+  );
+  assert.ok(
+    !safeDir.includes("/"),
+    "redactDirectoryLabel: must not contain a slash from the raw input",
+  );
+
+  // Remote label: only short identifiers like "origin"; URLs and paths rejected.
+  assert.equal(redactRemoteLabel("origin"), "origin", "redactRemoteLabel: passes name");
+  assert.equal(redactRemoteLabel("upstream"), "upstream", "redactRemoteLabel: passes name");
+  assert.equal(
+    redactRemoteLabel("https://example.com/repo.git"),
+    null,
+    "redactRemoteLabel: must reject full URL",
+  );
+  assert.equal(
+    redactRemoteLabel("git@example.com:org/repo.git"),
+    null,
+    "redactRemoteLabel: must reject SSH URL",
+  );
+  assert.equal(redactRemoteLabel(""), null, "redactRemoteLabel: empty → null");
+  assert.equal(redactRemoteLabel(null), null, "redactRemoteLabel: null → null");
+}
+
+/**
+ * Story 2.2: explanation builder — canonical payload contract.
+ * Verifies:
+ *   - all categories produce intent/impact/workflow/policy fields
+ *   - sensitivity = "sanitized", detailLevel = "concise" are fixed
+ *   - branch reason code is preserved as a code, not as a sentence
+ *   - identity/finalization rationale is rule-based
+ */
+async function verifyApprovalExplanationContracts() {
+  const { buildApprovalExplanation, buildFallbackExplanation } = await import(
+    `${buildApprovalExplanationModuleUrl}?v=${Date.now()}`
+  );
+
+  const workflowContext = {
+    commandName: "bmad-bmm-quick-dev",
+    normalizedCommand: "bmad-bmm-quick-dev",
+  };
+  const workflowPolicy = {
+    category: "implementation",
+    identityStrategy: "ticket-or-args",
+    branchRequired: true,
+    finalization: "commit-and-push",
+  };
+
+  // branch/create
+  const branchCreate = buildApprovalExplanation({
+    actionCategory: "branch/create",
+    workflowContext,
+    workflowPolicy,
+    branchProposal: {
+      kind: "branch",
+      action: "create",
+      name: "feat/ABC-1",
+      current: "main",
+      reason: "current-branch-is-long-lived",
+    },
+  });
+  assert.equal(branchCreate.actionCategory, "branch/create", "explanation: actionCategory preserved");
+  assert.equal(branchCreate.sensitivity, "sanitized", "explanation: sensitivity must be sanitized");
+  assert.equal(branchCreate.detailLevel, "concise", "explanation: detailLevel must be concise");
+  for (const key of ["intentSummary", "impactSummary", "workflowSummary", "policyRationale"]) {
+    assert.equal(typeof branchCreate[key], "string", `explanation: ${key} must be a string`);
+    assert.ok(branchCreate[key].length > 0, `explanation: ${key} must be non-empty`);
+  }
+  assert.equal(branchCreate.fields.targetBranchLabel, "feat/ABC-1", "explanation: target branch preserved");
+  assert.equal(branchCreate.fields.currentBranchLabel, "main", "explanation: current branch preserved");
+  assert.equal(
+    branchCreate.fields.branchReasonCode,
+    "current-branch-is-long-lived",
+    "explanation: branch reason code preserved",
+  );
+  assert.ok(
+    branchCreate.policyRationale.includes("전용 브랜치 정책") ||
+      branchCreate.policyRationale.includes("브랜치 정책"),
+    "explanation: branchRequired=true must surface in policyRationale",
+  );
+
+  // branch/switch with no explicit reason
+  const branchSwitch = buildApprovalExplanation({
+    actionCategory: "branch/switch",
+    workflowContext,
+    workflowPolicy,
+    branchProposal: {
+      kind: "branch",
+      action: "switch",
+      name: "feat/ABC-2",
+      current: "feat/ABC-1",
+      reason: "candidate-differs-from-current",
+    },
+  });
+  assert.equal(branchSwitch.fields.targetBranchLabel, "feat/ABC-2");
+  assert.equal(branchSwitch.fields.currentBranchLabel, "feat/ABC-1");
+  assert.notEqual(
+    branchSwitch.fields.targetBranchLabel,
+    branchSwitch.fields.currentBranchLabel,
+    "explanation: target/current branch must not be confused",
+  );
+
+  // init: directory must be a label, not a raw path
+  const initExplanation = buildApprovalExplanation({
+    actionCategory: "init",
+    workflowContext,
+    workflowPolicy,
+    initProposal: {
+      kind: "init",
+      action: "git-init",
+      directory: "/Users/secret/some/private/path",
+      reason: "git-not-initialized",
+    },
+    readiness: {
+      outcome: "ask",
+      reason: "git-not-initialized",
+    },
+  });
+  assert.equal(initExplanation.fields.directoryLabel, "current working directory");
+  assert.ok(
+    !initExplanation.fields.directoryLabel.includes("/"),
+    "explanation: directoryLabel must not include a slash",
+  );
+  assert.equal(initExplanation.fields.repoStateCode, "git-not-initialized");
+  assert.ok(
+    initExplanation.policyRationale.includes("초기화") ||
+      initExplanation.policyRationale.includes("Git"),
+    "explanation: init rationale must mention initialization",
+  );
+
+  // push: only remote name, no full URL
+  const pushExplanation = buildApprovalExplanation({
+    actionCategory: "push",
+    workflowContext,
+    workflowPolicy,
+    pushProposal: {
+      kind: "push",
+      action: "push",
+      remote: "origin",
+      branch: "feat/ABC-1",
+    },
+  });
+  assert.equal(pushExplanation.fields.targetRemoteLabel, "origin");
+  assert.equal(pushExplanation.fields.targetBranchLabel, "feat/ABC-1");
+
+  // push: full remote URL passed in must be redacted to null
+  const pushWithUrl = buildApprovalExplanation({
+    actionCategory: "push",
+    workflowContext,
+    workflowPolicy,
+    pushProposal: {
+      kind: "push",
+      action: "push",
+      remote: "https://github.com/example/repo.git",
+      branch: "feat/ABC-1",
+    },
+  });
+  assert.equal(
+    pushWithUrl.fields.targetRemoteLabel,
+    null,
+    "explanation: full remote URL must be redacted to null, never passed through",
+  );
+
+  // commit: extension point preserved even though Epic 3 will source the proposal
+  const commitExplanation = buildApprovalExplanation({
+    actionCategory: "commit",
+    workflowContext,
+    workflowPolicy,
+  });
+  assert.equal(typeof commitExplanation.intentSummary, "string");
+  assert.equal(commitExplanation.fields.finalizationMode, "commit-and-push");
+
+  // fallback explanation must be safe and labelled
+  const fb = buildFallbackExplanation("branch/create");
+  assert.equal(fb.actionCategory, "branch/create");
+  assert.equal(fb.sensitivity, "sanitized");
+  assert.equal(fb.detailLevel, "concise");
+  assert.equal(typeof fb.intentSummary, "string");
+  assert.equal(typeof fb.policyRationale, "string");
+}
+
+/**
+ * Story 2.2: buildApprovalRequest — body/metadata derived from a single
+ * canonical explanation payload, with full Story 2.2 fields populated.
+ */
+async function verifyBuildApprovalRequestStory22Fields() {
+  const { buildApprovalRequest } = await import(
+    `${buildApprovalRequestModuleUrl}?v22=${Date.now()}`
+  );
+
+  const proposal = {
+    kind: "branch",
+    action: "create",
+    name: "feat/ABC-1",
+    current: "main",
+    reason: "current-branch-is-long-lived",
+  };
+  const workflowContext = {
+    commandName: "bmad-bmm-quick-dev",
+    normalizedCommand: "bmad-bmm-quick-dev",
+  };
+  const workflowPolicy = {
+    category: "implementation",
+    identityStrategy: "ticket-or-args",
+    branchRequired: true,
+    finalization: "commit-and-push",
+  };
+
+  const req = buildApprovalRequest({
+    sessionID: "s-22-1",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    actionLabel: "Create branch: feat/ABC-1",
+    proposal,
+    workflowContext,
+    workflowPolicy,
+    readiness: { outcome: "allow", reason: "ready" },
+  });
+
+  // Prompt body — Story 2.2 fields
+  assert.equal(typeof req.prompt.title, "string", "prompt.title must be a string");
+  assert.equal(typeof req.prompt.summary, "string", "prompt.summary must remain a string (backward compat)");
+  assert.ok(Array.isArray(req.prompt.lines), "prompt.lines must be an array");
+  assert.equal(req.prompt.lines.length, 4, "prompt.lines must contain exactly 4 explanation lines");
+  assert.ok(
+    req.prompt.lines[0].startsWith("Intent:") &&
+      req.prompt.lines[1].startsWith("Impact:") &&
+      req.prompt.lines[2].startsWith("Context:") &&
+      req.prompt.lines[3].startsWith("Why approval is needed:"),
+    "prompt.lines must follow Intent/Impact/Context/Why approval is needed ordering",
+  );
+
+  // Metadata — schema + canonical explanation
+  assert.equal(req.metadata.event, "approval.requested", "metadata.event must equal approval.requested");
+  assert.equal(req.metadata.actionCategory, "branch/create", "metadata.actionCategory");
+  assert.equal(req.metadata.proposalKind, "branch", "metadata.proposalKind preserved");
+  assert.equal(req.metadata.proposalAction, "create", "metadata.proposalAction");
+  assert.equal(req.metadata.policyCategory, "implementation");
+  assert.equal(req.metadata.identityStrategy, "ticket-or-args");
+  assert.equal(req.metadata.finalization, "commit-and-push");
+  assert.equal(req.metadata.detailLevel, "concise");
+  assert.equal(req.metadata.sensitivity, "sanitized");
+
+  // Explanation block must mirror canonical fields
+  for (const key of ["intentSummary", "impactSummary", "workflowSummary", "policyRationale"]) {
+    assert.equal(typeof req.metadata.explanation[key], "string", `explanation.${key} must be a string`);
+    assert.ok(req.metadata.explanation[key].length > 0, `explanation.${key} must be non-empty`);
+  }
+
+  // Source-of-truth: prompt summary must equal explanation.intentSummary so
+  // there is no second formatting path for the same idea.
+  assert.equal(
+    req.prompt.summary,
+    req.metadata.explanation.intentSummary,
+    "prompt.summary must derive from the same canonical intentSummary",
+  );
+
+  // Action-specific fields
+  assert.equal(req.metadata.explanation.fields.targetBranchLabel, "feat/ABC-1");
+  assert.equal(req.metadata.explanation.fields.currentBranchLabel, "main");
+  assert.equal(req.metadata.explanation.fields.branchReasonCode, "current-branch-is-long-lived");
+}
+
+/**
+ * Story 2.2: redaction at the request level — sensitive inputs in the proposal
+ * must NOT leak into prompt text or metadata.
+ */
+async function verifyApprovalRedactionThroughRequest() {
+  const { buildApprovalRequest } = await import(
+    `${buildApprovalRequestModuleUrl}?v22redact=${Date.now()}`
+  );
+
+  // init proposal carrying an absolute path — must NOT surface in prompt or metadata
+  const sensitivePath = "/Users/secret/private-project";
+  const initReq = buildApprovalRequest({
+    sessionID: "s-22-redact-init",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "init",
+    actionLabel: "Initialize Git repository",
+    proposal: {
+      kind: "init",
+      action: "git-init",
+      directory: sensitivePath,
+      reason: "git-not-initialized",
+      message: `Git repository initialization is required for ${sensitivePath}.`,
+    },
+    workflowContext: { commandName: "bmad-bmm-quick-dev" },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "ticket-or-args",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    readiness: { outcome: "ask", reason: "git-not-initialized" },
+  });
+
+  const promptText = [
+    initReq.prompt.title,
+    initReq.prompt.summary,
+    ...(initReq.prompt.lines || []),
+  ].join("\n");
+  assert.ok(
+    !promptText.includes(sensitivePath),
+    "redaction: prompt must not include absolute path from init proposal",
+  );
+  assert.ok(
+    !JSON.stringify(initReq.metadata).includes(sensitivePath),
+    "redaction: metadata must not include absolute path from init proposal",
+  );
+  assert.equal(
+    initReq.metadata.explanation.fields.directoryLabel,
+    "current working directory",
+    "redaction: directoryLabel must be the safe label",
+  );
+
+  // push proposal carrying a full remote URL — must NOT surface anywhere
+  const sensitiveUrl = "https://corp.example.com/team/secret-repo.git";
+  const pushReq = buildApprovalRequest({
+    sessionID: "s-22-redact-push",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "finish",
+    actionType: "push",
+    actionLabel: "Push commits to remote",
+    proposal: {
+      kind: "push",
+      action: "push",
+      remote: sensitiveUrl,
+      branch: "feat/ABC-1",
+    },
+    workflowContext: { commandName: "bmad-bmm-quick-dev" },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "ticket-or-args",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+  });
+  const pushPromptText = [
+    pushReq.prompt.title,
+    pushReq.prompt.summary,
+    ...(pushReq.prompt.lines || []),
+  ].join("\n");
+  assert.ok(
+    !pushPromptText.includes(sensitiveUrl),
+    "redaction: prompt must not include full remote URL",
+  );
+  assert.ok(
+    !JSON.stringify(pushReq.metadata).includes(sensitiveUrl),
+    "redaction: metadata must not include full remote URL",
+  );
+  assert.equal(
+    pushReq.metadata.explanation.fields.targetRemoteLabel,
+    null,
+    "redaction: targetRemoteLabel must be null when input is a URL",
+  );
+
+  // raw arguments containing a secret-like string must never reach prompt/metadata
+  const rawArgs = "ABC-123 --auth-token=hunter2-supersecret";
+  const branchReq = buildApprovalRequest({
+    sessionID: "s-22-redact-branch",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    actionLabel: "Create branch: feat/ABC-1",
+    proposal: { kind: "branch", action: "create", name: "feat/ABC-1", current: "main", reason: "current-branch-is-long-lived" },
+    workflowContext: { commandName: "bmad-bmm-quick-dev", arguments: rawArgs },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "ticket-or-args",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+  });
+  const branchPromptText = [
+    branchReq.prompt.title,
+    branchReq.prompt.summary,
+    ...(branchReq.prompt.lines || []),
+  ].join("\n");
+  assert.ok(
+    !branchPromptText.includes("hunter2-supersecret"),
+    "redaction: prompt must not echo raw argument secret",
+  );
+  assert.ok(
+    !JSON.stringify(branchReq.metadata).includes("hunter2-supersecret"),
+    "redaction: metadata must not echo raw argument secret",
+  );
+}
+
+/**
+ * Story 2.2: hook integration — explanation flows from command-execute-before
+ * through to the workflow state without losing fields and stays sanitized in
+ * the audit pipeline.
+ */
+async function verifyApprovalExplanationHookIntegration() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?explain-hook=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?explain-hook=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+  const prompts = [];
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+        requestApproval(request) {
+          prompts.push(request);
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  try {
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 hook-explain", sessionID: "s-explain-hook" },
+      { parts: [] },
+    );
+
+    const state = workflowState.get("s-explain-hook");
+    const req = state?.approvalCurrent;
+    assert.ok(req, "hook integration: approvalCurrent must be set");
+
+    // Story 2.2 fields end-to-end
+    assert.equal(req.metadata.event, "approval.requested");
+    assert.equal(req.metadata.actionCategory, req.actionType);
+    assert.ok(req.metadata.explanation, "hook integration: metadata.explanation must be present");
+    assert.equal(req.metadata.sensitivity, "sanitized");
+    assert.equal(req.metadata.detailLevel, "concise");
+    for (const key of ["intentSummary", "impactSummary", "workflowSummary", "policyRationale"]) {
+      assert.equal(
+        typeof req.metadata.explanation[key],
+        "string",
+        `hook integration: explanation.${key} must be a string`,
+      );
+    }
+    assert.ok(Array.isArray(req.prompt.lines), "hook integration: prompt.lines must be an array");
+    assert.equal(req.prompt.lines.length, 4, "hook integration: prompt.lines must have 4 entries");
+
+    // Workflow context surfaced as policy-derived fields, not raw args
+    assert.equal(req.metadata.policyCategory, "implementation");
+    assert.equal(req.metadata.identityStrategy, "ticket-or-args");
+
+    // Sanity: requestApproval was called and got the same prompt structure
+    assert.equal(prompts.length, 1, "hook integration: requestApproval must be called once");
+    assert.equal(prompts[0].id, req.id, "hook integration: prompt and stashed request share id");
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.2: graceful degradation — when proposal data is malformed enough to
+ * break explanation building, the request still ships with a safe fallback
+ * explanation rather than throwing.
+ */
+async function verifyApprovalExplanationFallback() {
+  const { buildApprovalRequest } = await import(
+    `${buildApprovalRequestModuleUrl}?v22fallback=${Date.now()}`
+  );
+
+  // (1) Missing-policy path — canonical builder still produces a payload, so
+  // fallback flag must be FALSE here.
+  const reqMissingPolicy = buildApprovalRequest({
+    sessionID: "s-22-fallback",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    proposal: { kind: "branch", action: "create", name: "feat/ABC-1" },
+    // workflowPolicy intentionally omitted; explanation must still produce safe defaults
+  });
+
+  assert.equal(reqMissingPolicy.metadata.event, "approval.requested");
+  assert.equal(reqMissingPolicy.metadata.sensitivity, "sanitized");
+  assert.equal(reqMissingPolicy.metadata.detailLevel, "concise");
+  assert.equal(typeof reqMissingPolicy.metadata.explanation.policyRationale, "string");
+  assert.ok(reqMissingPolicy.metadata.explanation.policyRationale.length > 0);
+  assert.equal(reqMissingPolicy.metadata.policyCategory, null, "fallback: policyCategory must be null when no policy provided");
+  assert.equal(reqMissingPolicy.metadata.identityStrategy, null, "fallback: identityStrategy must be null when no policy provided");
+  assert.equal(
+    reqMissingPolicy.metadata.explanation.fallback,
+    false,
+    "fallback flag must be false when canonical builder succeeds",
+  );
+
+  // (2) Forced builder failure — proposal.reason getter throws. Fingerprint
+  // building only reads kind/action/name/current/directory so it succeeds; the
+  // explanation builder reads `proposal.reason` which throws, so the
+  // safeBuildExplanation catch must engage and produce fallback=true.
+  const explodingProposal = {
+    kind: "branch",
+    action: "create",
+    name: "feat/ABC-1",
+    current: "main",
+    get reason() {
+      throw new Error("simulated explanation builder failure");
+    },
+  };
+  const reqExploded = buildApprovalRequest({
+    sessionID: "s-22-fallback-throw",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    proposal: explodingProposal,
+    workflowContext: { commandName: "bmad-bmm-quick-dev" },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "ticket-or-args",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+  });
+  assert.equal(reqExploded.status, "awaitingApproval", "fallback: request must still be awaitingApproval");
+  assert.equal(
+    reqExploded.metadata.explanation.fallback,
+    true,
+    "fallback flag must be true when canonical builder throws",
+  );
+  assert.equal(reqExploded.metadata.sensitivity, "sanitized");
+  assert.equal(reqExploded.metadata.detailLevel, "concise");
+  // Generic safe copy must populate the four core fields.
+  for (const key of ["intentSummary", "impactSummary", "workflowSummary", "policyRationale"]) {
+    assert.equal(typeof reqExploded.metadata.explanation[key], "string", `fallback.${key} must be string`);
+    assert.ok(reqExploded.metadata.explanation[key].length > 0, `fallback.${key} must be non-empty`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Story 2.3: Support Accept, Deny, and Ignore-and-Continue Outcomes
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Story 2.3: approval-resolution-state pure helpers.
+ * Asserts the state machine constants and transition validator.
+ */
+async function verifyApprovalResolutionStateContracts() {
+  const mod = await import(`${approvalResolutionStateModuleUrl}?v23-state=${Date.now()}`);
+  const {
+    APPROVAL_OUTCOMES,
+    APPROVAL_OUTCOME_VALUES,
+    TERMINAL_OUTCOMES,
+    CONTINUATION,
+    APPROVAL_RESOLUTION_REASONS,
+    isTerminalOutcome,
+    isValidOutcome,
+    continuationFor,
+    skipReasonFor,
+    validateTransition,
+  } = mod;
+
+  assert.deepEqual(APPROVAL_OUTCOME_VALUES, [
+    "pending",
+    "accept",
+    "deny",
+    "ignore-and-continue",
+  ]);
+  assert.deepEqual(TERMINAL_OUTCOMES, ["accept", "deny", "ignore-and-continue"]);
+  assert.equal(APPROVAL_OUTCOMES.PENDING, "pending");
+  assert.equal(CONTINUATION.EXECUTE_NOW, "execute-now");
+  assert.equal(CONTINUATION.CONTINUE_WITHOUT_ACTION, "continue-without-action");
+  assert.equal(APPROVAL_RESOLUTION_REASONS.APPROVAL_DENIED, "approval-denied");
+  assert.equal(APPROVAL_RESOLUTION_REASONS.APPROVAL_IGNORED, "approval-ignored");
+
+  // isTerminalOutcome / isValidOutcome
+  assert.equal(isTerminalOutcome("accept"), true);
+  assert.equal(isTerminalOutcome("deny"), true);
+  assert.equal(isTerminalOutcome("ignore-and-continue"), true);
+  assert.equal(isTerminalOutcome("pending"), false);
+  assert.equal(isTerminalOutcome("anything-else"), false);
+  assert.equal(isValidOutcome("pending"), true);
+  assert.equal(isValidOutcome("accept"), true);
+  assert.equal(isValidOutcome("nope"), false);
+
+  // continuationFor
+  assert.equal(continuationFor("accept"), "execute-now");
+  assert.equal(continuationFor("deny"), "continue-without-action");
+  assert.equal(continuationFor("ignore-and-continue"), "continue-without-action");
+  assert.equal(continuationFor("pending"), null);
+
+  // skipReasonFor
+  assert.equal(skipReasonFor("deny"), "approval-denied");
+  assert.equal(skipReasonFor("ignore-and-continue"), "approval-ignored");
+  assert.equal(skipReasonFor("accept"), null);
+
+  // validateTransition
+  assert.equal(validateTransition("pending", "accept").ok, true);
+  assert.equal(validateTransition("pending", "deny").ok, true);
+  assert.equal(validateTransition("pending", "ignore-and-continue").ok, true);
+  assert.equal(validateTransition("pending", "pending").ok, false);
+  assert.equal(validateTransition("accept", "deny").ok, false);
+  assert.equal(validateTransition("deny", "accept").ok, false);
+  assert.equal(validateTransition("pending", "wrong").ok, false);
+}
+
+/**
+ * Story 2.3: buildApprovalResolution / buildApprovalResolvedAudit /
+ * buildGitActionSkippedAudit pure payload contracts.
+ */
+async function verifyBuildApprovalResolutionContracts() {
+  const mod = await import(`${buildApprovalResolutionModuleUrl}?v23-build=${Date.now()}`);
+  const {
+    deriveActionKind,
+    buildApprovalResolution,
+    buildApprovalResolvedAudit,
+    buildGitActionSkippedAudit,
+  } = mod;
+
+  assert.equal(deriveActionKind("branch/create"), "branch");
+  assert.equal(deriveActionKind("branch/switch"), "branch");
+  assert.equal(deriveActionKind("init"), "init");
+  assert.equal(deriveActionKind("push"), "push");
+  assert.equal(deriveActionKind(""), null);
+  assert.equal(deriveActionKind(null), null);
+
+  const baseRequest = {
+    id: "approval:s-23:branch/create:branch:create:feat/X",
+    actionId: "action:branch/create:branch:create:feat/X",
+    sessionID: "s-23",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    status: "awaitingApproval",
+  };
+
+  const resolved = buildApprovalResolution({
+    request: baseRequest,
+    outcome: "accept",
+    sourceHook: "permission.asked",
+    resolvedAt: "2026-05-09T10:00:00.000Z",
+  });
+  assert.equal(resolved.approvalId, baseRequest.id);
+  assert.equal(resolved.actionId, baseRequest.actionId);
+  assert.equal(resolved.sessionID, baseRequest.sessionID);
+  assert.equal(resolved.actionKind, "branch");
+  assert.equal(resolved.actionType, "branch/create");
+  assert.equal(resolved.status, "accept");
+  assert.equal(resolved.previousStatus, "pending");
+  assert.equal(resolved.continuation, "execute-now");
+  assert.equal(resolved.resolvedAt, "2026-05-09T10:00:00.000Z");
+  assert.equal(resolved.sourceHook, "permission.asked");
+  assert.equal(resolved.metadata.phase, "start");
+  assert.equal(resolved.metadata.workflow, "bmad-bmm-quick-dev");
+
+  const denied = buildApprovalResolution({
+    request: baseRequest,
+    outcome: "deny",
+    resolvedAt: "2026-05-09T10:00:01.000Z",
+  });
+  assert.equal(denied.continuation, "continue-without-action");
+
+  const ignored = buildApprovalResolution({
+    request: baseRequest,
+    outcome: "ignore-and-continue",
+    resolvedAt: "2026-05-09T10:00:02.000Z",
+  });
+  assert.equal(ignored.continuation, "continue-without-action");
+
+  // approval.resolved audit shape
+  const audit = buildApprovalResolvedAudit({
+    request: baseRequest,
+    resolution: resolved,
+    hadActiveApproval: true,
+  });
+  assert.equal(audit.event, "approval.resolved");
+  assert.equal(audit.workflow, baseRequest.workflow);
+  assert.equal(audit.command, baseRequest.command);
+  assert.equal(audit.sessionID, baseRequest.sessionID);
+  assert.equal(audit.approvalId, resolved.approvalId);
+  assert.equal(audit.actionId, resolved.actionId);
+  assert.equal(audit.outcome, "accept");
+  assert.equal(audit.details.actionKind, "branch");
+  assert.equal(audit.details.actionType, "branch/create");
+  assert.equal(audit.details.continuation, "execute-now");
+  assert.equal(audit.details.phase, "start");
+  assert.equal(audit.details.sourceHook, "permission.asked");
+  assert.equal(audit.details.hadActiveApproval, true);
+
+  // git.action.skipped only emitted for deny / ignore-and-continue
+  assert.equal(
+    buildGitActionSkippedAudit({ request: baseRequest, resolution: resolved }),
+    null,
+    "buildGitActionSkippedAudit: accept must return null",
+  );
+  const skipDeny = buildGitActionSkippedAudit({ request: baseRequest, resolution: denied });
+  assert.equal(skipDeny.event, "git.action.skipped");
+  assert.equal(skipDeny.outcome, "deny");
+  assert.equal(skipDeny.details.reason, "approval-denied");
+  assert.equal(skipDeny.details.continuation, "continue-without-action");
+  const skipIgnore = buildGitActionSkippedAudit({
+    request: baseRequest,
+    resolution: ignored,
+  });
+  assert.equal(skipIgnore.outcome, "ignore-and-continue");
+  assert.equal(skipIgnore.details.reason, "approval-ignored");
+}
+
+/**
+ * Story 2.3: build a workflowState seeded with a Story 2.1 ApprovalRequest
+ * and exercise consumeApprovalOutcome end-to-end. Reusable helper.
+ */
+async function _seedApprovalState({ outcomeFor = null } = {}) {
+  const [{ createWorkflowStateStore }, buildModule] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v23-seed=${Date.now()}`),
+    import(`${buildApprovalRequestModuleUrl}?v23-seed=${Date.now()}`),
+  ]);
+  const { buildApprovalRequest } = buildModule;
+
+  const store = createWorkflowStateStore();
+  const proposal = {
+    kind: "branch",
+    action: "create",
+    name: "feat/STORY-23",
+    current: "main",
+    reason: "branch-required-for-implementation",
+  };
+  const request = buildApprovalRequest({
+    sessionID: "s-23-seed",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    proposal,
+    workflowContext: { commandName: "bmad-bmm-quick-dev" },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "ticket-or-args",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+  });
+  store.set("s-23-seed", {
+    sessionID: "s-23-seed",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    branchProposal: proposal,
+    approvalCurrent: request,
+    approvalHistory: [request],
+    pendingActions: [],
+    lastContinuationDecision: null,
+  });
+  return { store, request, proposal, outcomeFor };
+}
+
+/**
+ * Story 2.3: accept resolves state, appends history, leaves continuation
+ * marker, and emits only `approval.resolved` (no git.action.skipped).
+ */
+async function verifyConsumeApprovalOutcomeAccept() {
+  const { consumeApprovalOutcome } = await import(
+    `${consumeApprovalOutcomeModuleUrl}?v23-accept=${Date.now()}`
+  );
+  const { store, request } = await _seedApprovalState();
+
+  const result = consumeApprovalOutcome({
+    workflowState: store,
+    sessionID: "s-23-seed",
+    outcome: "accept",
+    sourceHook: "permission.asked",
+  });
+
+  assert.equal(result.outcome, "resolved");
+  assert.equal(result.hadActiveApproval, true);
+  assert.equal(result.resolution.status, "accept");
+  assert.equal(result.resolution.continuation, "execute-now");
+  assert.equal(result.resolution.actionId, request.actionId);
+  assert.equal(result.resolution.approvalId, request.id);
+
+  const events = result.auditEvents;
+  assert.equal(events.length, 1, "accept must emit only approval.resolved");
+  assert.equal(events[0].event, "approval.resolved");
+  assert.equal(events[0].outcome, "accept");
+  assert.equal(events[0].details.continuation, "execute-now");
+  assert.equal(events[0].details.actionKind, "branch");
+
+  const finalState = store.get("s-23-seed");
+  assert.equal(finalState.approvalCurrent, null, "accept must clear approvalCurrent");
+  assert.equal(finalState.approvalHistory.length, 2, "history must include resolution snapshot");
+  const last = finalState.approvalHistory[1];
+  assert.equal(last.status, "accept");
+  assert.equal(last.resolution.continuation, "execute-now");
+  assert.equal(finalState.lastContinuationDecision.outcome, "accept");
+  assert.equal(finalState.lastContinuationDecision.continuation, "execute-now");
+}
+
+/**
+ * Story 2.3: deny clears state, emits both approval.resolved (outcome=deny)
+ * and git.action.skipped (reason=approval-denied), and never invokes any
+ * mutation-capable executor (asserted by the absence of additional events).
+ */
+async function verifyConsumeApprovalOutcomeDeny() {
+  const { consumeApprovalOutcome } = await import(
+    `${consumeApprovalOutcomeModuleUrl}?v23-deny=${Date.now()}`
+  );
+  const { store, request } = await _seedApprovalState();
+
+  const result = consumeApprovalOutcome({
+    workflowState: store,
+    sessionID: "s-23-seed",
+    outcome: "deny",
+  });
+
+  assert.equal(result.outcome, "resolved");
+  assert.equal(result.resolution.status, "deny");
+  assert.equal(result.resolution.continuation, "continue-without-action");
+
+  const events = result.auditEvents;
+  assert.equal(events.length, 2, "deny must emit approval.resolved AND git.action.skipped");
+  assert.equal(events[0].event, "approval.resolved");
+  assert.equal(events[0].outcome, "deny");
+  assert.equal(events[0].details.continuation, "continue-without-action");
+  assert.equal(events[1].event, "git.action.skipped");
+  assert.equal(events[1].outcome, "deny");
+  assert.equal(events[1].details.reason, "approval-denied");
+  assert.equal(events[1].details.continuation, "continue-without-action");
+  assert.equal(events[1].actionId, request.actionId);
+
+  const finalState = store.get("s-23-seed");
+  assert.equal(finalState.approvalCurrent, null);
+  assert.equal(finalState.lastContinuationDecision.outcome, "deny");
+  assert.equal(finalState.lastContinuationDecision.continuation, "continue-without-action");
+}
+
+/**
+ * Story 2.3: ignore-and-continue mirrors deny in shape but uses the
+ * "approval-ignored" reason code so audit consumers can distinguish them.
+ */
+async function verifyConsumeApprovalOutcomeIgnoreAndContinue() {
+  const { consumeApprovalOutcome } = await import(
+    `${consumeApprovalOutcomeModuleUrl}?v23-ignore=${Date.now()}`
+  );
+  const { store } = await _seedApprovalState();
+
+  const result = consumeApprovalOutcome({
+    workflowState: store,
+    sessionID: "s-23-seed",
+    outcome: "ignore-and-continue",
+  });
+
+  assert.equal(result.outcome, "resolved");
+  assert.equal(result.resolution.status, "ignore-and-continue");
+  assert.equal(result.resolution.continuation, "continue-without-action");
+
+  const events = result.auditEvents;
+  assert.equal(events.length, 2);
+  assert.equal(events[1].event, "git.action.skipped");
+  assert.equal(events[1].outcome, "ignore-and-continue");
+  assert.equal(events[1].details.reason, "approval-ignored");
+  assert.equal(events[1].details.continuation, "continue-without-action");
+
+  const finalState = store.get("s-23-seed");
+  assert.equal(finalState.lastContinuationDecision.outcome, "ignore-and-continue");
+}
+
+/**
+ * Story 2.3: idempotency — duplicate resolve / unknown outcome / no-active /
+ * unknown session must all return outcome:"skip" without throwing or
+ * mutating anything beyond what the first call did.
+ */
+async function verifyConsumeApprovalOutcomeIdempotent() {
+  const { consumeApprovalOutcome } = await import(
+    `${consumeApprovalOutcomeModuleUrl}?v23-idem=${Date.now()}`
+  );
+  const { store } = await _seedApprovalState();
+
+  // First resolve succeeds.
+  const first = consumeApprovalOutcome({
+    workflowState: store,
+    sessionID: "s-23-seed",
+    outcome: "accept",
+  });
+  assert.equal(first.outcome, "resolved");
+
+  const stateAfterFirst = store.get("s-23-seed");
+  const historyLengthAfterFirst = stateAfterFirst.approvalHistory.length;
+
+  // Second resolve on already-resolved approval is a no-op.
+  const second = consumeApprovalOutcome({
+    workflowState: store,
+    sessionID: "s-23-seed",
+    outcome: "deny",
+  });
+  assert.equal(second.outcome, "skip");
+  assert.equal(second.reason, "no-active-approval");
+
+  const stateAfterSecond = store.get("s-23-seed");
+  assert.equal(
+    stateAfterSecond.approvalHistory.length,
+    historyLengthAfterFirst,
+    "duplicate resolve must not append another history entry",
+  );
+
+  // Unknown session
+  const unknown = consumeApprovalOutcome({
+    workflowState: store,
+    sessionID: "s-not-tracked",
+    outcome: "accept",
+  });
+  assert.equal(unknown.outcome, "skip");
+  assert.equal(unknown.reason, "session-not-tracked");
+
+  // Invalid outcome
+  const invalid = consumeApprovalOutcome({
+    workflowState: store,
+    sessionID: "s-23-seed",
+    outcome: "yolo",
+  });
+  assert.equal(invalid.outcome, "skip");
+  assert.equal(invalid.reason, "invalid-outcome");
+
+  // pending is not a valid resolve target
+  const pendingTarget = consumeApprovalOutcome({
+    workflowState: store,
+    sessionID: "s-23-seed",
+    outcome: "pending",
+  });
+  assert.equal(pendingTarget.outcome, "skip");
+  assert.equal(pendingTarget.reason, "invalid-outcome");
+}
+
+/**
+ * Story 2.3 (post-review MED-1): the resolver no longer touches the
+ * pendingActions queue. Queue-head removal is the responsibility of the
+ * next planning pass (`command.execute.before` promotion). In production,
+ * pendingActions[0] never shares its actionId with the approvalCurrent
+ * because command-execute-before's queue-append guard
+ * (`candidateActionId !== activeActionId`) prevents that fixture. So the
+ * resolver MUST leave the queue intact.
+ */
+async function verifyConsumeApprovalOutcomeLeavesQueueIntact() {
+  const [{ createWorkflowStateStore }, buildModule, { consumeApprovalOutcome }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?v23-queue=${Date.now()}`),
+      import(`${buildApprovalRequestModuleUrl}?v23-queue=${Date.now()}`),
+      import(`${consumeApprovalOutcomeModuleUrl}?v23-queue=${Date.now()}`),
+    ]);
+  const { buildApprovalRequest, buildActionId } = buildModule;
+  const store = createWorkflowStateStore();
+
+  const activeProposal = {
+    kind: "branch",
+    action: "create",
+    name: "feat/active-head",
+    current: "main",
+  };
+  const activeRequest = buildApprovalRequest({
+    sessionID: "s-23-q",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    proposal: activeProposal,
+  });
+
+  const queuedProposal = {
+    kind: "init",
+    action: "git-init",
+    directory: "current working directory",
+  };
+  const queuedItem = {
+    actionId: buildActionId("init", queuedProposal),
+    approvalId: null,
+    kind: "init",
+    action: "git-init",
+    proposal: queuedProposal,
+    requiresApproval: true,
+    sessionID: "s-23-q",
+    phase: "start",
+    createdAt: "2026-05-09T09:00:00.000Z",
+  };
+
+  store.set("s-23-q", {
+    sessionID: "s-23-q",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: activeRequest,
+    approvalHistory: [activeRequest],
+    pendingActions: [queuedItem],
+    lastContinuationDecision: null,
+  });
+
+  const result = consumeApprovalOutcome({
+    workflowState: store,
+    sessionID: "s-23-q",
+    outcome: "accept",
+  });
+  assert.equal(result.outcome, "resolved");
+
+  const finalState = store.get("s-23-q");
+  assert.equal(finalState.approvalCurrent, null, "active slot must be cleared on accept");
+  assert.equal(
+    finalState.pendingActions.length,
+    1,
+    "resolver must not advance the queue — that is command.execute.before's job",
+  );
+  assert.equal(
+    finalState.pendingActions[0].actionId,
+    queuedItem.actionId,
+    "queue head must be untouched after resolver",
+  );
+}
+
+/**
+ * Story 2.3 (post-review MED-1): when the previous active approval has
+ * resolved and the queue has a pending head, the next `command.execute.before`
+ * pass must promote that head into approvalCurrent and shift it off the
+ * queue, instead of re-running the proposal-priority fallback.
+ */
+async function verifyCommandExecuteBeforePromotesQueueHead() {
+  const [
+    { createWorkflowStateStore },
+    buildModule,
+    commandBeforeModule,
+    { DEFAULT_PLUGIN_CONFIG },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v23-promote=${Date.now()}`),
+    import(`${buildApprovalRequestModuleUrl}?v23-promote=${Date.now()}`),
+    import(`${commandExecuteBeforeModuleUrl}?v23-promote=${Date.now()}`),
+    import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+  ]);
+  const { buildActionId } = buildModule;
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+
+  const queuedProposal = {
+    kind: "branch",
+    action: "create",
+    name: "feature/QUEUED-1",
+    current: "main",
+    reason: "queued-promotion",
+    isLongLived: false,
+  };
+  const queuedItem = {
+    actionId: buildActionId("branch/create", queuedProposal),
+    approvalId: null,
+    kind: "branch",
+    action: "create",
+    proposal: queuedProposal,
+    requiresApproval: true,
+    sessionID: "s-23-promote",
+    phase: "start",
+    createdAt: "2026-05-09T09:00:00.000Z",
+  };
+
+  // Seed the session as if a prior approval has just been resolved:
+  //   - approvalCurrent = null  (resolved)
+  //   - pendingActions = [queuedItem]  (queue head waiting to promote)
+  workflowState.set("s-23-promote", {
+    sessionID: "s-23-promote",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: null,
+    approvalHistory: [],
+    pendingActions: [queuedItem],
+    lastContinuationDecision: {
+      approvalId: "apr_prior",
+      actionId: "act_prior",
+      outcome: "deny",
+      continuation: "continue-without-action",
+      resolvedAt: "2026-05-09T09:00:00.000Z",
+      sourceHook: "permission.asked",
+    },
+  });
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  try {
+    await hook(
+      {
+        command: "/bmad-bmm-quick-dev",
+        arguments: "QUEUED-1 promote",
+        sessionID: "s-23-promote",
+      },
+      { parts: [] },
+    );
+
+    const finalState = workflowState.get("s-23-promote");
+    assert.ok(finalState.approvalCurrent, "queue head must be promoted to approvalCurrent");
+    assert.equal(
+      finalState.approvalCurrent.actionId,
+      queuedItem.actionId,
+      "promoted approval must carry the queued actionId",
+    );
+    assert.equal(
+      finalState.pendingActions.length,
+      0,
+      "queue head must be shifted off after promotion",
+    );
+
+    const requestedLogs = logs.filter((l) => l.message === "approval.requested");
+    assert.equal(requestedLogs.length, 1, "promotion must publish a fresh approval.requested");
+    assert.equal(
+      requestedLogs[0].extra.details.actionId,
+      queuedItem.actionId,
+      "approval.requested audit must reference the promoted actionId",
+    );
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.3: permission.asked hook ingress — runtime payload echoing the
+ * approval requestId and "approve"/"deny"/"ignore" outcome must drive
+ * consumeApprovalOutcome and emit audit events. Unrelated permission events
+ * (no requestId echo) must not touch approval state.
+ */
+async function verifyPermissionAskedHookFlow() {
+  const [
+    { createWorkflowStateStore },
+    buildModule,
+    { createPermissionAskedHook },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v23-hook=${Date.now()}`),
+    import(`${buildApprovalRequestModuleUrl}?v23-hook=${Date.now()}`),
+    import(`${permissionAskedModuleUrl}?v23-hook=${Date.now()}`),
+  ]);
+
+  const store = createWorkflowStateStore();
+  const proposal = {
+    kind: "branch",
+    action: "create",
+    name: "feat/HOOK-1",
+    current: "main",
+  };
+  const request = buildModule.buildApprovalRequest({
+    sessionID: "s-23-hook",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    proposal,
+  });
+  store.set("s-23-hook", {
+    sessionID: "s-23-hook",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: request,
+    approvalHistory: [request],
+    pendingActions: [],
+    lastContinuationDecision: null,
+  });
+
+  const logs = [];
+  let legacyCalls = 0;
+  const hook = createPermissionAskedHook(
+    {
+      "permission.asked": async () => {
+        legacyCalls += 1;
+      },
+    },
+    {
+      workflowState: store,
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  // (1) Unrelated permission event — no requestId/actionId echo. Must not
+  // resolve our approval.
+  await hook({ sessionID: "s-23-hook", tool: "write", arguments: {} });
+  assert.equal(
+    store.get("s-23-hook").approvalCurrent?.id,
+    request.id,
+    "unrelated permission event must not resolve approval",
+  );
+  assert.equal(legacyCalls, 1, "legacy delegate must be invoked");
+  assert.equal(
+    logs.some((l) => l.message === "approval.resolved"),
+    false,
+    "no approval.resolved event for unrelated permission",
+  );
+
+  // (2) Echoed requestId + outcome="deny" → resolve with deny.
+  await hook({
+    sessionID: "s-23-hook",
+    tool: "write",
+    requestId: request.id,
+    outcome: "deny",
+  });
+  const stateAfterDeny = store.get("s-23-hook");
+  assert.equal(stateAfterDeny.approvalCurrent, null, "deny must clear approvalCurrent");
+  assert.equal(
+    stateAfterDeny.lastContinuationDecision.outcome,
+    "deny",
+    "lastContinuationDecision must reflect deny",
+  );
+  const resolvedLogs = logs.filter((l) => l.message === "approval.resolved");
+  const skippedLogs = logs.filter((l) => l.message === "git.action.skipped");
+  assert.equal(resolvedLogs.length, 1);
+  assert.equal(resolvedLogs[0].extra.outcome, "deny");
+  assert.equal(skippedLogs.length, 1);
+  assert.equal(skippedLogs[0].extra.details.reason, "approval-denied");
+  assert.equal(legacyCalls, 2, "legacy delegate must be invoked again");
+
+  // (3) Replay same payload — already-resolved branch is idempotent (no new
+  // audit events).
+  await hook({
+    sessionID: "s-23-hook",
+    tool: "write",
+    requestId: request.id,
+    outcome: "deny",
+  });
+  assert.equal(
+    logs.filter((l) => l.message === "approval.resolved").length,
+    1,
+    "idempotent replay must not emit a second approval.resolved",
+  );
+
+  // (4) actionId echo also matches active approval (alternate ingress path).
+  store.set("s-23-hook", {
+    sessionID: "s-23-hook",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: request,
+    approvalHistory: [request],
+    pendingActions: [],
+    lastContinuationDecision: null,
+  });
+  await hook({
+    sessionID: "s-23-hook",
+    tool: "write",
+    actionId: request.actionId,
+    outcome: "ignore-and-continue",
+  });
+  const stateAfterIgnore = store.get("s-23-hook");
+  assert.equal(stateAfterIgnore.approvalCurrent, null);
+  assert.equal(stateAfterIgnore.lastContinuationDecision.outcome, "ignore-and-continue");
+}
+
+/**
+ * Story 2.3: session.deleted cleanup — clearing the session removes
+ * approvalCurrent/approvalHistory/pendingActions/lastContinuationDecision.
+ */
+async function verifySessionDeletedClearsAllApprovalState() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?v23-cleanup=${Date.now()}`);
+  const noGit = createGitWorkspace();
+  try {
+    const mock = createMockClient();
+    const handlers = await wrapperMod.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: noGit,
+    });
+
+    await handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-23 cleanup", sessionID: "s-23-cleanup" },
+      { parts: [] },
+    );
+    // approval should be set
+    // (workflowState is private to bootstrap; we assert via re-entry after
+    //  session.deleted: a brand-new approvalCurrent must be created.)
+    await handlers.event({
+      event: { type: "session.deleted", properties: { sessionID: "s-23-cleanup" } },
+    });
+
+    // Re-entry on the same sessionID must behave as a brand-new session.
+    const promptsBefore = mock.prompts.length;
+    await handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-23 cleanup-2", sessionID: "s-23-cleanup" },
+      { parts: [] },
+    );
+    assert.ok(
+      mock.prompts.length >= promptsBefore + 1,
+      "re-entry after session.deleted must publish a fresh approval prompt",
+    );
+  } finally {
+    fs.rmSync(noGit, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.3: ApprovalRequest now carries a stable `actionId` derived from
+ * the proposal fingerprint.
+ */
+async function verifyApprovalRequestActionIdContract() {
+  const { buildApprovalRequest, buildActionId } = await import(
+    `${buildApprovalRequestModuleUrl}?v23-actionid=${Date.now()}`
+  );
+  const proposal = { kind: "branch", action: "create", name: "feat/AID-1", current: "main" };
+  const req = buildApprovalRequest({
+    sessionID: "s-23-aid",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    proposal,
+  });
+  assert.equal(typeof req.actionId, "string", "actionId must be a string");
+  assert.ok(req.actionId.length > 0, "actionId must be non-empty");
+  assert.notEqual(req.actionId, req.id, "actionId and id must be distinct strings");
+  assert.equal(
+    req.actionId,
+    buildActionId("branch/create", proposal),
+    "actionId must match buildActionId output for the same inputs",
+  );
+}
+
+/**
+ * Story 2.3: approval.requested audit event must include the actionId so the
+ * resolved/skipped events can be correlated downstream.
+ */
+async function verifyApprovalRequestedAuditIncludesActionId() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?v23-aid-audit=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?v23-aid-audit=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  try {
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-23 audit", sessionID: "s-23-audit" },
+      { parts: [] },
+    );
+
+    const requestedLogs = logs.filter((l) => l.message === "approval.requested");
+    assert.equal(requestedLogs.length, 1);
+    const detail = requestedLogs[0].extra.details;
+    assert.equal(typeof detail.actionId, "string", "details.actionId must be string");
+    assert.ok(detail.actionId.length > 0, "details.actionId must be non-empty");
+    const stateActiveActionId = workflowState.get("s-23-audit").approvalCurrent.actionId;
+    assert.equal(
+      detail.actionId,
+      stateActiveActionId,
+      "audit details.actionId must match approvalCurrent.actionId",
+    );
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.3 post-review (MED-2): the approval.requested audit details must
+ * carry the story-spec fields (actionKind, actionName, proposalKind,
+ * proposalReason, requiresApproval, phase) alongside the existing Story 2.3
+ * traceability extensions (requestId, actionId, actionType, sessionID,
+ * explanationFallback).
+ */
+async function verifyApprovalRequestedAuditDetailsShape() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?v23-detail-shape=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?v23-detail-shape=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  try {
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "DETAIL-1 audit", sessionID: "s-23-detail" },
+      { parts: [] },
+    );
+
+    const requestedLogs = logs.filter((l) => l.message === "approval.requested");
+    assert.equal(requestedLogs.length, 1);
+    const details = requestedLogs[0].extra.details;
+
+    // Story-spec required keys
+    assert.equal(typeof details.actionKind, "string", "details.actionKind required");
+    assert.ok(details.actionKind.length > 0, "details.actionKind non-empty");
+    assert.equal(typeof details.actionName, "string", "details.actionName required");
+    assert.ok(details.actionName.length > 0, "details.actionName non-empty");
+    assert.equal(typeof details.proposalKind, "string", "details.proposalKind required");
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(details, "proposalReason"),
+      true,
+      "details.proposalReason must be present (string or null)",
+    );
+    assert.equal(
+      details.requiresApproval,
+      true,
+      "details.requiresApproval must be the literal true",
+    );
+    assert.equal(typeof details.phase, "string", "details.phase required");
+
+    // Traceability superset
+    assert.equal(typeof details.requestId, "string", "details.requestId required");
+    assert.equal(typeof details.actionId, "string", "details.actionId required");
+    assert.equal(typeof details.actionType, "string", "details.actionType required");
+    assert.equal(typeof details.sessionID, "string", "details.sessionID required");
+    assert.equal(
+      typeof details.explanationFallback,
+      "boolean",
+      "details.explanationFallback required",
+    );
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.3 post-review (LOW-2): the prompt metadata forwarded to
+ * client.session.promptAsync must include actionId so the permission-asked
+ * ingress can resolve via the actionId echo path (not only requestId).
+ */
+async function verifyPromptMetadataIncludesActionId() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?v23-prompt-aid=${Date.now()}`);
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  try {
+    const mock = createMockClient();
+    const handlers = await wrapperMod.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: gitWorkspace,
+    });
+
+    await handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "AID-PROMPT-1", sessionID: "s-23-prompt-aid" },
+      { parts: [] },
+    );
+
+    assert.ok(mock.prompts.length >= 1, "promptAsync must have been invoked at least once");
+    const metadata = mock.prompts[0].parts?.[0]?.metadata;
+    assert.ok(metadata, "prompt parts[0].metadata required");
+    assert.equal(typeof metadata.actionId, "string", "prompt metadata.actionId required");
+    assert.ok(metadata.actionId.length > 0, "prompt metadata.actionId must be non-empty");
+    // requestId path must remain intact for backwards compatibility
+    assert.equal(typeof metadata.requestId, "string", "prompt metadata.requestId required");
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.3 post-review (LOW-5): when permission-asked matches our active
+ * approval but the payload outcome is unknown, the hook must emit
+ * approval.resolution.failed (reason="unknown-outcome") for visibility,
+ * instead of silently skipping.
+ */
+async function verifyPermissionAskedHookEmitsResolutionFailedOnUnknownOutcome() {
+  const [{ createWorkflowStateStore }, buildModule, { createPermissionAskedHook }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?v23-low5=${Date.now()}`),
+      import(`${buildApprovalRequestModuleUrl}?v23-low5=${Date.now()}`),
+      import(`${permissionAskedModuleUrl}?v23-low5=${Date.now()}`),
+    ]);
+  const store = createWorkflowStateStore();
+  const proposal = { kind: "branch", action: "create", name: "feat/LOW5-1", current: "main" };
+  const request = buildModule.buildApprovalRequest({
+    sessionID: "s-23-low5",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    proposal,
+  });
+  store.set("s-23-low5", {
+    sessionID: "s-23-low5",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: request,
+    approvalHistory: [request],
+    pendingActions: [],
+    lastContinuationDecision: null,
+  });
+
+  const logs = [];
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    {
+      workflowState: store,
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  // Echoed requestId matches active approval, but outcome is gibberish.
+  await hook({
+    sessionID: "s-23-low5",
+    tool: "write",
+    requestId: request.id,
+    outcome: "frobnicate",
+  });
+
+  // Active approval must remain — resolver must not have run.
+  const after = store.get("s-23-low5");
+  assert.equal(after.approvalCurrent?.id, request.id, "unknown outcome must not resolve");
+
+  const failureLogs = logs.filter((l) => l.message === "approval.resolution.failed");
+  assert.equal(
+    failureLogs.length,
+    1,
+    "unknown outcome must emit a single approval.resolution.failed event",
+  );
+  assert.equal(failureLogs[0].extra.details.reason, "unknown-outcome");
+  assert.equal(failureLogs[0].extra.details.sourceHook, "permission.asked");
+  assert.equal(failureLogs[0].extra.approvalId, request.id);
+  assert.equal(failureLogs[0].extra.actionId, request.actionId);
+}
+
+/**
+ * Story 2.3 post-review (LOW-4): the permission-asked ingress must inject
+ * the canonical reasonCode for deny (approval-denied) and ignore-and-continue
+ * (approval-ignored) so the resolution snapshot recorded in approvalHistory
+ * carries the standard code.
+ */
+async function verifyPermissionAskedHookInjectsReasonCode() {
+  const [{ createWorkflowStateStore }, buildModule, { createPermissionAskedHook }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?v23-low4=${Date.now()}`),
+      import(`${buildApprovalRequestModuleUrl}?v23-low4=${Date.now()}`),
+      import(`${permissionAskedModuleUrl}?v23-low4=${Date.now()}`),
+    ]);
+
+  async function runOnce(outcomeWord, expectedReason) {
+    const store = createWorkflowStateStore();
+    const proposal = {
+      kind: "branch",
+      action: "create",
+      name: `feat/LOW4-${outcomeWord}`,
+      current: "main",
+    };
+    const request = buildModule.buildApprovalRequest({
+      sessionID: `s-23-low4-${outcomeWord}`,
+      workflow: "bmad-bmm-quick-dev",
+      command: "bmad-bmm-quick-dev",
+      phase: "start",
+      actionType: "branch/create",
+      proposal,
+    });
+    store.set(`s-23-low4-${outcomeWord}`, {
+      sessionID: `s-23-low4-${outcomeWord}`,
+      commandName: "bmad-bmm-quick-dev",
+      phase: "start",
+      approvalCurrent: request,
+      approvalHistory: [request],
+      pendingActions: [],
+      lastContinuationDecision: null,
+    });
+
+    const hook = createPermissionAskedHook(
+      { "permission.asked": async () => {} },
+      { workflowState: store, audit: { async info() {} } },
+    );
+
+    await hook({
+      sessionID: `s-23-low4-${outcomeWord}`,
+      tool: "write",
+      requestId: request.id,
+      outcome: outcomeWord,
+    });
+
+    const after = store.get(`s-23-low4-${outcomeWord}`);
+    const last = after.approvalHistory[after.approvalHistory.length - 1];
+    assert.equal(
+      last.resolution.reasonCode,
+      expectedReason,
+      `outcome=${outcomeWord} must record resolution.reasonCode=${expectedReason}`,
+    );
+  }
+
+  await runOnce("deny", "approval-denied");
+  await runOnce("ignore-and-continue", "approval-ignored");
+
+  // accept must NOT carry a skip-reason code (resolver passes null through).
+  const store = createWorkflowStateStore();
+  const proposal = { kind: "branch", action: "create", name: "feat/LOW4-accept", current: "main" };
+  const request = buildModule.buildApprovalRequest({
+    sessionID: "s-23-low4-accept",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    proposal,
+  });
+  store.set("s-23-low4-accept", {
+    sessionID: "s-23-low4-accept",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: request,
+    approvalHistory: [request],
+    pendingActions: [],
+    lastContinuationDecision: null,
+  });
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    { workflowState: store, audit: { async info() {} } },
+  );
+  await hook({
+    sessionID: "s-23-low4-accept",
+    tool: "write",
+    requestId: request.id,
+    outcome: "accept",
+  });
+  const after = store.get("s-23-low4-accept");
+  const last = after.approvalHistory[after.approvalHistory.length - 1];
+  assert.equal(
+    last.resolution.reasonCode,
+    null,
+    "accept must record resolution.reasonCode=null",
+  );
+}
+
+/**
+ * Story 2.3 second review (LOW): the permission-asked outcome parser must NOT
+ * fall back to the generic `input.action` field. Runtimes commonly populate
+ * `action` with the tool/operation name, which would otherwise collide with
+ * the alias table on unrelated permission events. The parser must only honor
+ * the dedicated decision keys (`outcome | decision | response | choice`).
+ */
+async function verifyPermissionAskedHookIgnoresGenericActionField() {
+  const [{ createWorkflowStateStore }, buildModule, { createPermissionAskedHook }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?v23-low-action=${Date.now()}`),
+      import(`${buildApprovalRequestModuleUrl}?v23-low-action=${Date.now()}`),
+      import(`${permissionAskedModuleUrl}?v23-low-action=${Date.now()}`),
+    ]);
+
+  const store = createWorkflowStateStore();
+  const proposal = {
+    kind: "branch",
+    action: "create",
+    name: "feat/LOW-ACTION-1",
+    current: "main",
+  };
+  const request = buildModule.buildApprovalRequest({
+    sessionID: "s-23-low-action",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "start",
+    actionType: "branch/create",
+    proposal,
+  });
+  store.set("s-23-low-action", {
+    sessionID: "s-23-low-action",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: request,
+    approvalHistory: [request],
+    pendingActions: [],
+    lastContinuationDecision: null,
+  });
+
+  const logs = [];
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    {
+      workflowState: store,
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  // Runtime echoes the requestId AND populates `action: "allow"` (the tool's
+  // intent, not an outcome decision). Without the LOW fix, "allow" would map
+  // through OUTCOME_ALIASES → "accept" and silently close the approval.
+  await hook({
+    sessionID: "s-23-low-action",
+    tool: "write",
+    requestId: request.id,
+    action: "allow",
+  });
+
+  const after = store.get("s-23-low-action");
+  assert.equal(
+    after.approvalCurrent?.id,
+    request.id,
+    "input.action='allow' must NOT resolve the active approval",
+  );
+  // Parser returns null → unknown-outcome surfaces via approval.resolution.failed.
+  const failureLogs = logs.filter((l) => l.message === "approval.resolution.failed");
+  assert.equal(
+    failureLogs.length,
+    1,
+    "missing dedicated decision field must emit approval.resolution.failed",
+  );
+  assert.equal(failureLogs[0].extra.details.reason, "unknown-outcome");
+
+  // Sanity: the dedicated decision key still works on a fresh approval.
+  store.set("s-23-low-action", {
+    sessionID: "s-23-low-action",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: request,
+    approvalHistory: [request],
+    pendingActions: [],
+    lastContinuationDecision: null,
+  });
+  await hook({
+    sessionID: "s-23-low-action",
+    tool: "write",
+    requestId: request.id,
+    decision: "accept",
+  });
+  assert.equal(
+    store.get("s-23-low-action").approvalCurrent,
+    null,
+    "decision='accept' must still resolve via the dedicated key",
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Story 2.4 — detect and report Git conflicts and execution failures
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Story 2.4: classifier contract — canonical FAILURE_CODES set, public
+ * signature, and per-action-kind mapping for the documented taxonomy.
+ */
+async function verifyClassifyGitExecutionFailureContract() {
+  const { classifyGitExecutionFailure, FAILURE_CODES } = await import(
+    `${classifyGitExecutionFailureModuleUrl}?contract=${Date.now()}`
+  );
+
+  // Frozen canonical code set — only-extend-do-not-narrow rule from Story 2.4.
+  assert.deepEqual(
+    Object.values(FAILURE_CODES).sort(),
+    [
+      "branch-conflict",
+      "branch-switch-mismatch",
+      "commit-failure",
+      "execution-unavailable",
+      "push-rejection",
+      "repository-state-mismatch",
+      "unknown-git-failure",
+    ],
+    "classifier: FAILURE_CODES must expose exactly the seven canonical codes",
+  );
+  assert.ok(
+    Object.isFrozen(FAILURE_CODES),
+    "classifier: FAILURE_CODES must be frozen so callers cannot mutate the taxonomy",
+  );
+
+  // Branch / create / "already exists" → branch-conflict.
+  const branchConflict = classifyGitExecutionFailure({
+    action: { kind: "branch", operation: "create", branchName: "feat/X" },
+    error: { status: 128, stderr: "fatal: A branch named 'feat/X' already exists." },
+    expectedState: { headBranch: "main" },
+    observedState: { headBranch: "main" },
+  });
+  assert.equal(branchConflict.code, FAILURE_CODES.BRANCH_CONFLICT);
+  assert.equal(typeof branchConflict.message, "string");
+  assert.equal(branchConflict.details.recoverable, true);
+  assert.equal(branchConflict.details.suggestedRecoveryKind, "switch-existing-branch");
+  assert.ok(
+    typeof branchConflict.details.stderrSummary === "string" &&
+      branchConflict.details.stderrSummary.length <= 240,
+    "classifier: stderr must be summarized, never raw passthrough",
+  );
+
+  // Branch post-condition mismatch → branch-switch-mismatch (no preflightDrift
+  // assertion, so the executor-side post-condition path is reachable).
+  const switchMismatch = classifyGitExecutionFailure({
+    action: { kind: "branch", operation: "switch", targetBranch: "feat/X" },
+    error: null,
+    expectedState: { headBranch: "feat/X" },
+    observedState: { headBranch: "main" },
+  });
+  assert.equal(switchMismatch.code, FAILURE_CODES.BRANCH_SWITCH_MISMATCH);
+  assert.equal(switchMismatch.details.recoverable, true);
+  assert.equal(switchMismatch.details.suggestedRecoveryKind, "manual-fix-branch");
+
+  // Detached HEAD post-condition still maps to branch-switch-mismatch.
+  const detached = classifyGitExecutionFailure({
+    action: { kind: "branch", operation: "switch", targetBranch: "feat/X" },
+    error: null,
+    expectedState: { headBranch: "feat/X" },
+    observedState: { headBranch: "(detached)", headDetached: true },
+  });
+  assert.equal(detached.code, FAILURE_CODES.BRANCH_SWITCH_MISMATCH);
+
+  // Commit / nothing-to-commit → commit-failure.
+  const commitNothing = classifyGitExecutionFailure({
+    action: { kind: "commit", operation: "commit" },
+    error: { status: 1, stdout: "nothing to commit, working tree clean" },
+  });
+  assert.equal(commitNothing.code, FAILURE_CODES.COMMIT_FAILURE);
+  assert.equal(commitNothing.details.recoverable, true);
+
+  // Push / non-fast-forward → push-rejection.
+  const pushReject = classifyGitExecutionFailure({
+    action: { kind: "push", operation: "push", branchName: "feat/X", remoteName: "origin" },
+    error: { status: 1, stderr: "! [rejected] feat/X -> feat/X (non-fast-forward)" },
+  });
+  assert.equal(pushReject.code, FAILURE_CODES.PUSH_REJECTION);
+  assert.equal(pushReject.details.recoverable, true);
+  assert.equal(pushReject.details.suggestedRecoveryKind, "retry-after-sync");
+
+  // Push / protected branch → push-rejection (non-recoverable hint).
+  const pushProtected = classifyGitExecutionFailure({
+    action: { kind: "push", operation: "push", branchName: "main", remoteName: "origin" },
+    error: { status: 1, stderr: "remote: error: GH006: Protected branch update failed" },
+  });
+  assert.equal(pushProtected.code, FAILURE_CODES.PUSH_REJECTION);
+  assert.equal(pushProtected.details.recoverable, false);
+
+  // Execution-unavailable wins over push semantics.
+  const execMissing = classifyGitExecutionFailure({
+    action: { kind: "push", operation: "push" },
+    error: { code: "ENOENT", message: "spawn git ENOENT" },
+  });
+  assert.equal(execMissing.code, FAILURE_CODES.EXECUTION_UNAVAILABLE);
+  assert.equal(execMissing.details.recoverable, false);
+
+  // Subprocess timeout → execution-unavailable.
+  const execTimeout = classifyGitExecutionFailure({
+    action: { kind: "commit", operation: "commit" },
+    error: { killed: true, signal: "SIGTERM" },
+  });
+  assert.equal(execTimeout.code, FAILURE_CODES.EXECUTION_UNAVAILABLE);
+
+  // Preflight drift wins over everything.
+  const drift = classifyGitExecutionFailure({
+    action: { kind: "commit", operation: "commit" },
+    preflightDrift: true,
+    expectedState: { headBranch: "feat/X", hasStagedChanges: true },
+    observedState: { headBranch: "main", hasStagedChanges: false },
+    error: { status: 1, stderr: "nothing to commit" },
+  });
+  assert.equal(drift.code, FAILURE_CODES.REPOSITORY_STATE_MISMATCH);
+
+  // Unknown action kind → unknown-git-failure.
+  const unknown = classifyGitExecutionFailure({
+    action: { kind: "weird", operation: "?" },
+    error: { status: 1 },
+  });
+  assert.equal(unknown.code, FAILURE_CODES.UNKNOWN_GIT_FAILURE);
+}
+
+/**
+ * Story 2.4: executor envelope shape — ok/status/action/code/message/details/
+ * audit/next must always be present.
+ */
+async function verifyGitExecutorEnvelopeShape() {
+  const { executeGitAction } = await import(
+    `${gitExecutorModuleUrl}?envelope-shape=${Date.now()}`
+  );
+
+  const envelope = await executeGitAction({
+    plan: { kind: "branch", operation: "switch", targetBranch: "feat/X", correlationId: "corr-1" },
+    expectedState: { headBranch: "feat/X" },
+    repositorySnapshot: { headBranch: "feat/X" },
+    workflowContext: { sessionID: "s-2-4-shape", commandName: "bmad-bmm-quick-dev", phase: "start" },
+    gitRunner: async () => ({ observedState: { headBranch: "feat/X" } }),
+  });
+
+  for (const key of ["ok", "status", "action", "code", "message", "details", "audit", "next"]) {
+    assert.ok(
+      Object.hasOwn(envelope, key),
+      `executor envelope must always include the "${key}" field`,
+    );
+  }
+  assert.equal(envelope.ok, true);
+  assert.equal(envelope.status, "succeeded");
+  assert.equal(envelope.code, null);
+  assert.equal(envelope.action.correlationId, "corr-1");
+  assert.equal(envelope.action.kind, "branch");
+  assert.equal(envelope.action.operation, "switch");
+  assert.equal(envelope.action.targetBranch, "feat/X");
+  assert.equal(envelope.next.continueWorkflow, true);
+  assert.equal(envelope.next.requiresRecoveryChoice, false);
+}
+
+/**
+ * Story 2.4: preflight drift short-circuits BEFORE the runner is invoked.
+ * Mutating execution against drifted state is unsafe and must produce
+ * repository-state-mismatch with no subprocess attempt.
+ */
+async function verifyGitExecutorPreflightShortCircuit() {
+  const { executeGitAction } = await import(
+    `${gitExecutorModuleUrl}?preflight=${Date.now()}`
+  );
+
+  let runnerCalls = 0;
+  const envelope = await executeGitAction({
+    plan: { kind: "commit", operation: "commit", correlationId: "corr-pf" },
+    expectedState: { headBranch: "feat/X", hasStagedChanges: true },
+    repositorySnapshot: { headBranch: "main", hasStagedChanges: false },
+    workflowContext: { sessionID: "s-2-4-pf", commandName: "bmad-bmm-quick-dev", phase: "start" },
+    gitRunner: async () => {
+      runnerCalls += 1;
+      return { stdout: "" };
+    },
+  });
+
+  assert.equal(runnerCalls, 0, "preflight drift must short-circuit BEFORE the runner is called");
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.status, "failed");
+  assert.equal(envelope.code, "repository-state-mismatch");
+  assert.equal(envelope.details.recoverable, true);
+  assert.equal(envelope.details.suggestedRecoveryKind, "re-evaluate-after-refresh");
+}
+
+/**
+ * Story 2.4: subprocess errors flow through the classifier and the executor
+ * envelope mirrors stable, machine-readable codes.
+ */
+async function verifyGitExecutorSubprocessFailureMapping() {
+  const { executeGitAction } = await import(
+    `${gitExecutorModuleUrl}?subproc-fail=${Date.now()}`
+  );
+
+  // Push / non-fast-forward.
+  const pushEnvelope = await executeGitAction({
+    plan: {
+      kind: "push",
+      operation: "push",
+      branchName: "feat/X",
+      remoteName: "origin",
+      correlationId: "corr-push",
+    },
+    expectedState: { headBranch: "feat/X", hasRemote: true },
+    repositorySnapshot: { headBranch: "feat/X", hasRemote: true },
+    workflowContext: { sessionID: "s-push", commandName: "bmad-bmm-quick-dev", phase: "start" },
+    gitRunner: async () => {
+      const error = new Error("git push rejected");
+      error.status = 1;
+      error.stderr = "! [rejected] feat/X -> feat/X (non-fast-forward)";
+      throw error;
+    },
+  });
+  assert.equal(pushEnvelope.ok, false);
+  assert.equal(pushEnvelope.code, "push-rejection");
+  assert.equal(typeof pushEnvelope.message, "string");
+  assert.equal(pushEnvelope.details.remoteName, "origin");
+  assert.equal(pushEnvelope.details.recoverable, true);
+  assert.equal(pushEnvelope.next.requiresRecoveryChoice, true);
+
+  // Commit / nothing to commit.
+  const commitEnvelope = await executeGitAction({
+    plan: { kind: "commit", operation: "commit", correlationId: "corr-commit" },
+    expectedState: { headBranch: "feat/X" },
+    repositorySnapshot: { headBranch: "feat/X" },
+    workflowContext: { sessionID: "s-commit", commandName: "bmad-bmm-quick-dev", phase: "start" },
+    gitRunner: async () => {
+      const error = new Error("git commit failed");
+      error.status = 1;
+      error.stdout = "nothing to commit, working tree clean";
+      throw error;
+    },
+  });
+  assert.equal(commitEnvelope.ok, false);
+  assert.equal(commitEnvelope.code, "commit-failure");
+
+  // Branch / create / already exists.
+  const branchEnvelope = await executeGitAction({
+    plan: {
+      kind: "branch",
+      operation: "create",
+      branchName: "feat/X",
+      correlationId: "corr-branch",
+    },
+    expectedState: { headBranch: "main" },
+    repositorySnapshot: { headBranch: "main" },
+    workflowContext: { sessionID: "s-branch", commandName: "bmad-bmm-quick-dev", phase: "start" },
+    gitRunner: async () => {
+      const error = new Error("branch exists");
+      error.status = 128;
+      error.stderr = "fatal: A branch named 'feat/X' already exists.";
+      throw error;
+    },
+  });
+  assert.equal(branchEnvelope.code, "branch-conflict");
+
+  // Subprocess spawn failure → execution-unavailable wins.
+  const execEnvelope = await executeGitAction({
+    plan: { kind: "push", operation: "push", correlationId: "corr-spawn" },
+    workflowContext: { sessionID: "s-exec", commandName: "bmad-bmm-quick-dev", phase: "start" },
+    gitRunner: async () => {
+      const error = new Error("spawn git ENOENT");
+      error.code = "ENOENT";
+      throw error;
+    },
+  });
+  assert.equal(execEnvelope.code, "execution-unavailable");
+  assert.equal(execEnvelope.details.recoverable, false);
+  assert.equal(
+    execEnvelope.next.requiresRecoveryChoice,
+    false,
+    "execution-unavailable failures cannot be addressed via runtime recovery choices",
+  );
+}
+
+/**
+ * Story 2.4: post-condition mismatch on a successful subprocess run still
+ * produces a failure envelope — branch landed on the wrong head.
+ */
+async function verifyGitExecutorPostConditionFailure() {
+  const { executeGitAction } = await import(
+    `${gitExecutorModuleUrl}?postcond=${Date.now()}`
+  );
+
+  const envelope = await executeGitAction({
+    plan: { kind: "branch", operation: "switch", targetBranch: "feat/X", correlationId: "corr-pc" },
+    expectedState: { headBranch: "feat/X" },
+    repositorySnapshot: { headBranch: "main" },
+    workflowContext: { sessionID: "s-pc", commandName: "bmad-bmm-quick-dev", phase: "start" },
+    // Runner reports success but observedState says HEAD never moved.
+    gitRunner: async () => ({ observedState: { headBranch: "main" } }),
+  });
+
+  // Preflight runs first — expected vs repositorySnapshot already disagree —
+  // so this case actually short-circuits as repository-state-mismatch. That is
+  // the correct contract: drift dominates, so the runner never gets invoked.
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.code, "repository-state-mismatch");
+
+  // Now a true post-condition failure: preflight matches, runner exits cleanly,
+  // but observedState afterwards differs from expectedState.
+  const postOnlyEnvelope = await executeGitAction({
+    plan: { kind: "branch", operation: "switch", targetBranch: "feat/X", correlationId: "corr-pc2" },
+    expectedState: { headBranch: "feat/X" },
+    repositorySnapshot: { headBranch: "feat/X" }, // preflight aligned
+    workflowContext: { sessionID: "s-pc2", commandName: "bmad-bmm-quick-dev", phase: "start" },
+    gitRunner: async () => ({ observedState: { headBranch: "main" } }),
+  });
+  assert.equal(postOnlyEnvelope.ok, false);
+  assert.equal(postOnlyEnvelope.code, "branch-switch-mismatch");
+  assert.equal(postOnlyEnvelope.details.recoverable, true);
+}
+
+/**
+ * Story 2.4: structured `git.action.executed` audit event payload — required
+ * fields plus best-effort behavior when the audit sink throws.
+ */
+async function verifyGitExecutorAuditEventPayload() {
+  const { executeGitAction } = await import(
+    `${gitExecutorModuleUrl}?audit=${Date.now()}`
+  );
+
+  const recorded = [];
+  const envelope = await executeGitAction({
+    plan: {
+      kind: "push",
+      operation: "push",
+      branchName: "feat/X",
+      remoteName: "origin",
+      correlationId: "corr-audit",
+    },
+    expectedState: { headBranch: "feat/X", hasRemote: true },
+    repositorySnapshot: { headBranch: "feat/X", hasRemote: true },
+    workflowContext: {
+      sessionID: "s-audit",
+      commandName: "bmad-bmm-quick-dev",
+      phase: "in-progress",
+    },
+    gitRunner: async () => {
+      const error = new Error("rejected");
+      error.status = 1;
+      error.stderr = "! [rejected] feat/X (non-fast-forward)";
+      throw error;
+    },
+    audit: {
+      async info(message, payload) {
+        recorded.push({ message, payload });
+      },
+    },
+  });
+
+  assert.equal(recorded.length, 1, "executor must emit exactly one git.action.executed event");
+  const [{ message, payload }] = recorded;
+  assert.equal(message, "git.action.executed");
+  assert.equal(payload.event, "git.action.executed");
+  assert.equal(typeof payload.timestamp, "string");
+  assert.equal(payload.workflow, "bmad-bmm-quick-dev");
+  assert.equal(payload.command, "bmad-bmm-quick-dev");
+  assert.equal(payload.outcome, "failed");
+  assert.equal(payload.details.actionKind, "push");
+  assert.equal(payload.details.operation, "push");
+  assert.equal(payload.details.code, "push-rejection");
+  assert.equal(payload.details.branch, "feat/X");
+  assert.equal(payload.details.remoteName, "origin");
+  assert.equal(payload.details.correlationId, "corr-audit");
+  assert.equal(payload.details.phase, "end");
+  assert.equal(payload.details.sessionID, "s-audit");
+  assert.equal(payload.details.recoverable, true);
+  assert.equal(typeof payload.details.stderrSummary, "string");
+  assert.ok(
+    !/\(non-fast-forward\)\n/.test(payload.details.stderrSummary),
+    "audit payload must not carry raw multi-line stderr",
+  );
+
+  assert.equal(envelope.audit.attempted, true);
+  assert.equal(envelope.audit.logged, true);
+  assert.equal(envelope.audit.loggingError, null);
+
+  // Best-effort: throwing audit sink must not corrupt the primary envelope.
+  const throwingEnvelope = await executeGitAction({
+    plan: {
+      kind: "push",
+      operation: "push",
+      branchName: "feat/X",
+      remoteName: "origin",
+      correlationId: "corr-audit-fail",
+    },
+    expectedState: { headBranch: "feat/X", hasRemote: true },
+    repositorySnapshot: { headBranch: "feat/X", hasRemote: true },
+    workflowContext: { sessionID: "s-audit-fail", commandName: "bmad-bmm-quick-dev", phase: "end" },
+    gitRunner: async () => {
+      const error = new Error("rejected");
+      error.status = 1;
+      error.stderr = "! [rejected]";
+      throw error;
+    },
+    audit: {
+      async info() {
+        throw new Error("audit sink unavailable");
+      },
+    },
+  });
+  assert.equal(throwingEnvelope.ok, false);
+  assert.equal(throwingEnvelope.code, "push-rejection");
+  assert.equal(throwingEnvelope.audit.attempted, true);
+  assert.equal(throwingEnvelope.audit.logged, false);
+  assert.equal(typeof throwingEnvelope.audit.loggingError, "string");
+}
+
+/**
+ * Story 2.4: workflowState mirror — executor persists lastGitAction /
+ * lastGitResult / lastGitFailure / pendingRecoveryContext, and get() deep
+ * clones each so external mutations cannot leak back into the store.
+ */
+async function verifyWorkflowStateExecutionMirror() {
+  const [{ createWorkflowStateStore }, { executeGitAction }] = await Promise.all([
+    import(`${workflowStateModuleUrl}?exec-mirror=${Date.now()}`),
+    import(`${gitExecutorModuleUrl}?exec-mirror=${Date.now()}`),
+  ]);
+
+  const store = createWorkflowStateStore();
+  store.set("s-exec-mirror", {
+    sessionID: "s-exec-mirror",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+    approvalCurrent: null,
+    approvalHistory: [],
+  });
+
+  await executeGitAction({
+    plan: {
+      kind: "push",
+      operation: "push",
+      branchName: "feat/X",
+      remoteName: "origin",
+      correlationId: "corr-mirror",
+    },
+    expectedState: { headBranch: "feat/X", hasRemote: true },
+    repositorySnapshot: { headBranch: "feat/X", hasRemote: true },
+    workflowContext: {
+      sessionID: "s-exec-mirror",
+      commandName: "bmad-bmm-quick-dev",
+      phase: "in-progress",
+    },
+    gitRunner: async () => {
+      const error = new Error("rejected");
+      error.status = 1;
+      error.stderr = "! [rejected] feat/X (non-fast-forward)";
+      throw error;
+    },
+    workflowState: store,
+  });
+
+  const after = store.get("s-exec-mirror");
+  assert.equal(after.approvalHistory?.length, 0, "execution must not touch approval history");
+  assert.equal(after.lastGitAction.kind, "push");
+  assert.equal(after.lastGitAction.operation, "push");
+  assert.equal(after.lastGitAction.correlationId, "corr-mirror");
+  assert.equal(after.lastGitResult.status, "failed");
+  assert.equal(after.lastGitResult.code, "push-rejection");
+  assert.equal(typeof after.lastGitResult.message, "string");
+  assert.equal(after.lastGitFailure.code, "push-rejection");
+  assert.equal(after.lastGitFailure.recoverable, true);
+  assert.equal(after.lastGitFailure.suggestedRecoveryKind, "retry-after-sync");
+  assert.equal(after.pendingRecoveryContext.source, "git-action-failure");
+  assert.equal(after.pendingRecoveryContext.correlationId, "corr-mirror");
+
+  // Mutating the returned snapshot must NOT leak back into the store.
+  after.lastGitResult.code = "tampered";
+  after.lastGitFailure.suggestedRecoveryKind = "tampered";
+  after.lastGitAction.branchName = "tampered";
+  after.pendingRecoveryContext.code = "tampered";
+  const refetched = store.get("s-exec-mirror");
+  assert.equal(refetched.lastGitResult.code, "push-rejection");
+  assert.equal(refetched.lastGitFailure.suggestedRecoveryKind, "retry-after-sync");
+  assert.equal(refetched.lastGitAction.branchName, "feat/X");
+  assert.equal(refetched.pendingRecoveryContext.code, "push-rejection");
+
+  // A subsequent successful execution clears lastGitFailure and the recovery
+  // context but still records lastGitAction / lastGitResult.
+  await executeGitAction({
+    plan: {
+      kind: "push",
+      operation: "push",
+      branchName: "feat/X",
+      remoteName: "origin",
+      correlationId: "corr-mirror-ok",
+    },
+    expectedState: { headBranch: "feat/X", hasRemote: true },
+    repositorySnapshot: { headBranch: "feat/X", hasRemote: true },
+    workflowContext: {
+      sessionID: "s-exec-mirror",
+      commandName: "bmad-bmm-quick-dev",
+      phase: "end",
+    },
+    gitRunner: async () => ({ observedState: { headBranch: "feat/X", hasRemote: true } }),
+    workflowState: store,
+  });
+  const okState = store.get("s-exec-mirror");
+  assert.equal(okState.lastGitResult.status, "succeeded");
+  assert.equal(okState.lastGitResult.code, null);
+  assert.equal(okState.lastGitFailure, null);
+  assert.equal(okState.pendingRecoveryContext, null);
+}
+
+/**
+ * Story 2.4: commit-service / push-service produce normalized envelopes only —
+ * no ad-hoc throws, no raw stderr leakage, and the action.kind is fixed.
+ */
+async function verifyCommitAndPushServicesSurfaceEnvelopes() {
+  const [commitModule, pushModule] = await Promise.all([
+    import(`${commitServiceModuleUrl}?services=${Date.now()}`),
+    import(`${pushServiceModuleUrl}?services=${Date.now()}`),
+  ]);
+
+  const commitEnvelope = await commitModule.executeCommit({
+    plan: commitModule.buildCommitAction({
+      message: "chore: smoke",
+      branchName: "feat/X",
+      correlationId: "corr-svc-commit",
+    }),
+    expectedState: { headBranch: "feat/X" },
+    repositorySnapshot: { headBranch: "feat/X" },
+    workflowContext: { sessionID: "s-svc-commit", commandName: "bmad-bmm-quick-dev", phase: "end" },
+    gitRunner: async () => {
+      const error = new Error("hook reject");
+      error.status = 1;
+      error.stderr = "pre-commit hook failed";
+      throw error;
+    },
+  });
+  assert.equal(commitEnvelope.action.kind, "commit");
+  assert.equal(commitEnvelope.action.operation, "commit");
+  assert.equal(commitEnvelope.code, "commit-failure");
+  assert.equal(commitEnvelope.action.correlationId, "corr-svc-commit");
+
+  const pushEnvelope = await pushModule.executePush({
+    plan: pushModule.buildPushAction({
+      branchName: "feat/X",
+      remoteName: "origin",
+      correlationId: "corr-svc-push",
+    }),
+    expectedState: { headBranch: "feat/X", hasRemote: true },
+    repositorySnapshot: { headBranch: "feat/X", hasRemote: true },
+    workflowContext: { sessionID: "s-svc-push", commandName: "bmad-bmm-quick-dev", phase: "end" },
+    gitRunner: async () => ({ observedState: { headBranch: "feat/X", hasRemote: true } }),
+  });
+  assert.equal(pushEnvelope.action.kind, "push");
+  assert.equal(pushEnvelope.action.remoteName, "origin");
+  assert.equal(pushEnvelope.ok, true);
+  assert.equal(pushEnvelope.status, "succeeded");
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Story 2.5 — recovery paths without failing the workflow
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Story 2.5: recovery-state state-machine guarantees.
+ * - planned -> awaitingApproval -> approved -> executing -> completed
+ * - awaitingRecovery -> retryRequested -> planned (attempt resets)
+ * - awaitingRecovery -> continuedWithoutAutomation (terminal)
+ * - awaitingRecovery -> awaitingManualResolution -> continuedAfterManualResolution
+ * - illegal jumps (e.g. completed -> planned) are rejected
+ */
+async function verifyRecoveryStateMachineContracts() {
+  const {
+    RECOVERY_STATES,
+    RECOVERY_CHOICES,
+    BLOCKING_SCOPES,
+    isRecoveryState,
+    isTerminalRecoveryState,
+    isRecoveryChoice,
+    intentStateForChoice,
+    validateRecoveryTransition,
+    defaultBlockingScopeFor,
+  } = await import(`${recoveryStateModuleUrl}?v25-state=${Date.now()}`);
+
+  // Vocabulary completeness — the spec calls out exactly these states.
+  for (const expected of [
+    "planned",
+    "awaitingApproval",
+    "approved",
+    "executing",
+    "failed",
+    "awaitingRecovery",
+    "retryRequested",
+    "continuedWithoutAutomation",
+    "awaitingManualResolution",
+    "continuedAfterManualResolution",
+    "completed",
+    "abandoned",
+  ]) {
+    assert.equal(isRecoveryState(expected), true, `state ${expected} must be valid`);
+  }
+  assert.equal(isRecoveryState("yolo"), false);
+
+  // Terminal states.
+  for (const t of ["completed", "continuedWithoutAutomation", "continuedAfterManualResolution", "abandoned"]) {
+    assert.equal(isTerminalRecoveryState(t), true, `${t} must be terminal`);
+  }
+  assert.equal(isTerminalRecoveryState("awaitingRecovery"), false);
+
+  // Allowed canonical progression.
+  assert.deepEqual(
+    validateRecoveryTransition(RECOVERY_STATES.PLANNED, RECOVERY_STATES.AWAITING_APPROVAL),
+    { ok: true },
+  );
+  assert.deepEqual(
+    validateRecoveryTransition(RECOVERY_STATES.AWAITING_RECOVERY, RECOVERY_STATES.RETRY_REQUESTED),
+    { ok: true },
+  );
+  assert.deepEqual(
+    validateRecoveryTransition(RECOVERY_STATES.RETRY_REQUESTED, RECOVERY_STATES.PLANNED),
+    { ok: true },
+  );
+  assert.deepEqual(
+    validateRecoveryTransition(
+      RECOVERY_STATES.AWAITING_MANUAL_RESOLUTION,
+      RECOVERY_STATES.CONTINUED_AFTER_MANUAL_RESOLUTION,
+    ),
+    { ok: true },
+  );
+
+  // Illegal transitions stay rejected.
+  const illegal = validateRecoveryTransition(
+    RECOVERY_STATES.COMPLETED,
+    RECOVERY_STATES.PLANNED,
+  );
+  assert.equal(illegal.ok, false);
+  assert.equal(illegal.reason, "transition-not-allowed");
+
+  const garbage = validateRecoveryTransition("yolo", RECOVERY_STATES.PLANNED);
+  assert.equal(garbage.ok, false);
+  assert.equal(garbage.reason, "invalid-previous-state");
+
+  // Choice → intent state mapping.
+  assert.equal(intentStateForChoice(RECOVERY_CHOICES.RETRY), RECOVERY_STATES.RETRY_REQUESTED);
+  assert.equal(
+    intentStateForChoice(RECOVERY_CHOICES.CONTINUE_WITHOUT_AUTOMATION),
+    RECOVERY_STATES.CONTINUED_WITHOUT_AUTOMATION,
+  );
+  assert.equal(
+    intentStateForChoice(RECOVERY_CHOICES.MANUAL_RESOLUTION),
+    RECOVERY_STATES.AWAITING_MANUAL_RESOLUTION,
+  );
+  assert.equal(intentStateForChoice(RECOVERY_CHOICES.ABANDON), RECOVERY_STATES.ABANDONED);
+  assert.equal(intentStateForChoice("nope"), null);
+  assert.equal(isRecoveryChoice(RECOVERY_CHOICES.RETRY), true);
+  assert.equal(isRecoveryChoice("nope"), false);
+
+  // Default blocking scope rules.
+  assert.equal(defaultBlockingScopeFor("init"), BLOCKING_SCOPES.SESSION_GIT);
+  assert.equal(defaultBlockingScopeFor("commit"), BLOCKING_SCOPES.WORKFLOW_FINALIZATION);
+  assert.equal(defaultBlockingScopeFor("branch"), BLOCKING_SCOPES.GIT_ONLY);
+  assert.equal(defaultBlockingScopeFor("push"), BLOCKING_SCOPES.GIT_ONLY);
+}
+
+/**
+ * Story 2.5: recoverable vs non-recoverable classification.
+ * - approval deny / ignore → recoverable, recommends continue-without-automation
+ * - branch-conflict / push-rejection (recoverable=true on Story 2.4 envelope)
+ *   → recoverable; recommendedChoice mapped from suggestedRecoveryKind
+ * - execution-unavailable → non-recoverable, session-git blocked
+ * - unknown-git-failure → non-recoverable
+ * - invariant violation (cross-session, missing kind) → non-recoverable
+ */
+async function verifyClassifyRecoveryContracts() {
+  const {
+    classifyApprovalRecovery,
+    classifyExecutionRecovery,
+    classifyInvariantViolation,
+  } = await import(`${classifyRecoveryModuleUrl}?v25-classify=${Date.now()}`);
+
+  // Approval deny — recoverable continue-without-automation, GIT_ONLY scope
+  // for non-init actions.
+  const denyClass = classifyApprovalRecovery({
+    approvalOutcome: "deny",
+    actionKind: "branch",
+    actionId: "action:branch/create:feat",
+    sessionID: "s-25-deny",
+  });
+  assert.equal(denyClass.recoverable, true);
+  assert.equal(denyClass.reason, "approval-denied");
+  assert.equal(denyClass.recommendedChoice, "continue-without-automation");
+  assert.equal(denyClass.blockingScope, "git-only");
+
+  // Approval ignore on init — session-git scope.
+  const ignoreInit = classifyApprovalRecovery({
+    approvalOutcome: "ignore-and-continue",
+    actionKind: "init",
+    sessionID: "s-25-ignore-init",
+  });
+  assert.equal(ignoreInit.recoverable, true);
+  assert.equal(ignoreInit.reason, "approval-ignored");
+  assert.equal(ignoreInit.blockingScope, "session-git");
+
+  // Approval accept must NOT be classified as recovery — it is a successful path.
+  const accept = classifyApprovalRecovery({
+    approvalOutcome: "accept",
+    actionKind: "branch",
+  });
+  assert.equal(accept.recoverable, false);
+  assert.equal(accept.reason, "approval-outcome-not-recoverable");
+
+  // Recoverable execution failure (push-rejection with retry-after-sync).
+  const recoverableEnvelope = {
+    ok: false,
+    status: "failed",
+    action: {
+      kind: "push",
+      operation: "push",
+      branchName: "feat/X",
+      remoteName: "origin",
+      correlationId: "corr-rec-push",
+    },
+    code: "push-rejection",
+    message: "remote rejected non-fast-forward",
+    details: {
+      recoverable: true,
+      suggestedRecoveryKind: "retry-after-sync",
+      expectedState: { headBranch: "feat/X" },
+      observedState: { headBranch: "feat/X" },
+    },
+  };
+  const recExec = classifyExecutionRecovery({
+    envelope: recoverableEnvelope,
+    sessionID: "s-25-rec",
+  });
+  assert.equal(recExec.recoverable, true);
+  assert.equal(recExec.reason, "push-rejection");
+  assert.equal(recExec.recommendedChoice, "retry");
+  assert.equal(recExec.blockingScope, "git-only");
+
+  // Non-recoverable: execution-unavailable.
+  const execUnavailable = classifyExecutionRecovery({
+    envelope: {
+      ok: false,
+      status: "failed",
+      action: { kind: "branch", operation: "create", correlationId: "corr-eu" },
+      code: "execution-unavailable",
+      details: {
+        recoverable: false,
+        suggestedRecoveryKind: "fix-environment",
+      },
+    },
+    sessionID: "s-25-exec-unavail",
+  });
+  assert.equal(execUnavailable.recoverable, false);
+  assert.equal(execUnavailable.reason, "execution-unavailable");
+  assert.equal(execUnavailable.recommendedChoice, null);
+  assert.equal(execUnavailable.blockingScope, "session-git");
+
+  // Non-recoverable: unknown-git-failure.
+  const unknown = classifyExecutionRecovery({
+    envelope: {
+      ok: false,
+      status: "failed",
+      action: { kind: "init", correlationId: "corr-unk" },
+      code: "unknown-git-failure",
+      details: { recoverable: false },
+    },
+    sessionID: "s-25-unknown",
+  });
+  assert.equal(unknown.recoverable, false);
+  assert.equal(unknown.reason, "unknown-git-failure");
+
+  // Story 2.4 says recoverable=false even though code may be a known one
+  // (e.g. push-rejection caused by branch-protection / authentication).
+  // Story 2.5 must respect the upstream recoverable flag.
+  const protectedPush = classifyExecutionRecovery({
+    envelope: {
+      ok: false,
+      status: "failed",
+      action: { kind: "push", correlationId: "corr-protected" },
+      code: "push-rejection",
+      details: { recoverable: false, suggestedRecoveryKind: "manual-credentials" },
+    },
+    sessionID: "s-25-protected",
+  });
+  assert.equal(protectedPush.recoverable, false);
+  assert.equal(protectedPush.recommendedChoice, null);
+
+  // Envelope.ok === true is not a recovery candidate.
+  const successCase = classifyExecutionRecovery({
+    envelope: { ok: true, status: "succeeded", action: { kind: "branch" } },
+  });
+  assert.equal(successCase.recoverable, false);
+  assert.equal(successCase.reason, "envelope-not-failed");
+
+  // Invariant violation always non-recoverable.
+  const violation = classifyInvariantViolation({
+    reason: "session-mismatch",
+    sessionID: "s-actual",
+    actionKind: "branch",
+    actionId: "stale-action-id",
+    detail: { stale: true },
+  });
+  assert.equal(violation.recoverable, false);
+  assert.equal(violation.reason, "session-mismatch");
+  assert.equal(violation.recommendedChoice, null);
+  assert.equal(violation.details.source, "invariant");
+}
+
+/**
+ * Story 2.5: action-specific recovery options for branch/init/commit/push.
+ * Every option must include user-facing instructions and the canonical
+ * nextState. Non-recoverable failures collapse to a single `abandon` option.
+ */
+async function verifyRecoveryOptionsContracts() {
+  const { buildRecoveryOptions } = await import(
+    `${buildRecoveryOptionsModuleUrl}?v25-opts=${Date.now()}`
+  );
+
+  const branchOpts = buildRecoveryOptions({
+    actionKind: "branch",
+    operation: "switch",
+    recoverable: true,
+    recommendedChoice: "manual-resolution",
+  });
+  assert.equal(branchOpts.length, 3);
+  for (const opt of branchOpts) {
+    assert.equal(typeof opt.instructions, "string");
+    assert.ok(opt.instructions.length > 0, "branch option must include instructions");
+    assert.ok(typeof opt.nextState === "string" && opt.nextState.length > 0);
+  }
+  const branchManual = branchOpts.find((o) => o.choice === "manual-resolution");
+  assert.equal(branchManual.recommended, true, "recommendedChoice must be flagged");
+
+  const initOpts = buildRecoveryOptions({
+    actionKind: "init",
+    recoverable: true,
+    recommendedChoice: "retry",
+  });
+  assert.equal(initOpts.length, 3);
+  for (const opt of initOpts) {
+    assert.equal(opt.blockingScope, "session-git", "init recovery options block whole session Git automation");
+  }
+
+  const commitOpts = buildRecoveryOptions({
+    actionKind: "commit",
+    recoverable: true,
+  });
+  assert.equal(commitOpts.length, 3);
+  for (const opt of commitOpts) {
+    assert.equal(opt.blockingScope, "workflow-finalization");
+  }
+
+  const pushOpts = buildRecoveryOptions({
+    actionKind: "push",
+    recoverable: true,
+  });
+  assert.equal(pushOpts.length, 3);
+  for (const opt of pushOpts) {
+    assert.equal(opt.blockingScope, "git-only");
+  }
+
+  const nonRec = buildRecoveryOptions({
+    actionKind: "push",
+    recoverable: false,
+  });
+  assert.equal(nonRec.length, 1);
+  assert.equal(nonRec[0].choice, "abandon");
+  assert.equal(nonRec[0].recommended, true);
+
+  const unknownKind = buildRecoveryOptions({
+    actionKind: "yolo",
+    recoverable: true,
+  });
+  assert.equal(unknownKind.length, 1);
+  assert.equal(unknownKind[0].choice, "abandon");
+}
+
+/**
+ * Story 2.5: recovery orchestrator opens a gate from a denied approval and
+ * emits git.action.recovery.offered with the expected envelope shape.
+ */
+async function verifyOpenRecoveryFromApprovalDeny() {
+  const [{ createWorkflowStateStore }, { openRecoveryFromApproval }] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v25-deny=${Date.now()}`),
+    import(`${recoveryOrchestratorModuleUrl}?v25-deny=${Date.now()}`),
+  ]);
+  const store = createWorkflowStateStore();
+  store.set("s-25-deny", { sessionID: "s-25-deny", commandName: "bmad-bmm-quick-dev", phase: "start" });
+
+  const events = [];
+  const audit = {
+    async info(name, payload) {
+      events.push(payload);
+    },
+  };
+
+  const result = await openRecoveryFromApproval({
+    workflowState: store,
+    sessionID: "s-25-deny",
+    approvalOutcome: "deny",
+    actionKind: "branch",
+    actionId: "action:branch/create:feat",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    audit,
+  });
+  assert.equal(result.outcome, "opened");
+  assert.equal(result.gate.state, "awaitingRecovery");
+  assert.equal(result.gate.recoverable, true);
+  assert.equal(result.gate.reason, "approval-denied");
+  assert.equal(result.gate.blockingScope, "git-only");
+  assert.equal(result.gate.actionKind, "branch");
+  assert.equal(result.gate.attempt, 1);
+  assert.equal(result.gate.options.length, 3);
+
+  // git.action.recovery.offered audit event must follow the existing envelope
+  // (event/timestamp/workflow/command/outcome/details), with all required
+  // recovery details fields present.
+  assert.equal(events.length, 1);
+  const offered = events[0];
+  assert.equal(offered.event, "git.action.recovery.offered");
+  assert.equal(typeof offered.timestamp, "string");
+  assert.equal(offered.workflow, "bmad-bmm-quick-dev");
+  assert.equal(offered.command, "bmad-bmm-quick-dev");
+  assert.equal(offered.outcome, "ask");
+  assert.equal(offered.details.actionKind, "branch");
+  assert.equal(offered.details.actionId, "action:branch/create:feat");
+  assert.equal(offered.details.failureCode, "approval-denied");
+  assert.equal(offered.details.recoverable, true);
+  assert.equal(offered.details.attempt, 1);
+  assert.deepEqual(
+    offered.details.offeredChoices.sort(),
+    ["continue-without-automation", "manual-resolution", "retry"].sort(),
+  );
+  assert.equal(offered.details.recommendedChoice, "continue-without-automation");
+
+  // Re-opening while a non-terminal gate exists must skip.
+  const dup = await openRecoveryFromApproval({
+    workflowState: store,
+    sessionID: "s-25-deny",
+    approvalOutcome: "deny",
+    actionKind: "branch",
+  });
+  assert.equal(dup.outcome, "skip");
+  assert.equal(dup.reason, "gate-already-open");
+}
+
+/**
+ * Story 2.5: orchestrator opens a gate from a Story 2.4 executor failure
+ * envelope, classifies the failure, and emits offered/blocked accordingly.
+ */
+async function verifyOpenRecoveryFromExecution() {
+  const [{ createWorkflowStateStore }, orch] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v25-exec=${Date.now()}`),
+    import(`${recoveryOrchestratorModuleUrl}?v25-exec=${Date.now()}`),
+  ]);
+  const store = createWorkflowStateStore();
+  store.set("s-25-exec", { sessionID: "s-25-exec", commandName: "bmad-bmm-quick-dev", phase: "in-progress" });
+
+  const events = [];
+  const audit = {
+    async info(_name, payload) {
+      events.push(payload);
+    },
+  };
+
+  // Recoverable push-rejection -> opens awaitingRecovery, emits offered.
+  const recoverable = await orch.openRecoveryFromExecution({
+    workflowState: store,
+    sessionID: "s-25-exec",
+    envelope: {
+      ok: false,
+      status: "failed",
+      action: { kind: "push", operation: "push", correlationId: "corr-exec-push", branchName: "feat/X", remoteName: "origin" },
+      code: "push-rejection",
+      message: "remote rejected non-fast-forward",
+      details: { recoverable: true, suggestedRecoveryKind: "retry-after-sync" },
+    },
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    audit,
+  });
+  assert.equal(recoverable.outcome, "opened");
+  assert.equal(recoverable.gate.state, "awaitingRecovery");
+  assert.equal(recoverable.gate.actionKind, "push");
+  assert.equal(recoverable.gate.recommendedChoice, "retry");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "git.action.recovery.offered");
+  assert.equal(events[0].details.failureCode, "push-rejection");
+
+  // Clear the gate before testing the non-recoverable path.
+  orch.clearRecoveryGate(store, "s-25-exec");
+
+  // Non-recoverable execution-unavailable -> opens & immediately blocks.
+  events.length = 0;
+  const blocked = await orch.openRecoveryFromExecution({
+    workflowState: store,
+    sessionID: "s-25-exec",
+    envelope: {
+      ok: false,
+      status: "failed",
+      action: { kind: "branch", operation: "create", correlationId: "corr-eu-branch" },
+      code: "execution-unavailable",
+      message: "git not found",
+      details: { recoverable: false, suggestedRecoveryKind: "fix-environment" },
+    },
+    audit,
+  });
+  // Story 2.5 (LOW review): non-recoverable opens return `outcome: "blocked"`
+  // so callers can distinguish them from `_openRecoverableGate`'s `"opened"`,
+  // which always denotes a gate still awaiting a user decision.
+  assert.equal(blocked.outcome, "blocked");
+  assert.equal(blocked.gate.state, "abandoned");
+  assert.equal(blocked.gate.recoverable, false);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "git.action.recovery.blocked");
+  assert.equal(events[0].outcome, "deny");
+  assert.equal(events[0].details.failureCode, "execution-unavailable");
+}
+
+/**
+ * Story 2.5: selecting `retry` increments attempt counter, transitions to
+ * `planned`, and emits selected + completed.
+ */
+async function verifySelectRetryIncrementsAttempt() {
+  const [{ createWorkflowStateStore }, orch] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v25-retry=${Date.now()}`),
+    import(`${recoveryOrchestratorModuleUrl}?v25-retry=${Date.now()}`),
+  ]);
+  const store = createWorkflowStateStore();
+  store.set("s-25-retry", { sessionID: "s-25-retry", commandName: "bmad-bmm-quick-dev", phase: "in-progress" });
+
+  await orch.openRecoveryFromApproval({
+    workflowState: store,
+    sessionID: "s-25-retry",
+    approvalOutcome: "deny",
+    actionKind: "branch",
+    actionId: "action:branch/create:retry",
+  });
+
+  const events = [];
+  const audit = {
+    async info(_name, payload) {
+      events.push(payload);
+    },
+  };
+  const result = await orch.selectRecoveryChoice({
+    workflowState: store,
+    sessionID: "s-25-retry",
+    choice: "retry",
+    audit,
+  });
+  assert.equal(result.outcome, "selected");
+  assert.equal(result.gate.state, "planned");
+  assert.equal(result.gate.attempt, 2);
+  assert.equal(typeof result.gate.resolvedAt, "string");
+
+  assert.equal(events.length, 2);
+  assert.equal(events[0].event, "git.action.recovery.selected");
+  assert.equal(events[0].details.choice, "retry");
+  assert.equal(events[0].details.previousState, "awaitingRecovery");
+  assert.equal(events[0].details.requiresRecheck, true);
+  assert.equal(events[1].event, "git.action.recovery.completed");
+  assert.equal(events[1].details.terminalState, "planned");
+
+  // History contains the full progression including retryRequested + planned.
+  const states = result.gate.history.map((h) => h.state);
+  assert.deepEqual(states, ["awaitingRecovery", "retryRequested", "planned"]);
+
+  // Story 2.5 (HIGH+LOW review): retry must clear the gate from the store so
+  // the next planning pass is NOT blocked by the historical recovery state.
+  // Without this, `command-execute-before` would call `isActionBlockedByGate`
+  // on a stale gate (state: "planned", blockingScope: "git-only",
+  // actionKind: "branch") and emit `git.action.recovery.blocked` instead of
+  // republishing the approval. Verify both that the gate is absent AND that
+  // `isActionBlockedByGate` confirms the same action kind is unblocked.
+  const postRetryGate = orch.readRecoveryGate(store, "s-25-retry");
+  assert.equal(postRetryGate, null, "retry must clear the recovery gate from the store");
+  assert.equal(
+    orch.isActionBlockedByGate(postRetryGate, "branch").blocked,
+    false,
+    "after retry the same action kind must be unblocked for fresh planning",
+  );
+
+  // A fresh approval cycle can re-open a gate on the same session immediately
+  // after retry — i.e. retry truly closed the previous gate, it did not just
+  // mute the gating check.
+  const reopen = await orch.openRecoveryFromApproval({
+    workflowState: store,
+    sessionID: "s-25-retry",
+    approvalOutcome: "deny",
+    actionKind: "branch",
+    actionId: "action:branch/create:retry-2",
+  });
+  assert.equal(reopen.outcome, "opened");
+  assert.equal(reopen.gate.state, "awaitingRecovery");
+  assert.notEqual(
+    reopen.gate.gateId,
+    result.gate.gateId,
+    "fresh gate id is required after a retry-cleared gate",
+  );
+}
+
+/**
+ * Story 2.5: continue-without-automation reaches the terminal continuation
+ * state and emits selected + completed.
+ */
+async function verifySelectContinueWithoutAutomation() {
+  const [{ createWorkflowStateStore }, orch] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v25-cont=${Date.now()}`),
+    import(`${recoveryOrchestratorModuleUrl}?v25-cont=${Date.now()}`),
+  ]);
+  const store = createWorkflowStateStore();
+  store.set("s-25-cont", { sessionID: "s-25-cont", commandName: "bmad-bmm-quick-dev", phase: "in-progress" });
+
+  await orch.openRecoveryFromApproval({
+    workflowState: store,
+    sessionID: "s-25-cont",
+    approvalOutcome: "ignore-and-continue",
+    actionKind: "branch",
+  });
+
+  const events = [];
+  const audit = {
+    async info(_n, e) {
+      events.push(e);
+    },
+  };
+  const result = await orch.selectRecoveryChoice({
+    workflowState: store,
+    sessionID: "s-25-cont",
+    choice: "continue-without-automation",
+    audit,
+  });
+  assert.equal(result.outcome, "selected");
+  assert.equal(result.gate.state, "continuedWithoutAutomation");
+  assert.equal(events.length, 2);
+  assert.equal(events[0].event, "git.action.recovery.selected");
+  assert.equal(events[1].event, "git.action.recovery.completed");
+  assert.equal(events[1].details.terminalState, "continuedWithoutAutomation");
+}
+
+/**
+ * Story 2.5: manual-resolution can be deferred (verifyManual=false) leaving
+ * the gate in awaitingManualResolution, then later confirmed via
+ * confirmManualResolution which transitions to continuedAfterManualResolution.
+ */
+async function verifyManualResolutionTwoStep() {
+  const [{ createWorkflowStateStore }, orch] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v25-manual=${Date.now()}`),
+    import(`${recoveryOrchestratorModuleUrl}?v25-manual=${Date.now()}`),
+  ]);
+  const store = createWorkflowStateStore();
+  store.set("s-25-manual", { sessionID: "s-25-manual", commandName: "bmad-bmm-quick-dev", phase: "in-progress" });
+
+  await orch.openRecoveryFromApproval({
+    workflowState: store,
+    sessionID: "s-25-manual",
+    approvalOutcome: "deny",
+    actionKind: "init",
+  });
+
+  const stepOne = await orch.selectRecoveryChoice({
+    workflowState: store,
+    sessionID: "s-25-manual",
+    choice: "manual-resolution",
+  });
+  assert.equal(stepOne.outcome, "selected");
+  assert.equal(stepOne.gate.state, "awaitingManualResolution");
+  assert.equal(stepOne.gate.continuationPhase, "selected");
+
+  const stepTwo = await orch.confirmManualResolution({
+    workflowState: store,
+    sessionID: "s-25-manual",
+  });
+  assert.equal(stepTwo.outcome, "completed");
+  assert.equal(stepTwo.gate.state, "continuedAfterManualResolution");
+
+  // Single-step manual-resolution: verifyManual=true reaches terminal directly.
+  const otherStore = createWorkflowStateStore();
+  otherStore.set("s-25-manual-2", { sessionID: "s-25-manual-2", commandName: "bmad-bmm-quick-dev", phase: "in-progress" });
+  await orch.openRecoveryFromApproval({
+    workflowState: otherStore,
+    sessionID: "s-25-manual-2",
+    approvalOutcome: "deny",
+    actionKind: "init",
+  });
+  const oneShot = await orch.selectRecoveryChoice({
+    workflowState: otherStore,
+    sessionID: "s-25-manual-2",
+    choice: "manual-resolution",
+    verifyManual: true,
+  });
+  assert.equal(oneShot.outcome, "selected");
+  assert.equal(oneShot.gate.state, "continuedAfterManualResolution");
+}
+
+/**
+ * Story 2.5: gate-blocking rules per action kind.
+ * - init blocks ALL later Git automation in same session
+ * - branch blocks only same-action retry; unrelated kinds proceed
+ * - commit blocks workflow finalization (push/commit) but not branch
+ * - terminal gate stops blocking
+ */
+async function verifyGateBlockingRules() {
+  const [{ createWorkflowStateStore }, orch] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v25-block=${Date.now()}`),
+    import(`${recoveryOrchestratorModuleUrl}?v25-block=${Date.now()}`),
+  ]);
+
+  // init gate.
+  const storeInit = createWorkflowStateStore();
+  storeInit.set("s-25-init-block", { sessionID: "s-25-init-block", commandName: "bmad-bmm-quick-dev", phase: "start" });
+  await orch.openRecoveryFromApproval({
+    workflowState: storeInit,
+    sessionID: "s-25-init-block",
+    approvalOutcome: "deny",
+    actionKind: "init",
+  });
+  const initGate = orch.readRecoveryGate(storeInit, "s-25-init-block");
+  assert.equal(orch.isActionBlockedByGate(initGate, "branch").blocked, true);
+  assert.equal(orch.isActionBlockedByGate(initGate, "commit").blocked, true);
+  assert.equal(orch.isActionBlockedByGate(initGate, "push").blocked, true);
+
+  // branch gate.
+  const storeBranch = createWorkflowStateStore();
+  storeBranch.set("s-25-branch-block", { sessionID: "s-25-branch-block", commandName: "bmad-bmm-quick-dev", phase: "start" });
+  await orch.openRecoveryFromApproval({
+    workflowState: storeBranch,
+    sessionID: "s-25-branch-block",
+    approvalOutcome: "deny",
+    actionKind: "branch",
+  });
+  const branchGate = orch.readRecoveryGate(storeBranch, "s-25-branch-block");
+  assert.equal(orch.isActionBlockedByGate(branchGate, "branch").blocked, true);
+  // Different action kinds proceed (branch gate scope = git-only).
+  assert.equal(orch.isActionBlockedByGate(branchGate, "init").blocked, false);
+
+  // commit gate (workflow-finalization scope).
+  const storeCommit = createWorkflowStateStore();
+  storeCommit.set("s-25-commit-block", { sessionID: "s-25-commit-block", commandName: "bmad-bmm-quick-dev", phase: "in-progress" });
+  await orch.openRecoveryFromApproval({
+    workflowState: storeCommit,
+    sessionID: "s-25-commit-block",
+    approvalOutcome: "deny",
+    actionKind: "commit",
+  });
+  const commitGate = orch.readRecoveryGate(storeCommit, "s-25-commit-block");
+  assert.equal(orch.isActionBlockedByGate(commitGate, "commit").blocked, true);
+  assert.equal(orch.isActionBlockedByGate(commitGate, "push").blocked, true);
+  // Branch progress allowed even with commit gate open.
+  assert.equal(orch.isActionBlockedByGate(commitGate, "branch").blocked, false);
+
+  // After the gate is resolved (continue-without-automation), it stops blocking.
+  await orch.selectRecoveryChoice({
+    workflowState: storeCommit,
+    sessionID: "s-25-commit-block",
+    choice: "continue-without-automation",
+  });
+  const closedGate = orch.readRecoveryGate(storeCommit, "s-25-commit-block");
+  assert.equal(orch.isActionBlockedByGate(closedGate, "commit").blocked, false);
+  assert.equal(orch.isActionBlockedByGate(closedGate, "push").blocked, false);
+}
+
+/**
+ * Story 2.5: invariant violations (missing action kind, cross-session select)
+ * never throw and always emit git.action.recovery.blocked.
+ */
+async function verifyInvariantViolationsAreBlockedNotThrown() {
+  const [{ createWorkflowStateStore }, orch] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v25-inv=${Date.now()}`),
+    import(`${recoveryOrchestratorModuleUrl}?v25-inv=${Date.now()}`),
+  ]);
+  const store = createWorkflowStateStore();
+  store.set("s-25-inv", { sessionID: "s-25-inv", commandName: "bmad-bmm-quick-dev", phase: "start" });
+
+  const events = [];
+  const audit = {
+    async info(_n, e) {
+      events.push(e);
+    },
+  };
+  const missingKind = await orch.openRecoveryFromApproval({
+    workflowState: store,
+    sessionID: "s-25-inv",
+    approvalOutcome: "deny",
+    actionKind: "yolo", // not a recovery action kind
+    audit,
+  });
+  // Story 2.5 (LOW review): controlled-stop opens are tagged "blocked" so
+  // callers branching on the result do not assume the gate is still open.
+  assert.equal(missingKind.outcome, "blocked");
+  assert.equal(missingKind.gate.state, "abandoned");
+  assert.equal(missingKind.gate.recoverable, false);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "git.action.recovery.blocked");
+
+  // Selection on wrong session id is also blocked, not thrown.
+  // Open a real gate, then craft a stale gate-payload by hand-tampering the
+  // store: set sessionID on the gate to something else.
+  const otherStore = createWorkflowStateStore();
+  otherStore.set("s-25-other", { sessionID: "s-25-other", commandName: "bmad-bmm-quick-dev", phase: "start" });
+  await orch.openRecoveryFromApproval({
+    workflowState: otherStore,
+    sessionID: "s-25-other",
+    approvalOutcome: "deny",
+    actionKind: "branch",
+  });
+  const stored = otherStore.get("s-25-other");
+  // Forge: set the gate.sessionID to a different session, then re-store.
+  otherStore.set("s-25-other", {
+    ...stored,
+    recoveryGate: { ...stored.recoveryGate, sessionID: "s-other-stale" },
+  });
+  events.length = 0;
+  const cross = await orch.selectRecoveryChoice({
+    workflowState: otherStore,
+    sessionID: "s-25-other",
+    choice: "retry",
+    audit,
+  });
+  assert.equal(cross.outcome, "skip");
+  assert.equal(cross.reason, "session-mismatch");
+  // The forged gate has been abandoned and a blocked event emitted.
+  const blockedEvents = events.filter((e) => e.event === "git.action.recovery.blocked");
+  assert.equal(blockedEvents.length, 1);
+}
+
+/**
+ * Story 2.5: workflowState mirror — recoveryGate is deep-cloned on get so
+ * external mutations cannot leak back into the store, AND session.deleted
+ * cleanup (workflowState.clear) wipes the gate alongside other session data.
+ */
+async function verifyRecoveryGateIsolatedAndCleanedUp() {
+  const [{ createWorkflowStateStore }, orch] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v25-iso=${Date.now()}`),
+    import(`${recoveryOrchestratorModuleUrl}?v25-iso=${Date.now()}`),
+  ]);
+  const store = createWorkflowStateStore();
+  store.set("s-25-iso", { sessionID: "s-25-iso", commandName: "bmad-bmm-quick-dev", phase: "start" });
+  await orch.openRecoveryFromApproval({
+    workflowState: store,
+    sessionID: "s-25-iso",
+    approvalOutcome: "deny",
+    actionKind: "branch",
+  });
+  const snap1 = store.get("s-25-iso");
+  assert.equal(snap1.recoveryGate.state, "awaitingRecovery");
+
+  // Tamper with the snapshot — must not affect the store.
+  snap1.recoveryGate.state = "tampered";
+  snap1.recoveryGate.options[0].instructions = "tampered";
+  const snap2 = store.get("s-25-iso");
+  assert.equal(snap2.recoveryGate.state, "awaitingRecovery");
+  assert.notEqual(snap2.recoveryGate.options[0].instructions, "tampered");
+
+  // session.deleted cleanup wipes the entire entry, including the gate.
+  store.clear("s-25-iso");
+  assert.equal(store.get("s-25-iso"), undefined);
+}
+
+/**
+ * Story 2.5 — integration: a denied approval must NOT hard-fail the workflow
+ * session. The wrapper plugin instance routes through permission-asked, and
+ * after the resolver fires the orchestrator opens a recovery gate so future
+ * planning passes can release it explicitly.
+ */
+async function verifyDeniedApprovalDoesNotHardFailWorkflow() {
+  const wrapperWorkspace = createTempWorkspace();
+  try {
+    const wrapperModule = await import(wrapperModuleUrl);
+    const { handlers, mock } = await instantiate(
+      wrapperModule.DevaiAiddGuardPlugin,
+      wrapperWorkspace,
+    );
+
+    // First, drive command.execute.before so a branch approval is requested
+    // and stored in workflow state.
+    await runCommandExecuteBefore(handlers);
+    assert.ok(mock.prompts.length >= 1, "wrapper must publish at least one approval prompt");
+    const firstPrompt = mock.prompts[0];
+    const meta = firstPrompt.parts[0].metadata;
+    assert.equal(typeof meta.requestId, "string");
+
+    // Simulate the user denying the approval through permission.asked.
+    let permissionThrew = false;
+    try {
+      await handlers["permission.asked"]({
+        sessionID: "session-1",
+        outcome: "deny",
+        requestId: meta.requestId,
+        actionId: meta.actionId,
+      });
+    } catch {
+      permissionThrew = true;
+    }
+    assert.equal(
+      permissionThrew,
+      false,
+      "denied approval must NOT throw out of the permission.asked hook",
+    );
+
+    // After the deny, subsequent tool execution must continue working — the
+    // wrapper does not enter a hard-fail state for this session.
+    let toolError = null;
+    try {
+      await handlers["tool.execute.before"]({
+        sessionID: "session-1",
+        tool: "read",
+        args: {},
+      }, { args: {} });
+    } catch (caught) {
+      toolError = caught;
+    }
+    assert.equal(toolError, null, "post-deny tool.execute.before must not throw");
+
+    // Built artifact also routes the deny without hard-failing.
+    const builtModule = await import(`${builtModuleUrl}?t=${Date.now()}-deny`);
+    const builtWorkspace = createTempWorkspace();
+    try {
+      const built = await instantiate(
+        builtModule.DevaiAiddGuardPlugin || builtModule.DevaiGitWorkflowPlugin || builtModule.default,
+        builtWorkspace,
+      );
+      await runCommandExecuteBefore(built.handlers);
+      const builtMeta = built.mock.prompts[0]?.parts?.[0]?.metadata;
+      let builtThrew = false;
+      try {
+        await built.handlers["permission.asked"]({
+          sessionID: "session-1",
+          outcome: "deny",
+          requestId: builtMeta?.requestId,
+          actionId: builtMeta?.actionId,
+        });
+      } catch {
+        builtThrew = true;
+      }
+      assert.equal(builtThrew, false, "built artifact must mirror wrapper recovery behavior on deny");
+    } finally {
+      fs.rmSync(builtWorkspace, { recursive: true, force: true });
+    }
+  } finally {
+    fs.rmSync(wrapperWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.5 (MEDIUM review): the wrapper must deliver the recovery prompt to
+ * the user via `pluginContext.requestRecoveryDecision` after a denied approval
+ * opens a recovery gate. Without that delivery, AC1 is only data-shape
+ * complete and the gate would stay open forever because the user has nothing
+ * to act on.
+ */
+async function verifyRecoveryPromptDeliveredAfterDeny() {
+  const wrapperWorkspace = createTempWorkspace();
+  try {
+    const wrapperModule = await import(`${wrapperModuleUrl}?recovery-deliver=${Date.now()}`);
+    const { handlers, mock } = await instantiate(
+      wrapperModule.DevaiAiddGuardPlugin,
+      wrapperWorkspace,
+    );
+
+    await runCommandExecuteBefore(handlers);
+    assert.ok(mock.prompts.length >= 1, "approval prompt must be delivered before recovery");
+    const approvalMeta = mock.prompts[0].parts[0].metadata;
+    assert.equal(typeof approvalMeta.requestId, "string");
+
+    const promptCountBeforeDeny = mock.prompts.length;
+    await handlers["permission.asked"]({
+      sessionID: "session-1",
+      outcome: "deny",
+      requestId: approvalMeta.requestId,
+      actionId: approvalMeta.actionId,
+    });
+
+    // A recovery prompt MUST have been delivered after the deny resolved.
+    assert.ok(
+      mock.prompts.length > promptCountBeforeDeny,
+      "denied approval must trigger a recovery prompt delivery",
+    );
+
+    // The newest prompt is the recovery prompt — its metadata must carry the
+    // recoveryGateId so the user's response can be matched back to the gate.
+    const recoveryPrompt = mock.prompts[mock.prompts.length - 1];
+    const recoveryMeta = recoveryPrompt?.parts?.[0]?.metadata;
+    assert.ok(recoveryMeta, "recovery prompt must carry metadata");
+    assert.equal(typeof recoveryMeta.recoveryGateId, "string");
+    assert.ok(
+      recoveryMeta.recoveryGateId.startsWith("recovery:"),
+      "recoveryGateId must be the orchestrator-issued id",
+    );
+    assert.ok(Array.isArray(recoveryMeta.choices) && recoveryMeta.choices.length >= 1);
+    assert.ok(
+      recoveryMeta.choices.includes("retry"),
+      "recovery prompt must offer retry as one of the user choices",
+    );
+    assert.ok(
+      recoveryMeta.choices.includes("continue-without-automation"),
+      "recovery prompt must offer continue-without-automation",
+    );
+    // Prompt body must include actionable guidance, not just data shape.
+    const text = recoveryPrompt.parts[0].text;
+    assert.equal(typeof text, "string");
+    assert.ok(text.length > 0, "recovery prompt body must be non-empty");
+    assert.ok(text.includes("retry") || text.includes("Retry"));
+  } finally {
+    fs.rmSync(wrapperWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.5 (MEDIUM review): when the runtime delivers a recovery choice via
+ * `permission.asked`, the hook must dispatch to `selectRecoveryChoice` so the
+ * gate is actually resolved. After a `retry` choice, the gate is cleared and
+ * a fresh `permission.asked` deny on a new approval can re-open recovery.
+ */
+async function verifyRecoveryChoiceRoutingThroughPermissionAsked() {
+  const wrapperWorkspace = createTempWorkspace();
+  try {
+    const wrapperModule = await import(`${wrapperModuleUrl}?recovery-route=${Date.now()}`);
+    const { handlers, mock } = await instantiate(
+      wrapperModule.DevaiAiddGuardPlugin,
+      wrapperWorkspace,
+    );
+
+    await runCommandExecuteBefore(handlers);
+    const approvalMeta = mock.prompts[0].parts[0].metadata;
+    await handlers["permission.asked"]({
+      sessionID: "session-1",
+      outcome: "deny",
+      requestId: approvalMeta.requestId,
+      actionId: approvalMeta.actionId,
+    });
+
+    const recoveryPrompt = mock.prompts[mock.prompts.length - 1];
+    const recoveryMeta = recoveryPrompt.parts[0].metadata;
+    const gateIdBeforeRetry = recoveryMeta.recoveryGateId;
+    assert.equal(typeof gateIdBeforeRetry, "string");
+
+    // Simulate the user responding with `retry` to the recovery prompt.
+    let routingThrew = false;
+    try {
+      await handlers["permission.asked"]({
+        sessionID: "session-1",
+        outcome: "retry",
+        recoveryGateId: gateIdBeforeRetry,
+      });
+    } catch {
+      routingThrew = true;
+    }
+    assert.equal(routingThrew, false, "recovery routing must not throw out of permission.asked");
+
+    // After retry routes through, the orchestrator must have cleared the gate
+    // (HIGH review fix). A second deny must therefore be able to re-open a
+    // brand-new recovery gate with a different gate id.
+    await runCommandExecuteBefore(handlers);
+    const secondApproval = mock.prompts.filter((p) => p?.parts?.[0]?.metadata?.requestId).pop();
+    assert.ok(secondApproval, "after retry a fresh approval prompt must be republished");
+    const secondApprovalMeta = secondApproval.parts[0].metadata;
+
+    await handlers["permission.asked"]({
+      sessionID: "session-1",
+      outcome: "deny",
+      requestId: secondApprovalMeta.requestId,
+      actionId: secondApprovalMeta.actionId,
+    });
+    const newRecoveryPrompt = mock.prompts[mock.prompts.length - 1];
+    const newRecoveryMeta = newRecoveryPrompt.parts[0].metadata;
+    assert.equal(typeof newRecoveryMeta.recoveryGateId, "string");
+    assert.notEqual(
+      newRecoveryMeta.recoveryGateId,
+      gateIdBeforeRetry,
+      "fresh recovery gate id is required after retry cleared the previous gate",
+    );
+  } finally {
+    fs.rmSync(wrapperWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 2.5 (MEDIUM review): pure prompt-builder contract. Recovery prompts
+ * must include the action label, attempt counter, every offered choice with
+ * its instructions, and a recommended-choice tag when the orchestrator
+ * supplied one.
+ */
+async function verifyBuildRecoveryPromptContracts() {
+  const buildRecoveryPromptModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "services", "approval", "build-recovery-prompt.js"),
+  ).href;
+  const { buildRecoveryPrompt } = await import(
+    `${buildRecoveryPromptModuleUrl}?v25-prompt=${Date.now()}`
+  );
+
+  const recoverableGate = {
+    gateId: "recovery:test-1",
+    actionKind: "branch",
+    actionId: "action:branch/create:foo",
+    state: "awaitingRecovery",
+    recoverable: true,
+    reason: "approval-denied",
+    attempt: 1,
+    recommendedChoice: "continue-without-automation",
+    options: [
+      {
+        choice: "retry",
+        label: "Retry",
+        instructions: "Retry the branch operation after fixing branch state.",
+        nextState: "retryRequested",
+        blockingScope: "git-only",
+      },
+      {
+        choice: "continue-without-automation",
+        label: "Continue without automation",
+        instructions: "Stay on the current branch and continue the workflow.",
+        nextState: "continuedWithoutAutomation",
+        blockingScope: "git-only",
+        recommended: true,
+      },
+      {
+        choice: "manual-resolution",
+        label: "Continue after manual resolution",
+        instructions: "Manually create the expected branch outside the plugin.",
+        nextState: "awaitingManualResolution",
+        blockingScope: "git-only",
+      },
+    ],
+  };
+
+  const prompt = buildRecoveryPrompt(recoverableGate);
+  assert.equal(typeof prompt.title, "string");
+  assert.ok(prompt.title.includes("branch"));
+  assert.ok(Array.isArray(prompt.lines));
+  assert.ok(prompt.lines.some((line) => line.includes("Retry")));
+  assert.ok(prompt.lines.some((line) => line.includes("[recommended]")));
+  assert.ok(prompt.lines.some((line) => line.includes("retry")));
+  assert.ok(prompt.lines.some((line) => line.includes("continue-without-automation")));
+  assert.deepEqual(
+    prompt.choices.sort(),
+    ["continue-without-automation", "manual-resolution", "retry"].sort(),
+  );
+  assert.equal(prompt.recommendedChoice, "continue-without-automation");
+  assert.equal(prompt.actionKind, "branch");
+  assert.equal(prompt.recoveryGateId, "recovery:test-1");
+
+  // Non-recoverable gates collapse to a single `abandon` option and the
+  // headline must signal that automation will be closed.
+  const blockedGate = {
+    gateId: "recovery:test-2",
+    actionKind: null,
+    state: "abandoned",
+    recoverable: false,
+    reason: "missing-action-kind",
+    attempt: 1,
+    options: [
+      {
+        choice: "abandon",
+        label: "Stop automation",
+        instructions: "The action kind is not recognised by recovery.",
+        nextState: "abandoned",
+        blockingScope: "git-only",
+        recommended: true,
+      },
+    ],
+  };
+  const blockedPrompt = buildRecoveryPrompt(blockedGate);
+  assert.equal(blockedPrompt.choices.length, 1);
+  assert.equal(blockedPrompt.choices[0], "abandon");
+  assert.ok(
+    blockedPrompt.lines.some((line) => line.toLowerCase().includes("non-recoverable")),
+    "non-recoverable headline must announce automation closure",
+  );
+}
+
+/**
+ * Story 2.5 (HIGH review round 2): selected / completed / blocked recovery
+ * audit events must carry workflow + command attribution. Before the round-2
+ * fix, `_openRecoverableGate` did not persist workflow/command on the gate,
+ * so when `permission-asked` later called `selectRecoveryChoice` it could
+ * only pass `gate.workflow ?? null` (always undefined → null) and audit
+ * consumers grouping by workflow saw the entire `selected` / `completed`
+ * stream as null while `offered` (emitted directly with full params) was
+ * correctly attributed. The fix persists workflow/command on the gate AND
+ * adds a fallback in `buildEventEnvelope`.
+ */
+async function verifyRecoveryGatePersistsWorkflowCommandAttribution() {
+  const [{ createWorkflowStateStore }, orch] = await Promise.all([
+    import(`${workflowStateModuleUrl}?v25-attr=${Date.now()}`),
+    import(`${recoveryOrchestratorModuleUrl}?v25-attr=${Date.now()}`),
+  ]);
+  const store = createWorkflowStateStore();
+  store.set("s-25-attr", {
+    sessionID: "s-25-attr",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "in-progress",
+  });
+
+  // Open a gate WITH workflow/command, then verify both survive on the gate.
+  const opened = await orch.openRecoveryFromApproval({
+    workflowState: store,
+    sessionID: "s-25-attr",
+    approvalOutcome: "deny",
+    actionKind: "branch",
+    actionId: "action:branch/create:attr",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+  });
+  assert.equal(opened.outcome, "opened");
+  assert.equal(
+    opened.gate.workflow,
+    "bmad-bmm-quick-dev",
+    "gate must persist workflow at open time",
+  );
+  assert.equal(
+    opened.gate.command,
+    "bmad-bmm-quick-dev",
+    "gate must persist command at open time",
+  );
+
+  // Now call selectRecoveryChoice WITHOUT passing workflow/command (mirrors
+  // the failure mode the round-2 review caught in permission-asked.js, which
+  // sourced workflow/command from gate.workflow / gate.command and got
+  // null/null). With the fallback in buildEventEnvelope, the emitted events
+  // must still carry the gate's persisted attribution.
+  const events = [];
+  const audit = {
+    async info(_n, e) {
+      events.push(e);
+    },
+  };
+  const selected = await orch.selectRecoveryChoice({
+    workflowState: store,
+    sessionID: "s-25-attr",
+    choice: "continue-without-automation",
+    audit,
+    // intentionally do NOT pass workflow/command
+  });
+  assert.equal(selected.outcome, "selected");
+  assert.equal(events.length, 2, "selected + completed must both emit");
+  for (const e of events) {
+    assert.equal(
+      e.workflow,
+      "bmad-bmm-quick-dev",
+      `${e.event} must carry workflow from gate fallback when params are null`,
+    );
+    assert.equal(
+      e.command,
+      "bmad-bmm-quick-dev",
+      `${e.event} must carry command from gate fallback when params are null`,
+    );
+  }
+
+  // Cross-session abandon path: open a gate on one session with workflow/
+  // command, forge a session-mismatch on the gate, then call
+  // selectRecoveryChoice without passing workflow/command. The forged
+  // `git.action.recovery.blocked` must STILL carry the gate's attribution.
+  const otherStore = createWorkflowStateStore();
+  otherStore.set("s-25-attr-x", {
+    sessionID: "s-25-attr-x",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "start",
+  });
+  await orch.openRecoveryFromApproval({
+    workflowState: otherStore,
+    sessionID: "s-25-attr-x",
+    approvalOutcome: "deny",
+    actionKind: "branch",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+  });
+  const stored = otherStore.get("s-25-attr-x");
+  otherStore.set("s-25-attr-x", {
+    ...stored,
+    recoveryGate: { ...stored.recoveryGate, sessionID: "s-25-attr-x-stale" },
+  });
+  const blockedEvents = [];
+  const blockedAudit = {
+    async info(_n, e) {
+      blockedEvents.push(e);
+    },
+  };
+  const cross = await orch.selectRecoveryChoice({
+    workflowState: otherStore,
+    sessionID: "s-25-attr-x",
+    choice: "retry",
+    audit: blockedAudit,
+  });
+  assert.equal(cross.outcome, "skip");
+  assert.equal(cross.reason, "session-mismatch");
+  const blockedFromCross = blockedEvents.find((e) => e.event === "git.action.recovery.blocked");
+  assert.ok(blockedFromCross, "session-mismatch must emit a blocked event");
+  assert.equal(
+    blockedFromCross.workflow,
+    "bmad-bmm-quick-dev",
+    "blocked event from cross-session abandon must inherit workflow from gate",
+  );
+  assert.equal(
+    blockedFromCross.command,
+    "bmad-bmm-quick-dev",
+    "blocked event from cross-session abandon must inherit command from gate",
+  );
+}
+
+/**
+ * Story 2.5 (MEDIUM review round 2): the planning hook in
+ * `command-execute-before.js` and the orchestrator both emit
+ * `git.action.recovery.blocked` under the same event name. After the fix,
+ * the hook routes through `buildHookBlockedEvent` which delegates to the
+ * shared `buildEventEnvelope`, so both emissions share the canonical
+ * minimum `details` keys: failureCode, recoverable, attempt, gateId,
+ * blockingScope, source, sessionID, actionKind, actionId.
+ */
+async function verifyHookBlockedEventMatchesOrchestratorShape() {
+  const orch = await import(`${recoveryOrchestratorModuleUrl}?v25-shape=${Date.now()}`);
+
+  // Forge a recoverable gate as if `_openRecoverableGate` had persisted it.
+  const gate = {
+    gateId: "recovery:hook-shape-1",
+    sessionID: "s-shape",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    actionKind: "branch",
+    actionId: "action:branch/create:shape",
+    correlationId: "corr-shape",
+    state: "awaitingRecovery",
+    source: "approval",
+    recoverable: true,
+    reason: "approval-denied",
+    blockingScope: "git-only",
+    attempt: 3,
+    continuationPhase: "open",
+  };
+
+  const hookEvent = orch.buildHookBlockedEvent({
+    gate,
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    sessionID: "s-shape",
+    source: "command.execute.before",
+    reason: "same-action-blocked",
+    extraDetails: { actionKind: "branch" },
+  });
+
+  // Envelope-level fields.
+  assert.equal(hookEvent.event, "git.action.recovery.blocked");
+  assert.equal(hookEvent.outcome, "skip");
+  assert.equal(hookEvent.workflow, "bmad-bmm-quick-dev");
+  assert.equal(hookEvent.command, "bmad-bmm-quick-dev");
+  assert.equal(typeof hookEvent.timestamp, "string");
+
+  // Minimum details keys from the audit contract (Story 2.5 Task #6).
+  const requiredKeys = [
+    "actionKind",
+    "actionId",
+    "failureCode",
+    "recoverable",
+    "blockingScope",
+    "attempt",
+    "gateId",
+    "sessionID",
+    "source",
+  ];
+  for (const key of requiredKeys) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(hookEvent.details, key),
+      `hook-emitted blocked event must include details.${key} (round-2 MEDIUM fix)`,
+    );
+  }
+  assert.equal(hookEvent.details.actionKind, "branch");
+  assert.equal(hookEvent.details.actionId, "action:branch/create:shape");
+  assert.equal(hookEvent.details.failureCode, "approval-denied");
+  assert.equal(hookEvent.details.recoverable, true);
+  assert.equal(hookEvent.details.blockingScope, "git-only");
+  assert.equal(hookEvent.details.attempt, 3);
+  assert.equal(hookEvent.details.gateId, "recovery:hook-shape-1");
+  assert.equal(hookEvent.details.sessionID, "s-shape");
+  assert.equal(hookEvent.details.source, "command.execute.before");
+  assert.equal(hookEvent.details.reason, "same-action-blocked");
+}
+
+/**
+ * Story 2.5 (LOW review round 2): `isActionBlockedByGate` must honour
+ * `gate.continuationPhase === "terminal"` as a release signal. The retry
+ * path persists the gate at `state: "planned"` with
+ * `continuationPhase: "terminal"` and then awaits two emissions before
+ * `clearGate` runs. In that window, any concurrent reader would otherwise
+ * see `state === "planned"` (not in `TERMINAL_RECOVERY_STATES`) and emit
+ * `git.action.recovery.blocked` even though the retry has finalised. The
+ * fix below the round-1 HIGH fix is defense in depth.
+ */
+async function verifyTerminalContinuationPhaseReleasesGate() {
+  const orch = await import(`${recoveryOrchestratorModuleUrl}?v25-term=${Date.now()}`);
+
+  // Hand-craft a gate that mirrors the retry-window state: state is "planned"
+  // (NOT a strict-terminal state in the recovery vocabulary) and
+  // continuationPhase is "terminal".
+  const retryWindowGate = {
+    gateId: "recovery:term-1",
+    sessionID: "s-term",
+    actionKind: "branch",
+    state: "planned",
+    blockingScope: "git-only",
+    continuationPhase: "terminal",
+  };
+  const result = orch.isActionBlockedByGate(retryWindowGate, "branch");
+  assert.equal(
+    result.blocked,
+    false,
+    "gate.continuationPhase === 'terminal' must release the gate even before strict-terminal state",
+  );
+  assert.equal(
+    result.reason,
+    "gate-terminal-phase",
+    "release reason must signal the terminal-phase release path",
+  );
+
+  // Sanity: a gate with the same state but continuationPhase === "open" is
+  // still treated as actively blocking the same action kind.
+  const openGate = {
+    ...retryWindowGate,
+    continuationPhase: "open",
+    state: "awaitingRecovery",
+  };
+  const openResult = orch.isActionBlockedByGate(openGate, "branch");
+  assert.equal(openResult.blocked, true);
+  assert.equal(openResult.reason, "same-action-blocked");
+}
+
+/**
+ * Story 2.5 (LOW review round 3): the recovery-first routing in
+ * `permission-asked.js` is only safe while approval-outcome aliases and
+ * recovery-choice aliases stay disjoint. If a key ever appears in both maps,
+ * a runtime payload like `outcome: "skip"` could resolve to a different
+ * vocabulary depending on whether a recovery gate is active. Lock the
+ * invariant down with a regression test sourced from the same module the hook
+ * imports, so any future alias addition fails the suite immediately.
+ */
+async function verifyPermissionAskedAliasDisjointness() {
+  const aliasModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "services", "approval", "permission-asked-aliases.js"),
+  ).href;
+  const { APPROVAL_OUTCOME_ALIASES, RECOVERY_CHOICE_ALIASES } = await import(
+    `${aliasModuleUrl}?v25-disjoint=${Date.now()}`
+  );
+  const approvalKeys = new Set(Object.keys(APPROVAL_OUTCOME_ALIASES));
+  const recoveryKeys = new Set(Object.keys(RECOVERY_CHOICE_ALIASES));
+  const overlap = [...approvalKeys].filter((k) => recoveryKeys.has(k));
+  assert.deepEqual(
+    overlap,
+    [],
+    `approval-outcome and recovery-choice alias keys must remain disjoint, found overlap: ${JSON.stringify(overlap)}`,
+  );
+  // Both maps must still resolve to the canonical vocabularies on round-trip.
+  for (const key of approvalKeys) {
+    assert.ok(
+      ["accept", "deny", "ignore-and-continue"].includes(APPROVAL_OUTCOME_ALIASES[key]),
+      `approval alias '${key}' must map to a canonical approval outcome`,
+    );
+  }
+  for (const key of recoveryKeys) {
+    assert.ok(
+      ["retry", "continue-without-automation", "manual-resolution", "abandon"].includes(
+        RECOVERY_CHOICE_ALIASES[key],
+      ),
+      `recovery alias '${key}' must map to a canonical recovery choice`,
+    );
+  }
+
+  // Story 2.5 (LOW review round 3): _openBlockedGate history must contain
+  // exactly one entry — the gate's actual lifecycle was a direct open into
+  // `abandoned`. A synthetic `awaitingRecovery` precursor would mislead audit
+  // consumers reconstructing the timeline from `gate.history`.
+  const orchModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "services", "approval", "recovery-orchestrator.js"),
+  ).href;
+  const wfModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "services", "workflow", "workflow-state.js"),
+  ).href;
+  const [{ createWorkflowStateStore }, orch] = await Promise.all([
+    import(`${wfModuleUrl}?v25-history=${Date.now()}`),
+    import(`${orchModuleUrl}?v25-history=${Date.now()}`),
+  ]);
+  const store = createWorkflowStateStore();
+  store.set("s-25-history", {
+    sessionID: "s-25-history",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "in-progress",
+  });
+  // Drive `_openBlockedGate` via a non-recoverable approval invariant
+  // violation (missing actionKind triggers the controlled-stop path).
+  const blocked = await orch.openRecoveryFromApproval({
+    workflowState: store,
+    sessionID: "s-25-history",
+    approvalOutcome: "deny",
+    actionKind: null, // intentionally invalid → invariant-violation → blocked
+  });
+  assert.equal(blocked.outcome, "blocked");
+  assert.ok(Array.isArray(blocked.gate.history));
+  assert.equal(
+    blocked.gate.history.length,
+    1,
+    "non-recoverable open must record exactly one history entry (abandoned)",
+  );
+  assert.equal(blocked.gate.history[0].state, "abandoned");
+  assert.equal(blocked.gate.history[0].choice, "abandon");
+}
+
 main()
   .then(() => verifyBootstrapFailureShape())
   .then(() => verifyMissingLegacyBootstrapDependencyFails())
@@ -1910,6 +6878,82 @@ main()
   .then(() => verifyRepositoryReadinessIntegration())
   .then(() => verifyInvalidBranchRegexValidation())
   .then(() => verifyConfigValidationFailedAuditPayload())
+  // Story 2.1 tests
+  .then(() => verifyClassifyGitActionContracts())
+  .then(() => verifyBuildApprovalRequestContracts())
+  .then(() => verifyApprovalPolicyServiceContracts())
+  .then(() => verifyWorkflowStateApprovalIsolation())
+  .then(() => verifyApprovalRequestFromBranchProposal())
+  .then(() => verifyApprovalRequestFromInitProposal())
+  .then(() => verifyApprovalIdempotency())
+  .then(() => verifyNoApprovalForNonWorkflowAndPlanning())
+  .then(() => verifyApprovalRequestPayloadShape())
+  .then(() => verifyApprovalBuiltArtifactParity())
+  // Story 2.1 code review fixes (H1, H2, M1)
+  .then(() => verifyApprovalPromptDeliveryFailureAudit())
+  .then(() => verifyPriorStateCarryOver())
+  .then(() => verifyWorkflowStateNestedDeepIsolation())
+  // Story 2.1 second review fix (L4)
+  .then(() => verifyStaleGitFieldsInvalidatedOnReentry())
+  // Story 2.2 tests
+  .then(() => verifyApprovalRedactionHelpers())
+  .then(() => verifyApprovalExplanationContracts())
+  .then(() => verifyBuildApprovalRequestStory22Fields())
+  .then(() => verifyApprovalRedactionThroughRequest())
+  .then(() => verifyApprovalExplanationHookIntegration())
+  .then(() => verifyApprovalExplanationFallback())
+  // Story 2.3 tests
+  .then(() => verifyApprovalResolutionStateContracts())
+  .then(() => verifyBuildApprovalResolutionContracts())
+  .then(() => verifyApprovalRequestActionIdContract())
+  .then(() => verifyApprovalRequestedAuditIncludesActionId())
+  .then(() => verifyConsumeApprovalOutcomeAccept())
+  .then(() => verifyConsumeApprovalOutcomeDeny())
+  .then(() => verifyConsumeApprovalOutcomeIgnoreAndContinue())
+  .then(() => verifyConsumeApprovalOutcomeIdempotent())
+  .then(() => verifyConsumeApprovalOutcomeLeavesQueueIntact())
+  .then(() => verifyCommandExecuteBeforePromotesQueueHead())
+  .then(() => verifyPermissionAskedHookFlow())
+  .then(() => verifySessionDeletedClearsAllApprovalState())
+  // Story 2.3 post-review fixes
+  .then(() => verifyApprovalRequestedAuditDetailsShape())
+  .then(() => verifyPromptMetadataIncludesActionId())
+  .then(() => verifyPermissionAskedHookEmitsResolutionFailedOnUnknownOutcome())
+  .then(() => verifyPermissionAskedHookInjectsReasonCode())
+  // Story 2.3 second review fix (LOW)
+  .then(() => verifyPermissionAskedHookIgnoresGenericActionField())
+  // Story 2.4 — detect and report Git conflicts and execution failures
+  .then(() => verifyClassifyGitExecutionFailureContract())
+  .then(() => verifyGitExecutorEnvelopeShape())
+  .then(() => verifyGitExecutorPreflightShortCircuit())
+  .then(() => verifyGitExecutorSubprocessFailureMapping())
+  .then(() => verifyGitExecutorPostConditionFailure())
+  .then(() => verifyGitExecutorAuditEventPayload())
+  .then(() => verifyWorkflowStateExecutionMirror())
+  .then(() => verifyCommitAndPushServicesSurfaceEnvelopes())
+  // Story 2.5 — recovery paths without failing the workflow
+  .then(() => verifyRecoveryStateMachineContracts())
+  .then(() => verifyClassifyRecoveryContracts())
+  .then(() => verifyRecoveryOptionsContracts())
+  .then(() => verifyOpenRecoveryFromApprovalDeny())
+  .then(() => verifyOpenRecoveryFromExecution())
+  .then(() => verifySelectRetryIncrementsAttempt())
+  .then(() => verifySelectContinueWithoutAutomation())
+  .then(() => verifyManualResolutionTwoStep())
+  .then(() => verifyGateBlockingRules())
+  .then(() => verifyInvariantViolationsAreBlockedNotThrown())
+  .then(() => verifyRecoveryGateIsolatedAndCleanedUp())
+  .then(() => verifyDeniedApprovalDoesNotHardFailWorkflow())
+  // Story 2.5 review fixes
+  .then(() => verifyBuildRecoveryPromptContracts())
+  .then(() => verifyRecoveryPromptDeliveredAfterDeny())
+  .then(() => verifyRecoveryChoiceRoutingThroughPermissionAsked())
+  // Story 2.5 review round 2 fixes
+  .then(() => verifyRecoveryGatePersistsWorkflowCommandAttribution())
+  .then(() => verifyHookBlockedEventMatchesOrchestratorShape())
+  .then(() => verifyTerminalContinuationPhaseReleasesGate())
+  // Story 2.5 review round 3 fixes
+  .then(() => verifyPermissionAskedAliasDisjointness())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;
