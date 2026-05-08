@@ -16,6 +16,9 @@ const workflowStateModuleUrl = pathToFileURL(
 const detectWorkflowContextModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "workflow", "detect-workflow-context.js"),
 ).href;
+const commandExecuteBeforeModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "hooks", "command-execute-before.js"),
+).href;
 const toolExecuteAfterModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "hooks", "tool-execute-after.js"),
 ).href;
@@ -24,6 +27,9 @@ const loadConfigModuleUrl = pathToFileURL(
 ).href;
 const resolveWorkflowPolicyModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "workflow", "resolve-workflow-policy.js"),
+).href;
+const branchServiceModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "git", "branch-service.js"),
 ).href;
 const builtModulePath = path.join(projectRoot, "dist", "devai-aidd-guard.js");
 const builtModuleUrl = pathToFileURL(builtModulePath).href;
@@ -48,6 +54,7 @@ function createTempWorkspace() {
   const commandsDir = path.join(tempRoot, ".opencode", "commands");
   fs.mkdirSync(commandsDir, { recursive: true });
   fs.writeFileSync(path.join(commandsDir, "bmad-bmm-quick-dev.md"), "# quick dev\n", "utf8");
+  fs.writeFileSync(path.join(commandsDir, "bmad-bmm-create-prd.md"), "# create prd\n", "utf8");
   return tempRoot;
 }
 
@@ -1083,6 +1090,384 @@ async function verifyResolveWorkflowPolicy() {
   );
 }
 
+async function verifyBranchServiceContracts() {
+  const branchService = await import(`${branchServiceModuleUrl}?v=${Date.now()}`);
+  const { DEFAULT_PLUGIN_CONFIG } = await import(
+    pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href
+  );
+
+  assert.equal(
+    branchService.slugifyArguments("Regression Coverage", { fallback: "workflow" }),
+    "regression-coverage",
+    "verifyBranchServiceContracts: slugifyArguments must normalize spaces and case",
+  );
+  assert.equal(
+    branchService.slugifyArguments("", { fallback: "bmad-bmm-quick-dev" }),
+    "bmad-bmm-quick-dev",
+    "verifyBranchServiceContracts: slugifyArguments must fall back when slug is empty",
+  );
+  assert.equal(
+    branchService.extractTicketToken("ABC-123 cleanup", { fallbackTicket: "no-ticket" }),
+    "ABC-123",
+    "verifyBranchServiceContracts: extractTicketToken must return the first uppercase ticket match",
+  );
+  assert.equal(
+    branchService.extractTicketToken("cleanup only", { fallbackTicket: "no-ticket" }),
+    "no-ticket",
+    "verifyBranchServiceContracts: extractTicketToken must fall back when no ticket is present",
+  );
+
+  const workflowContext = {
+    commandName: "bmad-bmm-quick-dev",
+    arguments: "ABC-123 regression coverage",
+    sessionID: "branch-service-1",
+    detectedAt: "2026-05-08T00:00:00.000Z",
+    phase: "start",
+  };
+  const workflowPolicy = DEFAULT_PLUGIN_CONFIG.workflowPolicy["bmad-bmm-quick-dev"];
+  const candidate = branchService.computeCandidateBranchName({
+    workflowContext,
+    workflowPolicy,
+    branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+  });
+  assert.equal(
+    candidate,
+    "feat/ABC-123-regression-coverage",
+    "verifyBranchServiceContracts: quick-dev candidate branch name must use type, ticket, and slug",
+  );
+
+  const fallbackCandidate = branchService.computeCandidateBranchName({
+    workflowContext: {
+      ...workflowContext,
+      arguments: "",
+    },
+    workflowPolicy,
+    branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+  });
+  assert.equal(
+    fallbackCandidate,
+    "feat/no-ticket-bmad-bmm-quick-dev",
+    "verifyBranchServiceContracts: empty args must fall back to no-ticket + normalized command slug",
+  );
+
+  const defaultTypeCandidate = branchService.computeCandidateBranchName({
+    workflowContext: {
+      ...workflowContext,
+      commandName: "bmad-bmm-unknown",
+      arguments: "ABC-123 docs refresh",
+    },
+    workflowPolicy,
+    branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+  });
+  assert.equal(
+    defaultTypeCandidate,
+    "chore/ABC-123-docs-refresh",
+    "verifyBranchServiceContracts: unknown command must fall back to branch.defaultType",
+  );
+
+  const requiredStrategy = branchService.evaluateBranchStrategy({
+    workflowContext,
+    workflowPolicy,
+    branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+    currentBranch: "main",
+  });
+  assert.equal(
+    requiredStrategy.requirement,
+    "required",
+    "verifyBranchServiceContracts: branchRequired=true must map to requirement=required",
+  );
+  assert.equal(
+    requiredStrategy.isLongLived,
+    true,
+    "verifyBranchServiceContracts: main must be treated as long-lived",
+  );
+
+  const planningStrategy = branchService.evaluateBranchStrategy({
+    workflowContext: {
+      ...workflowContext,
+      commandName: "bmad-bmm-create-prd",
+    },
+    workflowPolicy: DEFAULT_PLUGIN_CONFIG.workflowPolicy["bmad-bmm-create-prd"],
+    branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+    currentBranch: "docs/ABC-123-prd",
+  });
+  assert.equal(
+    planningStrategy.requirement,
+    "unnecessary",
+    "verifyBranchServiceContracts: planning workflows with branchRequired=false must be unnecessary",
+  );
+
+  const createProposal = branchService.buildBranchProposal({
+    strategy: requiredStrategy,
+    candidateName: candidate,
+    currentBranch: "main",
+  });
+  assert.equal(
+    createProposal?.action,
+    "create",
+    "verifyBranchServiceContracts: long-lived current branch must trigger create proposal",
+  );
+
+  const switchProposal = branchService.buildBranchProposal({
+    strategy: branchService.evaluateBranchStrategy({
+      workflowContext,
+      workflowPolicy,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      currentBranch: "feat/ABC-999-other-work",
+    }),
+    candidateName: candidate,
+    currentBranch: "feat/ABC-999-other-work",
+  });
+  assert.equal(
+    switchProposal?.action,
+    "switch",
+    "verifyBranchServiceContracts: mismatched non-long-lived branch must trigger switch proposal",
+  );
+
+  const invalidRegexDetailed = branchService.computeCandidateBranchNameDetailed({
+    workflowContext,
+    workflowPolicy,
+    branchConfig: {
+      ...DEFAULT_PLUGIN_CONFIG.branch,
+      validationRegex: "[",
+    },
+  });
+  assert.equal(
+    invalidRegexDetailed.valid,
+    false,
+    "verifyBranchServiceContracts: invalid validationRegex must degrade to a failed candidate instead of throwing",
+  );
+  assert.equal(
+    invalidRegexDetailed.reason,
+    "candidate-failed-validation",
+    "verifyBranchServiceContracts: invalid validationRegex must surface candidate-failed-validation",
+  );
+}
+
+async function verifyBranchProposalIntegration() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, branchService, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?branch=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?branch=${Date.now()}`),
+      import(`${branchServiceModuleUrl}?branch=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    {
+      "command.execute.before": async () => {},
+    },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        resolvePolicy(workflowContext) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[workflowContext.commandName];
+          if (!policy) {
+            return { outcome: "ask", details: { fallback: {} } };
+          }
+          return {
+            outcome: "allow",
+            details: {
+              policy,
+            },
+          };
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  await hook(
+    {
+      command: "/bmad-bmm-quick-dev",
+      arguments: "ABC-123 regression coverage",
+      sessionID: "branch-integration-1",
+    },
+    { parts: [] },
+  );
+
+  const stateAfterQuickDev = workflowState.get("branch-integration-1");
+  assert.deepEqual(
+    stateAfterQuickDev?.branchProposal,
+    {
+      kind: "branch",
+      action: "create",
+      name: "feat/ABC-123-regression-coverage",
+      reason: "no-current-branch",
+      current: null,
+      policyMatch: {
+        commandName: "bmad-bmm-quick-dev",
+        category: "implementation",
+        identityStrategy: "ticket-or-args",
+        branchRequired: true,
+        finalization: "commit-and-push",
+      },
+    },
+    "verifyBranchProposalIntegration: quick-dev must stash create proposal in workflow state",
+  );
+
+  const plannedLog = logs.find((entry) => entry.message === "git.action.planned");
+  assert.ok(plannedLog, "verifyBranchProposalIntegration: git.action.planned audit must be emitted");
+  assert.equal(
+    plannedLog.extra.details.name,
+    "feat/ABC-123-regression-coverage",
+    "verifyBranchProposalIntegration: audit payload must include candidate branch name",
+  );
+
+  await hook(
+    {
+      command: "/bmad-bmm-quick-dev",
+      arguments: "ABC-123 regression coverage",
+      currentBranch: "feat/ABC-999-other-work",
+      sessionID: "branch-integration-switch",
+    },
+    { parts: [] },
+  );
+  assert.deepEqual(
+    workflowState.get("branch-integration-switch")?.branchProposal,
+    {
+      kind: "branch",
+      action: "switch",
+      name: "feat/ABC-123-regression-coverage",
+      reason: "candidate-differs-from-current",
+      current: "feat/ABC-999-other-work",
+      policyMatch: {
+        commandName: "bmad-bmm-quick-dev",
+        category: "implementation",
+        identityStrategy: "ticket-or-args",
+        branchRequired: true,
+        finalization: "commit-and-push",
+      },
+    },
+    "verifyBranchProposalIntegration: hook must preserve an injected currentBranch and produce a switch proposal when it mismatches",
+  );
+
+  await hook(
+    {
+      command: "/bmad-bmm-quick-dev",
+      arguments: "ABC-123 regression coverage",
+      currentBranch: "main",
+      sessionID: "branch-integration-long-lived",
+    },
+    { parts: [] },
+  );
+  assert.equal(
+    workflowState.get("branch-integration-long-lived")?.branchProposal?.action,
+    "create",
+    "verifyBranchProposalIntegration: hook must treat an injected long-lived currentBranch as a create proposal",
+  );
+
+  await hook(
+    {
+      command: "/bmad-bmm-create-prd",
+      arguments: "",
+      sessionID: "branch-integration-2",
+    },
+    { parts: [] },
+  );
+  assert.equal(
+    workflowState.get("branch-integration-2")?.branchProposal,
+    undefined,
+    "verifyBranchProposalIntegration: planning workflow must not stash a branch proposal",
+  );
+
+  await hook(
+    {
+      command: "/non-workflow-command",
+      arguments: "",
+      sessionID: "branch-integration-3",
+    },
+    { parts: [] },
+  );
+  assert.equal(
+    workflowState.get("branch-integration-3"),
+    undefined,
+    "verifyBranchProposalIntegration: non-workflow commands must not create workflow state",
+  );
+
+  const gitPlannedCount = logs.filter((entry) => entry.message === "git.action.planned").length;
+  assert.equal(
+    gitPlannedCount,
+    3,
+    "verifyBranchProposalIntegration: each implementation workflow run with a proposal must emit git.action.planned",
+  );
+
+  const directDetailed = branchService.computeCandidateBranchNameDetailed({
+    workflowContext: {
+      commandName: "bmad-bmm-quick-dev",
+      arguments: "bad slug ###",
+      sessionID: "branch-integration-4",
+      detectedAt: "2026-05-08T00:00:00.000Z",
+      phase: "start",
+    },
+    workflowPolicy: DEFAULT_PLUGIN_CONFIG.workflowPolicy["bmad-bmm-quick-dev"],
+    branchConfig: {
+      ...DEFAULT_PLUGIN_CONFIG.branch,
+      validationRegex: "^feat\\/[A-Z]+-\\d+-must-fail$",
+    },
+  });
+  assert.equal(
+    directDetailed.valid,
+    false,
+    "verifyBranchProposalIntegration: detailed candidate API must expose validation failure",
+  );
+  assert.equal(
+    directDetailed.reason,
+    "candidate-failed-validation",
+    "verifyBranchProposalIntegration: failed detailed candidate must carry candidate-failed-validation reason",
+  );
+}
+
+async function verifyInvalidBranchRegexValidation() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?invalid-branch-regex=${Date.now()}`);
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-invalid-branch-regex-"));
+  const projectConfigDir = path.join(tempRoot, "project", ".opencode");
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+
+  try {
+    fs.writeFileSync(
+      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { validationRegex: "[" } }),
+      "utf8",
+    );
+
+    const fakeHomedir = path.join(tempRoot, "no-home");
+    const fsAdapter = {
+      existsSync: fs.existsSync.bind(fs),
+      readFileSync: fs.readFileSync.bind(fs),
+      readdirSync: fs.readdirSync.bind(fs),
+      mkdirSync: fs.mkdirSync.bind(fs),
+      writeFileSync: fs.writeFileSync.bind(fs),
+      dirname: path.dirname.bind(path),
+      homedir: () => fakeHomedir,
+    };
+
+    const result = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
+    assert.equal(
+      result.validation.droppedLayers.includes("projectConfig"),
+      true,
+      "verifyInvalidBranchRegexValidation: invalid branch.validationRegex must cause the project layer to be dropped",
+    );
+    assert.ok(
+      result.validation.errors.some(
+        (err) => err.instancePath === "/branch/validationRegex" && err.params?.reason === "invalid-regex",
+      ),
+      "verifyInvalidBranchRegexValidation: validation errors must identify /branch/validationRegex as invalid-regex",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 /**
  * Story 1.3: Verify config.validation.failed audit payload shape.
  * When an invalid project config layer is provided, the wrapper must emit
@@ -1188,6 +1573,9 @@ main()
   .then(() => verifyForwardCompatExtensionKeys())
   .then(() => verifySchemaVersionEnforcement())
   .then(() => verifyResolveWorkflowPolicy())
+  .then(() => verifyBranchServiceContracts())
+  .then(() => verifyBranchProposalIntegration())
+  .then(() => verifyInvalidBranchRegexValidation())
   .then(() => verifyConfigValidationFailedAuditPayload())
   .catch((error) => {
   console.error(error);

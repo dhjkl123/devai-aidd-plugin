@@ -99,6 +99,7 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     }
 
     const workflowState = createWorkflowStateStore();
+    const branchConfig = runtimeConfig.config.branch;
 
     // Build pluginContext so downstream hook factories (Story 1.4+) and
     // approval hooks (Epic 2) can consume the resolver without re-loading config.
@@ -108,7 +109,13 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     };
 
     return {
-      "command.execute.before": createCommandExecuteBeforeHook(legacyHandlers, { workflowCommands, workflowState, audit, pluginContext }),
+      "command.execute.before": createCommandExecuteBeforeHook(legacyHandlers, {
+        workflowCommands,
+        workflowState,
+        audit,
+        pluginContext,
+        branchConfig,
+      }),
       "tool.execute.before": createToolExecuteBeforeHook(legacyHandlers, { workflowState, pluginContext }),
       "tool.execute.after": createToolExecuteAfterHook(legacyHandlers, { workflowState, pluginContext }),
       "permission.asked": createPermissionAskedHook(legacyHandlers, { pluginContext }),
