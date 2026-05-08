@@ -16,6 +16,7 @@ import { createSessionHook } from "./hooks/session.js";
 import { createPermissionAskedHook } from "./hooks/permission-asked.js";
 import { createFileEditedHook } from "./hooks/file-edited.js";
 import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-policy.js";
+import { runGitCommand } from "./services/git/run-git-command.js";
 
 const SUPPORTED_RUNTIME = "Node.js ESM plugin runtime (Node 22 target)";
 
@@ -105,6 +106,8 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     // approval hooks (Epic 2) can consume the resolver without re-loading config.
     const pluginContext = {
       runtimeConfig,
+      directory,
+      gitRunner: runGitCommand,
       resolvePolicy: (workflowContext) => resolveWorkflowPolicy(workflowContext, runtimeConfig.config),
     };
 

@@ -31,6 +31,9 @@ const resolveWorkflowPolicyModuleUrl = pathToFileURL(
 const branchServiceModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "git", "branch-service.js"),
 ).href;
+const readinessServiceModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "git", "check-repository-readiness.js"),
+).href;
 const builtModulePath = path.join(projectRoot, "dist", "devai-aidd-guard.js");
 const builtModuleUrl = pathToFileURL(builtModulePath).href;
 const legacyModulePath = path.join(
@@ -77,6 +80,26 @@ function createMockClient() {
       },
     },
   };
+}
+
+function createGitWorkspace({ initialize = false, withRemote = false } = {}) {
+  const tempRoot = createTempWorkspace();
+
+  if (initialize) {
+    execFileSync("git", ["init"], {
+      cwd: tempRoot,
+      stdio: "pipe",
+    });
+  }
+
+  if (withRemote) {
+    execFileSync("git", ["remote", "add", "origin", "https://example.com/repo.git"], {
+      cwd: tempRoot,
+      stdio: "pipe",
+    });
+  }
+
+  return tempRoot;
 }
 
 function verifyLegacyBootstrapDependencyPath() {
@@ -1285,120 +1308,199 @@ async function verifyBranchProposalIntegration() {
     },
   );
 
-  await hook(
-    {
-      command: "/bmad-bmm-quick-dev",
-      arguments: "ABC-123 regression coverage",
-      sessionID: "branch-integration-1",
-    },
-    { parts: [] },
-  );
+  const noGitWorkspace = createGitWorkspace();
 
-  const stateAfterQuickDev = workflowState.get("branch-integration-1");
-  assert.deepEqual(
-    stateAfterQuickDev?.branchProposal,
-    {
-      kind: "branch",
-      action: "create",
-      name: "feat/ABC-123-regression-coverage",
-      reason: "no-current-branch",
-      current: null,
-      policyMatch: {
-        commandName: "bmad-bmm-quick-dev",
-        category: "implementation",
-        identityStrategy: "ticket-or-args",
-        branchRequired: true,
-        finalization: "commit-and-push",
+  try {
+    await hook(
+      {
+        command: "/bmad-bmm-quick-dev",
+        arguments: "ABC-123 regression coverage",
+        sessionID: "branch-integration-1",
       },
-    },
-    "verifyBranchProposalIntegration: quick-dev must stash create proposal in workflow state",
-  );
+      { parts: [] },
+    );
 
-  const plannedLog = logs.find((entry) => entry.message === "git.action.planned");
-  assert.ok(plannedLog, "verifyBranchProposalIntegration: git.action.planned audit must be emitted");
-  assert.equal(
-    plannedLog.extra.details.name,
-    "feat/ABC-123-regression-coverage",
-    "verifyBranchProposalIntegration: audit payload must include candidate branch name",
-  );
-
-  await hook(
-    {
-      command: "/bmad-bmm-quick-dev",
-      arguments: "ABC-123 regression coverage",
-      currentBranch: "feat/ABC-999-other-work",
-      sessionID: "branch-integration-switch",
-    },
-    { parts: [] },
-  );
-  assert.deepEqual(
-    workflowState.get("branch-integration-switch")?.branchProposal,
-    {
-      kind: "branch",
-      action: "switch",
-      name: "feat/ABC-123-regression-coverage",
-      reason: "candidate-differs-from-current",
-      current: "feat/ABC-999-other-work",
-      policyMatch: {
-        commandName: "bmad-bmm-quick-dev",
-        category: "implementation",
-        identityStrategy: "ticket-or-args",
-        branchRequired: true,
-        finalization: "commit-and-push",
+    const stateAfterQuickDev = workflowState.get("branch-integration-1");
+    assert.deepEqual(
+      stateAfterQuickDev?.branchProposal,
+      {
+        kind: "branch",
+        action: "create",
+        name: "feat/ABC-123-regression-coverage",
+        reason: "no-current-branch",
+        current: null,
+        policyMatch: {
+          commandName: "bmad-bmm-quick-dev",
+          category: "implementation",
+          identityStrategy: "ticket-or-args",
+          branchRequired: true,
+          finalization: "commit-and-push",
+        },
       },
-    },
-    "verifyBranchProposalIntegration: hook must preserve an injected currentBranch and produce a switch proposal when it mismatches",
-  );
+      "verifyBranchProposalIntegration: quick-dev must stash create proposal in workflow state",
+    );
 
-  await hook(
-    {
-      command: "/bmad-bmm-quick-dev",
-      arguments: "ABC-123 regression coverage",
-      currentBranch: "main",
-      sessionID: "branch-integration-long-lived",
-    },
-    { parts: [] },
-  );
-  assert.equal(
-    workflowState.get("branch-integration-long-lived")?.branchProposal?.action,
-    "create",
-    "verifyBranchProposalIntegration: hook must treat an injected long-lived currentBranch as a create proposal",
-  );
+    const plannedLog = logs.find(
+      (entry) => entry.message === "git.action.planned" && entry.extra?.details?.kind === "branch",
+    );
+    assert.ok(
+      plannedLog,
+      "verifyBranchProposalIntegration: branch git.action.planned audit must be emitted",
+    );
+    assert.equal(
+      plannedLog.extra.details.name,
+      "feat/ABC-123-regression-coverage",
+      "verifyBranchProposalIntegration: audit payload must include candidate branch name",
+    );
 
-  await hook(
-    {
-      command: "/bmad-bmm-create-prd",
-      arguments: "",
-      sessionID: "branch-integration-2",
-    },
-    { parts: [] },
-  );
-  assert.equal(
-    workflowState.get("branch-integration-2")?.branchProposal,
-    undefined,
-    "verifyBranchProposalIntegration: planning workflow must not stash a branch proposal",
-  );
+    await hook(
+      {
+        command: "/bmad-bmm-quick-dev",
+        arguments: "ABC-123 regression coverage",
+        currentBranch: "feat/ABC-999-other-work",
+        sessionID: "branch-integration-switch",
+      },
+      { parts: [] },
+    );
+    assert.deepEqual(
+      workflowState.get("branch-integration-switch")?.branchProposal,
+      {
+        kind: "branch",
+        action: "switch",
+        name: "feat/ABC-123-regression-coverage",
+        reason: "candidate-differs-from-current",
+        current: "feat/ABC-999-other-work",
+        policyMatch: {
+          commandName: "bmad-bmm-quick-dev",
+          category: "implementation",
+          identityStrategy: "ticket-or-args",
+          branchRequired: true,
+          finalization: "commit-and-push",
+        },
+      },
+      "verifyBranchProposalIntegration: hook must preserve an injected currentBranch and produce a switch proposal when it mismatches",
+    );
 
-  await hook(
-    {
-      command: "/non-workflow-command",
-      arguments: "",
-      sessionID: "branch-integration-3",
-    },
-    { parts: [] },
-  );
-  assert.equal(
-    workflowState.get("branch-integration-3"),
-    undefined,
-    "verifyBranchProposalIntegration: non-workflow commands must not create workflow state",
-  );
+    await hook(
+      {
+        command: "/bmad-bmm-quick-dev",
+        arguments: "ABC-123 regression coverage",
+        currentBranch: "main",
+        sessionID: "branch-integration-long-lived",
+      },
+      { parts: [] },
+    );
+    assert.equal(
+      workflowState.get("branch-integration-long-lived")?.branchProposal?.action,
+      "create",
+      "verifyBranchProposalIntegration: hook must treat an injected long-lived currentBranch as a create proposal",
+    );
 
-  const gitPlannedCount = logs.filter((entry) => entry.message === "git.action.planned").length;
-  assert.equal(
-    gitPlannedCount,
-    3,
-    "verifyBranchProposalIntegration: each implementation workflow run with a proposal must emit git.action.planned",
-  );
+    await hook(
+      {
+        command: "/bmad-bmm-create-prd",
+        arguments: "",
+        sessionID: "branch-integration-2",
+      },
+      { parts: [] },
+    );
+    assert.equal(
+      workflowState.get("branch-integration-2")?.branchProposal,
+      undefined,
+      "verifyBranchProposalIntegration: planning workflow must not stash a branch proposal",
+    );
+
+    await hook(
+      {
+        command: "/non-workflow-command",
+        arguments: "",
+        sessionID: "branch-integration-3",
+      },
+      { parts: [] },
+    );
+    assert.equal(
+      workflowState.get("branch-integration-3"),
+      undefined,
+      "verifyBranchProposalIntegration: non-workflow commands must not create workflow state",
+    );
+
+    const noGitLogs = [];
+    const noGitWorkflowState = createWorkflowStateStore();
+    const noGitHook = commandBeforeModule.createCommandExecuteBeforeHook(
+      {
+        "command.execute.before": async () => {},
+      },
+      {
+        workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
+        workflowState: noGitWorkflowState,
+        branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+        pluginContext: {
+          directory: noGitWorkspace,
+          resolvePolicy(workflowContext) {
+            const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[workflowContext.commandName];
+            if (!policy) {
+              return { outcome: "ask", details: { fallback: {} } };
+            }
+            return {
+              outcome: "allow",
+              details: {
+                policy,
+              },
+            };
+          },
+        },
+        audit: {
+          async info(message, extra) {
+            noGitLogs.push({ message, extra });
+          },
+        },
+      },
+    );
+
+    await noGitHook(
+      {
+        command: "/bmad-bmm-quick-dev",
+        arguments: "ABC-123 regression coverage",
+        sessionID: "branch-integration-ask",
+      },
+      { parts: [] },
+    );
+    assert.equal(
+      noGitWorkflowState.get("branch-integration-ask")?.branchProposal,
+      undefined,
+      "verifyBranchProposalIntegration: non-git readiness ask must not stash a branch proposal",
+    );
+    assert.equal(
+      noGitWorkflowState.get("branch-integration-ask")?.initProposal?.kind,
+      "init",
+      "verifyBranchProposalIntegration: non-git readiness ask must still stash the init proposal",
+    );
+    assert.equal(
+      noGitLogs.filter(
+        (entry) => entry.message === "git.action.planned" && entry.extra?.details?.kind === "branch",
+      ).length,
+      0,
+      "verifyBranchProposalIntegration: non-git readiness ask must not emit branch git.action.planned",
+    );
+    assert.equal(
+      noGitLogs.filter(
+        (entry) => entry.message === "git.action.planned" && entry.extra?.details?.kind === "init",
+      ).length,
+      1,
+      "verifyBranchProposalIntegration: non-git readiness ask must still emit init git.action.planned",
+    );
+
+    const branchPlannedCount = logs.filter(
+      (entry) => entry.message === "git.action.planned" && entry.extra?.details?.kind === "branch",
+    ).length;
+    assert.equal(
+      branchPlannedCount,
+      3,
+      "verifyBranchProposalIntegration: each implementation workflow run with a branch proposal must emit branch git.action.planned",
+    );
+  } finally {
+    fs.rmSync(noGitWorkspace, { recursive: true, force: true });
+  }
 
   const directDetailed = branchService.computeCandidateBranchNameDetailed({
     workflowContext: {
@@ -1465,6 +1567,235 @@ async function verifyInvalidBranchRegexValidation() {
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function verifyRepositoryReadinessContracts() {
+  const readinessModule = await import(`${readinessServiceModuleUrl}?readiness=${Date.now()}`);
+
+  const noGitWorkspace = createGitWorkspace();
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const remoteWorkspace = createGitWorkspace({ initialize: true, withRemote: true });
+
+  try {
+    const askResult = readinessModule.checkRepositoryReadiness({
+      directory: noGitWorkspace,
+    });
+    assert.equal(
+      askResult.outcome,
+      "ask",
+      "verifyRepositoryReadinessContracts: non-git workspace must request initialization approval",
+    );
+    assert.equal(
+      askResult.reason,
+      "git-not-initialized",
+      "verifyRepositoryReadinessContracts: non-git workspace must expose git-not-initialized reason",
+    );
+    assert.equal(
+      askResult.details?.proposal?.kind,
+      "init",
+      "verifyRepositoryReadinessContracts: non-git workspace must attach init proposal details",
+    );
+
+    const allowResult = readinessModule.checkRepositoryReadiness({
+      directory: gitWorkspace,
+    });
+    assert.equal(
+      allowResult.outcome,
+      "allow",
+      "verifyRepositoryReadinessContracts: initialized repository must be allowed",
+    );
+    assert.equal(
+      allowResult.details?.isGitRepository,
+      true,
+      "verifyRepositoryReadinessContracts: initialized repository must report isGitRepository=true",
+    );
+    assert.equal(
+      allowResult.details?.hasRemote,
+      false,
+      "verifyRepositoryReadinessContracts: repository without remotes must report hasRemote=false",
+    );
+
+    const detachedHeadResult = readinessModule.checkRepositoryReadiness({
+      directory: remoteWorkspace,
+      gitRunner({ command }) {
+        if (command === "rev-parse-inside-work-tree") {
+          return "true\n";
+        }
+        if (command === "symbolic-ref-short-head") {
+          const error = new Error("detached HEAD");
+          error.status = 128;
+          error.stderr = "fatal: ref HEAD is not a symbolic ref\n";
+          throw error;
+        }
+        if (command === "remote-verbose") {
+          return "origin https://example.com/repo.git (fetch)\norigin https://example.com/repo.git (push)\n";
+        }
+
+        throw new Error(`unexpected command: ${command}`);
+      },
+    });
+    assert.equal(
+      detachedHeadResult.outcome,
+      "allow",
+      "verifyRepositoryReadinessContracts: detached HEAD must still be treated as a valid repository",
+    );
+    assert.equal(
+      detachedHeadResult.details?.branch,
+      null,
+      "verifyRepositoryReadinessContracts: detached HEAD must report branch=null",
+    );
+    assert.equal(
+      detachedHeadResult.details?.hasRemote,
+      true,
+      "verifyRepositoryReadinessContracts: detached HEAD must still continue remote readiness reporting",
+    );
+    assert.deepEqual(
+      detachedHeadResult.details?.remoteNames,
+      ["origin"],
+      "verifyRepositoryReadinessContracts: detached HEAD must preserve remote names",
+    );
+
+    const invokedCommands = [];
+    const skippedRemoteResult = readinessModule.checkRepositoryReadiness({
+      directory: remoteWorkspace,
+      policy: { requiresRemote: false },
+      gitRunner({ command }) {
+        invokedCommands.push(command);
+        if (command === "rev-parse-inside-work-tree") {
+          return "true\n";
+        }
+        if (command === "symbolic-ref-short-head") {
+          return "main\n";
+        }
+        if (command === "remote-verbose") {
+          throw new Error("remote-verbose should not run when requiresRemote=false");
+        }
+
+        throw new Error(`unexpected command: ${command}`);
+      },
+    });
+    assert.equal(
+      skippedRemoteResult.outcome,
+      "allow",
+      "verifyRepositoryReadinessContracts: requiresRemote=false must still allow an initialized repository",
+    );
+    assert.equal(
+      invokedCommands.includes("remote-verbose"),
+      false,
+      "verifyRepositoryReadinessContracts: requiresRemote=false must skip remote-verbose entirely",
+    );
+
+    const unavailableResult = readinessModule.checkRepositoryReadiness({
+      directory: gitWorkspace,
+      gitRunner() {
+        const error = new Error("git missing");
+        error.code = "ENOENT";
+        throw error;
+      },
+    });
+    assert.equal(
+      unavailableResult.outcome,
+      "skip",
+      "verifyRepositoryReadinessContracts: ENOENT must degrade to skip outcome",
+    );
+    assert.equal(
+      unavailableResult.reason,
+      "readiness-check-unavailable",
+      "verifyRepositoryReadinessContracts: ENOENT must use readiness-check-unavailable reason",
+    );
+  } finally {
+    fs.rmSync(noGitWorkspace, { recursive: true, force: true });
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+    fs.rmSync(remoteWorkspace, { recursive: true, force: true });
+  }
+}
+
+async function verifyRepositoryReadinessIntegration() {
+  const wrapperModule = await import(`${wrapperModuleUrl}?readiness-integration=${Date.now()}`);
+
+  const noGitWorkspace = createGitWorkspace();
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+
+  try {
+    const askWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, noGitWorkspace);
+    const askStartedAt = process.hrtime.bigint();
+    await askWrapper.handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 readiness", sessionID: "readiness-ask" },
+      { parts: [] },
+    );
+    const askDurationMs = Number(process.hrtime.bigint() - askStartedAt) / 1e6;
+    assert.ok(
+      askDurationMs < 500,
+      "verifyRepositoryReadinessIntegration: readiness check must complete within the NFR1 budget",
+    );
+
+    const askReadinessLogs = askWrapper.mock.logs.filter(
+      (entry) => entry.body?.message === "git.readiness.checked",
+    );
+    assert.equal(
+      askReadinessLogs.length,
+      1,
+      "verifyRepositoryReadinessIntegration: workflow command must emit one git.readiness.checked event",
+    );
+    assert.equal(
+      askReadinessLogs[0].body.extra.outcome,
+      "ask",
+      "verifyRepositoryReadinessIntegration: non-git workflow workspace must emit ask outcome",
+    );
+
+    const askPlannedLogs = askWrapper.mock.logs.filter(
+      (entry) => entry.body?.message === "git.action.planned" && entry.body?.extra?.details?.kind === "init",
+    );
+    assert.equal(
+      askPlannedLogs.length,
+      1,
+      "verifyRepositoryReadinessIntegration: init proposal must emit one git.action.planned event",
+    );
+    const askBranchPlannedLogs = askWrapper.mock.logs.filter(
+      (entry) => entry.body?.message === "git.action.planned" && entry.body?.extra?.details?.kind === "branch",
+    );
+    assert.equal(
+      askBranchPlannedLogs.length,
+      0,
+      "verifyRepositoryReadinessIntegration: init proposal path must not emit branch git.action.planned",
+    );
+
+    const allowWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, gitWorkspace);
+    await allowWrapper.handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 readiness", sessionID: "readiness-allow" },
+      { parts: [] },
+    );
+    const allowReadinessLogs = allowWrapper.mock.logs.filter(
+      (entry) => entry.body?.message === "git.readiness.checked",
+    );
+    assert.equal(
+      allowReadinessLogs.length,
+      1,
+      "verifyRepositoryReadinessIntegration: initialized repository must still emit readiness audit",
+    );
+    assert.equal(
+      allowReadinessLogs[0].body.extra.outcome,
+      "allow",
+      "verifyRepositoryReadinessIntegration: initialized repository must emit allow outcome",
+    );
+
+    const nonWorkflowWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, noGitWorkspace);
+    await nonWorkflowWrapper.handlers["command.execute.before"](
+      { command: "/non-workflow-command", arguments: "", sessionID: "readiness-nwf" },
+      { parts: [] },
+    );
+    const nonWorkflowReadinessLogs = nonWorkflowWrapper.mock.logs.filter(
+      (entry) => entry.body?.message === "git.readiness.checked",
+    );
+    assert.equal(
+      nonWorkflowReadinessLogs.length,
+      0,
+      "verifyRepositoryReadinessIntegration: non-workflow commands must not run readiness checks",
+    );
+  } finally {
+    fs.rmSync(noGitWorkspace, { recursive: true, force: true });
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
   }
 }
 
@@ -1575,6 +1906,8 @@ main()
   .then(() => verifyResolveWorkflowPolicy())
   .then(() => verifyBranchServiceContracts())
   .then(() => verifyBranchProposalIntegration())
+  .then(() => verifyRepositoryReadinessContracts())
+  .then(() => verifyRepositoryReadinessIntegration())
   .then(() => verifyInvalidBranchRegexValidation())
   .then(() => verifyConfigValidationFailedAuditPayload())
   .catch((error) => {

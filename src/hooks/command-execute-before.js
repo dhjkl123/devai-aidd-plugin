@@ -4,6 +4,7 @@ import {
   computeCandidateBranchName,
   evaluateBranchStrategy,
 } from "../services/git/branch-service.js";
+import { checkRepositoryReadiness } from "../services/git/check-repository-readiness.js";
 
 function resolveCurrentBranch(input, context, pluginContext) {
   if (typeof input?.currentBranch === "string" && input.currentBranch.length > 0) {
@@ -22,6 +23,10 @@ function resolveCurrentBranch(input, context, pluginContext) {
   }
 
   return null;
+}
+
+function shouldSkipBranchPlanning(readiness) {
+  return readiness?.outcome === "ask" && readiness?.reason === "git-not-initialized";
 }
 
 export function createCommandExecuteBeforeHook(
@@ -52,45 +57,96 @@ export function createCommandExecuteBeforeHook(
         const resolvedPolicy = pluginContext?.resolvePolicy?.(context);
         const workflowPolicy =
           resolvedPolicy?.outcome === "allow" ? resolvedPolicy.details?.policy : null;
-        const currentBranch = resolveCurrentBranch(input, context, pluginContext);
-        const strategy = evaluateBranchStrategy({
-          workflowContext: context,
-          workflowPolicy,
-          branchConfig,
-          currentBranch,
+        const readinessStartedAt = process.hrtime.bigint();
+        const readiness = checkRepositoryReadiness({
+          directory: pluginContext?.directory,
+          gitRunner: pluginContext?.gitRunner,
+          policy: workflowPolicy,
+        });
+        const readinessDurationMs = Number(process.hrtime.bigint() - readinessStartedAt) / 1e6;
+
+        workflowState.set(context.sessionID, {
+          ...workflowState.get(context.sessionID),
+          readiness,
         });
 
-        if (strategy.requirement !== "unnecessary") {
-          const candidateName = computeCandidateBranchName({
+        if (readiness?.outcome === "ask" && readiness.details?.proposal) {
+          workflowState.set(context.sessionID, {
+            ...workflowState.get(context.sessionID),
+            initProposal: readiness.details.proposal,
+          });
+          if (audit) {
+            await audit.info("git.action.planned", {
+              event: "git.action.planned",
+              timestamp: new Date().toISOString(),
+              workflow: context.commandName,
+              command: context.commandName,
+              outcome: readiness.outcome,
+              details: {
+                kind: "init",
+                requiresApproval: true,
+              },
+            });
+          }
+        }
+
+        if (audit) {
+          await audit.info("git.readiness.checked", {
+            event: "git.readiness.checked",
+            timestamp: new Date().toISOString(),
+            workflow: context.commandName,
+            command: context.commandName,
+            outcome: readiness.outcome,
+            details: {
+              isGitRepository: readiness.details?.isGitRepository === true,
+              hasRemote: readiness.details?.hasRemote === true,
+              branch: readiness.details?.branch || null,
+              durationMs: readinessDurationMs,
+            },
+          });
+        }
+
+        if (!shouldSkipBranchPlanning(readiness)) {
+          const currentBranch = resolveCurrentBranch(input, context, pluginContext);
+          const strategy = evaluateBranchStrategy({
             workflowContext: context,
             workflowPolicy,
             branchConfig,
-          });
-          const proposal = buildBranchProposal({
-            strategy,
-            candidateName,
             currentBranch,
           });
 
-          if (proposal) {
-            workflowState.set(context.sessionID, {
-              ...workflowState.get(context.sessionID),
-              branchProposal: proposal,
+          if (strategy.requirement !== "unnecessary") {
+            const candidateName = computeCandidateBranchName({
+              workflowContext: context,
+              workflowPolicy,
+              branchConfig,
             });
-            if (audit) {
-              await audit.info("git.action.planned", {
-                event: "git.action.planned",
-                timestamp: new Date().toISOString(),
-                workflow: context.commandName,
-                command: context.commandName,
-                details: {
-                  kind: "branch",
-                  action: proposal.action,
-                  name: proposal.name,
-                  reason: proposal.reason,
-                  isLongLived: strategy.isLongLived,
-                },
+            const proposal = buildBranchProposal({
+              strategy,
+              candidateName,
+              currentBranch,
+            });
+
+            if (proposal) {
+              workflowState.set(context.sessionID, {
+                ...workflowState.get(context.sessionID),
+                branchProposal: proposal,
               });
+              if (audit) {
+                await audit.info("git.action.planned", {
+                  event: "git.action.planned",
+                  timestamp: new Date().toISOString(),
+                  workflow: context.commandName,
+                  command: context.commandName,
+                  details: {
+                    kind: "branch",
+                    action: proposal.action,
+                    name: proposal.name,
+                    reason: proposal.reason,
+                    isLongLived: strategy.isLongLived,
+                  },
+                });
+              }
             }
           }
         }
