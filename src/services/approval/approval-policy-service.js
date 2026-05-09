@@ -12,7 +12,8 @@
  * Priority order for selectNextPlannedAction:
  *   1. initProposal
  *   2. branchProposal
- *   (future: commitProposal, pushProposal — added by Story 3.x)
+ *   3. commitProposal (Story 3.2)
+ *   4. pushProposal   (Story 3.3)
  */
 
 /**
@@ -37,11 +38,13 @@ export function getPendingApproval(state) {
  *      init/branch proposal so queued actions are not lost.
  *   1. initProposal
  *   2. branchProposal
+ *   3. commitProposal
  *
  * @param {{
  *   pendingActions?: Array<{ proposal?: object } | null>,
  *   initProposal?: object | null,
- *   branchProposal?: object | null
+ *   branchProposal?: object | null,
+ *   commitProposal?: object | null
  * }} state
  * @returns {object | null}
  */
@@ -68,7 +71,12 @@ export function selectNextPlannedAction(state) {
     return state.branchProposal;
   }
 
-  // Future: commitProposal, pushProposal (Story 3.x)
+  // Priority 3: commitProposal (Story 3.2)
+  if (state.commitProposal && typeof state.commitProposal === "object") {
+    return state.commitProposal;
+  }
+
+  // Future: pushProposal (Story 3.3)
 
   return null;
 }

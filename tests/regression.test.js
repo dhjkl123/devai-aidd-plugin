@@ -22,11 +22,20 @@ const commandExecuteBeforeModuleUrl = pathToFileURL(
 const toolExecuteAfterModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "hooks", "tool-execute-after.js"),
 ).href;
+const permissionAskedHookModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "hooks", "permission-asked.js"),
+).href;
+const fileEditedHookModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "hooks", "file-edited.js"),
+).href;
 const loadConfigModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "config", "load-config.js"),
 ).href;
 const resolveWorkflowPolicyModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "workflow", "resolve-workflow-policy.js"),
+).href;
+const detectFinalizableOutputsModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "workflow", "detect-finalizable-outputs.js"),
 ).href;
 const branchServiceModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "git", "branch-service.js"),
@@ -2115,6 +2124,7 @@ async function verifyApprovalPolicyServiceContracts() {
 
   const initProposal = { kind: "init", directory: "/tmp" };
   const branchProposal = { kind: "branch", action: "create", name: "feat/X" };
+  const commitProposal = { kind: "commit", message: "Finish workflow outputs" };
 
   assert.deepEqual(
     selectNextPlannedAction({ initProposal }),
@@ -2130,6 +2140,16 @@ async function verifyApprovalPolicyServiceContracts() {
     selectNextPlannedAction({ initProposal, branchProposal }),
     initProposal,
     "selectNextPlannedAction: initProposal takes priority over branchProposal",
+  );
+  assert.deepEqual(
+    selectNextPlannedAction({ commitProposal }),
+    commitProposal,
+    "selectNextPlannedAction: commitProposal alone selected",
+  );
+  assert.deepEqual(
+    selectNextPlannedAction({ branchProposal, commitProposal }),
+    branchProposal,
+    "selectNextPlannedAction: branchProposal takes priority over commitProposal",
   );
 
   // evaluateRequestGate
@@ -2954,6 +2974,240 @@ async function verifyWorkflowStateNestedDeepIsolation() {
     "verifyWorkflowStateNestedDeepIsolation: nested mutation of approvalHistory[0].proposal.name must not reach store",
   );
 }
+
+async function verifyWorkflowStateFinalizationIsolation() {
+  const { createWorkflowStateStore } = await import(
+    `${workflowStateModuleUrl}?finalization-iso=${Date.now()}`
+  );
+
+  const store = createWorkflowStateStore();
+  store.set("s-final-iso", {
+    commandName: "bmad-bmm-quick-dev",
+    phase: "finish",
+    touchedFiles: [
+      { path: "src/index.js", kind: "code" },
+      { path: "README.md", kind: "technical-doc" },
+    ],
+    finalizationArtifacts: {
+      matchedFiles: [{ path: "src/index.js", kind: "code" }],
+      ignoredFiles: [{ path: ".opencode/state/cache.json", kind: "other" }],
+    },
+    finalizationAssessment: {
+      outcome: "allow",
+      reason: "finalizable-outputs-detected",
+      details: {
+        matchedFiles: [{ path: "src/index.js", kind: "code" }],
+        artifactKinds: ["code"],
+      },
+    },
+    commitProposal: {
+      kind: "commit",
+      artifactScope: "implementation",
+      files: ["src/index.js"],
+    },
+  });
+
+  const snapshot = store.get("s-final-iso");
+  snapshot.touchedFiles[0].path = "tampered.js";
+  snapshot.finalizationArtifacts.matchedFiles[0].kind = "other";
+  snapshot.finalizationAssessment.details.artifactKinds.push("planning-artifact");
+  snapshot.commitProposal.files[0] = "tampered.md";
+
+  const reFetched = store.get("s-final-iso");
+  assert.equal(reFetched.touchedFiles[0].path, "src/index.js");
+  assert.equal(reFetched.finalizationArtifacts.matchedFiles[0].kind, "code");
+  assert.deepEqual(reFetched.finalizationAssessment.details.artifactKinds, ["code"]);
+  assert.deepEqual(reFetched.commitProposal.files, ["src/index.js"]);
+}
+
+async function verifyFileEditedTracksTouchedFilesAndSessionCleanup() {
+  const [{ createWorkflowStateStore }, { createFileEditedHook }] = await Promise.all([
+    import(`${workflowStateModuleUrl}?file-edited=${Date.now()}`),
+    import(`${fileEditedHookModuleUrl}?file-edited=${Date.now()}`),
+  ]);
+
+  const store = createWorkflowStateStore();
+  store.set("s-file-edited", {
+    sessionID: "s-file-edited",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "in-progress",
+  });
+
+  const hook = createFileEditedHook(
+    { "file.edited": async () => {} },
+    { workflowState: store, pluginContext: { directory: projectRoot } },
+  );
+
+  await hook({
+    sessionID: "s-file-edited",
+    filePath: path.join(projectRoot, "src", "index.js"),
+  });
+  await hook({
+    sessionID: "s-file-edited",
+    filePath: "README.md",
+  });
+  await hook({
+    sessionID: "s-file-edited",
+    filePath: path.join(projectRoot, "src", "index.js"),
+  });
+
+  const snapshot = store.get("s-file-edited");
+  assert.deepEqual(
+    snapshot.touchedFiles.map((entry) => entry.path),
+    ["src/index.js", "README.md"],
+  );
+  assert.deepEqual(
+    snapshot.touchedFiles.map((entry) => entry.kind),
+    ["code", "technical-doc"],
+  );
+
+  store.clear("s-file-edited");
+  assert.equal(store.get("s-file-edited"), undefined);
+}
+
+async function verifyDetectFinalizableOutputs() {
+  const { detectFinalizableOutputs } = await import(
+    `${detectFinalizableOutputsModuleUrl}?finalizable=${Date.now()}`
+  );
+
+  const commitAndPush = detectFinalizableOutputs({
+    workflowContext: { commandName: "bmad-bmm-quick-dev", sessionID: "s-final-1", phase: "finish" },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "story",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    trackedFiles: [{ path: "src/index.js", kind: "code" }],
+    repositorySnapshot: null,
+    lastContinuationDecision: null,
+    activeRecoveryGate: null,
+  });
+  assert.equal(commitAndPush.details.hasFinalizableOutputs, true);
+  assert.equal(commitAndPush.details.shouldProposeCommit, true);
+  assert.equal(commitAndPush.details.shouldConsiderPushLater, true);
+
+  const noRelevantOutputs = detectFinalizableOutputs({
+    workflowContext: { commandName: "bmad-bmm-quick-dev", sessionID: "s-final-2", phase: "finish" },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "story",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    trackedFiles: [{ path: ".opencode/state/cache.json", kind: "other" }],
+    repositorySnapshot: null,
+    lastContinuationDecision: null,
+    activeRecoveryGate: null,
+  });
+  assert.equal(noRelevantOutputs.details.hasFinalizableOutputs, false);
+  assert.equal(noRelevantOutputs.details.shouldProposeCommit, false);
+
+  const artifactMismatch = detectFinalizableOutputs({
+    workflowContext: { commandName: "bmad-bmm-create-prd", sessionID: "s-final-3", phase: "finish" },
+    workflowPolicy: {
+      category: "planning",
+      identityStrategy: "artifact-singleton",
+      artifactKey: "prd",
+      branchRequired: false,
+      finalization: "commit-optional-push",
+    },
+    trackedFiles: [{ path: "_bmad-output/planning-artifacts/architecture.md", kind: "planning-artifact" }],
+    repositorySnapshot: null,
+    lastContinuationDecision: null,
+    activeRecoveryGate: null,
+  });
+  assert.equal(artifactMismatch.reason, "artifact-scope-mismatch");
+  assert.equal(artifactMismatch.details.shouldProposeCommit, false);
+
+  const blockedByRecovery = detectFinalizableOutputs({
+    workflowContext: { commandName: "bmad-bmm-quick-dev", sessionID: "s-final-4", phase: "finish" },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "story",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    trackedFiles: [{ path: "src/index.js", kind: "code" }],
+    repositorySnapshot: null,
+    lastContinuationDecision: null,
+    activeRecoveryGate: {
+      blockingScope: "workflow-finalization",
+      state: "awaitingRecovery",
+    },
+  });
+  assert.equal(blockedByRecovery.reason, "finalization-blocked");
+  assert.equal(blockedByRecovery.details.hasFinalizableOutputs, true);
+  assert.equal(blockedByRecovery.details.shouldProposeCommit, false);
+  assert.equal(blockedByRecovery.details.shouldConsiderPushLater, false);
+}
+
+async function verifyToolExecuteAfterFinishEvaluatesFinalization() {
+  const [{ createWorkflowStateStore }, { createToolExecuteAfterHook }] = await Promise.all([
+    import(`${workflowStateModuleUrl}?finish-hook=${Date.now()}`),
+    import(`${toolExecuteAfterModuleUrl}?finish-hook=${Date.now()}`),
+  ]);
+
+  const store = createWorkflowStateStore();
+  store.set("s-finish-hook", {
+    sessionID: "s-finish-hook",
+    commandName: "bmad-bmm-quick-dev",
+    arguments: "ABC-123 finish hook",
+    detectedAt: "2026-05-09T00:00:00.000Z",
+    phase: "in-progress",
+    touchedFiles: [{ path: "src/index.js", kind: "code" }],
+  });
+
+  const events = [];
+  const hook = createToolExecuteAfterHook(
+    { "tool.execute.after": async () => {} },
+    {
+      workflowState: store,
+      audit: {
+        async info(message, payload) {
+          events.push({ message, payload });
+        },
+      },
+      pluginContext: {
+        directory: projectRoot,
+        resolvePolicy() {
+          return {
+            outcome: "allow",
+            details: {
+              policy: {
+                category: "implementation",
+                identityStrategy: "story",
+                branchRequired: true,
+                finalization: "commit-and-push",
+              },
+            },
+          };
+        },
+        listChangedFiles() {
+          return ["src/index.js"];
+        },
+      },
+    },
+  );
+
+  await hook(
+    { sessionID: "s-finish-hook", tool: "finish", args: {} },
+    { changedFiles: ["src/index.js"] },
+  );
+
+  const snapshot = store.get("s-finish-hook");
+  assert.equal(snapshot.phase, "finish");
+  assert.equal(snapshot.finalizationAssessment.reason, "finalizable-outputs-detected");
+  assert.ok(
+    events.some((entry) => entry.message === "workflow.finalization.evaluated"),
+    "finish hook must emit workflow.finalization.evaluated",
+  );
+  assert.ok(
+    events.some((entry) => entry.message === "git.finalization.outputs.detected"),
+    "finish hook must emit git.finalization.outputs.detected when outputs exist",
+  );
+}
+
 
 /**
  * L4 (Story 2.1 second review): stale Git-evaluation fields (branchProposal /
@@ -6893,6 +7147,7 @@ main()
   .then(() => verifyApprovalPromptDeliveryFailureAudit())
   .then(() => verifyPriorStateCarryOver())
   .then(() => verifyWorkflowStateNestedDeepIsolation())
+  .then(() => verifyWorkflowStateFinalizationIsolation())
   // Story 2.1 second review fix (L4)
   .then(() => verifyStaleGitFieldsInvalidatedOnReentry())
   // Story 2.2 tests
@@ -6954,6 +7209,11 @@ main()
   .then(() => verifyTerminalContinuationPhaseReleasesGate())
   // Story 2.5 review round 3 fixes
   .then(() => verifyPermissionAskedAliasDisjointness())
+  // Story 3.1 — detect finalizable workflow outputs
+  .then(() => verifyFileEditedTracksTouchedFilesAndSessionCleanup())
+  .then(() => verifyDetectFinalizableOutputs())
+  .then(() => verifyToolExecuteAfterFinishEvaluatesFinalization())
+  // Story 3.2 — prepare and execute workflow completion commits
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;

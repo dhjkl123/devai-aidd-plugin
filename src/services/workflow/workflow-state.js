@@ -147,6 +147,24 @@ export function createWorkflowStateStore() {
       if (copy.recoveryGate !== null && copy.recoveryGate !== undefined) {
         copy.recoveryGate = structuredClone(copy.recoveryGate);
       }
+      if (Array.isArray(copy.touchedFiles)) {
+        copy.touchedFiles = structuredClone(copy.touchedFiles);
+      }
+      if (
+        copy.finalizationAssessment !== null &&
+        copy.finalizationAssessment !== undefined
+      ) {
+        copy.finalizationAssessment = structuredClone(copy.finalizationAssessment);
+      }
+      if (
+        copy.finalizationArtifacts !== null &&
+        copy.finalizationArtifacts !== undefined
+      ) {
+        copy.finalizationArtifacts = structuredClone(copy.finalizationArtifacts);
+      }
+      if (copy.commitProposal !== null && copy.commitProposal !== undefined) {
+        copy.commitProposal = structuredClone(copy.commitProposal);
+      }
       return copy;
     },
 

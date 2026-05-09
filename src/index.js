@@ -31,6 +31,21 @@ function assertBootstrapEnvironment({ client, directory }) {
   }
 }
 
+function parseStatusPorcelainPaths(stdout) {
+  return String(stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .map((line) => {
+      const payload = line.slice(3).trim();
+      if (payload.includes(" -> ")) {
+        return payload.split(" -> ").at(-1)?.trim() || null;
+      }
+      return payload || null;
+    })
+    .filter(Boolean);
+}
+
 export async function DevaiAiddGuardPlugin({ client, directory }) {
   const fsAdapter = createFileSystemAdapter();
   const consoleAdapter = createConsoleAdapter();
@@ -116,6 +131,17 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       directory,
       gitRunner: runGitCommand,
       resolvePolicy: (workflowContext) => resolveWorkflowPolicy(workflowContext, runtimeConfig.config),
+      listChangedFiles() {
+        try {
+          const stdout = runGitCommand({
+            directory,
+            command: "status-porcelain",
+          });
+          return parseStatusPorcelainPaths(stdout);
+        } catch {
+          return [];
+        }
+      },
 
       // Prompt adapter — delegates to runtime client.session.promptAsync.
       // Injected here so hook tests can substitute a mock without touching client.
@@ -213,7 +239,11 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       // these factories — keep the injection surface minimal so the contract
       // matches the consumer (mirrors the LOW-3 cleanup on permission.asked).
       "tool.execute.before": createToolExecuteBeforeHook(legacyHandlers, { workflowState }),
-      "tool.execute.after": createToolExecuteAfterHook(legacyHandlers, { workflowState }),
+      "tool.execute.after": createToolExecuteAfterHook(legacyHandlers, {
+        workflowState,
+        audit,
+        pluginContext,
+      }),
       "permission.asked": createPermissionAskedHook(legacyHandlers, {
         // Story 2.5 (MEDIUM review): pluginContext is now consumed so the
         // hook can deliver recovery prompts via `requestRecoveryDecision`
@@ -223,7 +253,7 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         audit,
         pluginContext,
       }),
-      "file.edited": createFileEditedHook(legacyHandlers, { pluginContext }),
+      "file.edited": createFileEditedHook(legacyHandlers, { workflowState, pluginContext }),
       event: createSessionHook(legacyHandlers, { workflowState, pluginContext }),
     };
   } catch (error) {

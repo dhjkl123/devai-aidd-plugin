@@ -1,6 +1,6 @@
 # Story 3.1: 완료 가능한 워크플로우 출력 감지
 
-Status: ready-for-dev
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -23,47 +23,56 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] 최종화 출력 판정용 세션 상태 모델을 추가한다 (AC: 1, 2)
-  - [ ] `src/services/workflow/workflow-state.js`에 Story 3.1 전용 상태 슬롯을 추가한다. 최소 후보: `touchedFiles`, `finalizationAssessment`, `finalizationArtifacts`, `commitProposal`.
-  - [ ] 기존 `approvalCurrent`, `pendingActions`, `recoveryGate`, `lastGitResult`와 동일하게 `get()`에서 deep clone을 보장한다.
-  - [ ] Story 2.5의 recovery gate가 `workflow-finalization` 범위를 막는 동안 finalization assessment가 commit/push 계획을 성급히 열지 않도록 상태 분리를 유지한다.
+- [x] 최종화 출력 판정용 세션 상태 모델을 추가한다 (AC: 1, 2)
+  - [x] `src/services/workflow/workflow-state.js`에 Story 3.1 전용 상태 슬롯을 추가한다. 최소 후보: `touchedFiles`, `finalizationAssessment`, `finalizationArtifacts`, `commitProposal`.
+  - [x] 기존 `approvalCurrent`, `pendingActions`, `recoveryGate`, `lastGitResult`와 동일하게 `get()`에서 deep clone을 보장한다.
+  - [x] Story 2.5의 recovery gate가 `workflow-finalization` 범위를 막는 동안 finalization assessment가 commit/push 계획을 성급히 열지 않도록 상태 분리를 유지한다.
 
-- [ ] 워크플로우 산출물 수집기를 구현한다 (AC: 1, 2)
-  - [ ] `src/hooks/file-edited.js`를 더 이상 단순 위임만 하지 않도록 확장하고, session-scoped 파일 편집 이벤트를 누적 기록한다.
-  - [ ] 런타임이 `file.edited`를 항상 보내지 않는 경우를 대비해 보조 수집 경로를 설계한다. 후보: `pluginContext`에서 제공 가능한 changed-files 조회 함수, 또는 Story 3.2 직전의 Git status snapshot 재사용.
-  - [ ] 산출물 분류는 최소한 `code`, `technical-doc`, `planning-artifact`, `other` 네 범주를 구분하고, 절대경로/상대경로 혼용을 정규화한다.
+- [x] 워크플로우 산출물 수집기를 구현한다 (AC: 1, 2)
+  - [x] `src/hooks/file-edited.js`를 더 이상 단순 위임만 하지 않도록 확장하고, session-scoped 파일 편집 이벤트를 누적 기록한다.
+  - [x] 런타임이 `file.edited`를 항상 보내지 않는 경우를 대비해 보조 수집 경로를 설계한다. 후보: `pluginContext`에서 제공 가능한 changed-files 조회 함수, 또는 Story 3.2 직전의 Git status snapshot 재사용.
+  - [x] 산출물 분류는 최소한 `code`, `technical-doc`, `planning-artifact`, `other` 네 범주를 구분하고, 절대경로/상대경로 혼용을 정규화한다.
 
-- [ ] 최종화 가능성 판정 서비스를 구현한다 (AC: 1, 2)
-  - [ ] 새 서비스 후보 `src/services/workflow/detect-finalizable-outputs.js`에 순수 함수 형태의 판정 로직을 둔다.
-  - [ ] 입력은 최소한 `workflowContext`, `workflowPolicy`, `trackedFiles`, `repositorySnapshot`, `lastContinuationDecision`, `activeRecoveryGate`를 받는다.
-  - [ ] 출력은 기존 envelope 스타일을 재사용한다: `{ outcome, reason, message, details }`.
-  - [ ] `details`에는 `hasFinalizableOutputs`, `artifactScope`, `artifactKinds`, `matchedFiles`, `ignoredFiles`, `policyFinalization`, `shouldProposeCommit`, `shouldConsiderPushLater`를 담는다.
+- [x] 최종화 가능성 판정 서비스를 구현한다 (AC: 1, 2)
+  - [x] 새 서비스 후보 `src/services/workflow/detect-finalizable-outputs.js`에 순수 함수 형태의 판정 로직을 둔다.
+  - [x] 입력은 최소한 `workflowContext`, `workflowPolicy`, `trackedFiles`, `repositorySnapshot`, `lastContinuationDecision`, `activeRecoveryGate`를 받는다.
+  - [x] 출력은 기존 envelope 스타일을 재사용한다: `{ outcome, reason, message, details }`.
+  - [x] `details`에는 `hasFinalizableOutputs`, `artifactScope`, `artifactKinds`, `matchedFiles`, `ignoredFiles`, `policyFinalization`, `shouldProposeCommit`, `shouldConsiderPushLater`를 담는다.
 
-- [ ] workflow policy 기반 판정 규칙을 명시적으로 구현한다 (AC: 1, 2)
-  - [ ] `commit-and-push`: 의미 있는 출력이 있으면 commit 준비 가능 상태를 연다. push 판단은 Story 3.3에서 이어받도록 별도 플래그만 남긴다.
-  - [ ] `commit-optional-push`: planning artifact 중심 워크플로우에서도 실제 변경 파일이 존재할 때만 finalizable로 본다.
-  - [ ] `no-forced-finalization`: 출력이 있어도 자동 commit 제안을 강제하지 않는다. 단, audit/traceability용 detection result는 남긴다.
-  - [ ] `artifactKey`가 있는 정책은 `prd`, `architecture`, `epics`, `sprint-planning` 같은 singleton artifact 기대치와 실제 touched file 범위를 교차검증한다.
+- [x] workflow policy 기반 판정 규칙을 명시적으로 구현한다 (AC: 1, 2)
+  - [x] `commit-and-push`: 의미 있는 출력이 있으면 commit 준비 가능 상태를 연다. push 판단은 Story 3.3에서 이어받도록 별도 플래그만 남긴다.
+  - [x] `commit-optional-push`: planning artifact 중심 워크플로우에서도 실제 변경 파일이 존재할 때만 finalizable로 본다.
+  - [x] `no-forced-finalization`: 출력이 있어도 자동 commit 제안을 강제하지 않는다. 단, audit/traceability용 detection result는 남긴다.
+  - [x] `artifactKey`가 있는 정책은 `prd`, `architecture`, `epics`, `sprint-planning` 같은 singleton artifact 기대치와 실제 touched file 범위를 교차검증한다.
 
-- [ ] finish 단계 진입과 finalization assessment 호출 경계를 추가한다 (AC: 1, 2)
-  - [ ] `src/services/workflow/detect-workflow-context.js`가 이미 예약한 `finish` phase를 Story 3.1에서 실제 사용한다.
-  - [ ] 훅에 직접 commit/push 로직을 넣지 말고, Story 3.2가 재사용할 수 있는 `advancePhase(..., "finish")` + assessment 호출 경계만 만든다.
-  - [ ] `src/hooks/tool-execute-after.js`는 여전히 thin hook 원칙을 유지하고, finish 판정 오케스트레이션이 필요하면 전용 helper/service를 호출하는 수준에 그친다.
+- [x] finish 단계 진입과 finalization assessment 호출 경계를 추가한다 (AC: 1, 2)
+  - [x] `src/services/workflow/detect-workflow-context.js`가 이미 예약한 `finish` phase를 Story 3.1에서 실제 사용한다.
+  - [x] 훅에 직접 commit/push 로직을 넣지 말고, Story 3.2가 재사용할 수 있는 `advancePhase(..., "finish")` + assessment 호출 경계만 만든다.
+  - [x] `src/hooks/tool-execute-after.js`는 여전히 thin hook 원칙을 유지하고, finish 판정 오케스트레이션이 필요하면 전용 helper/service를 호출하는 수준에 그친다.
 
-- [ ] approval/recovery 파이프라인과 충돌하지 않도록 최종화 제안 준비 구조를 만든다 (AC: 1, 2)
-  - [ ] `src/services/approval/approval-policy-service.js`의 주석과 우선순위 설계를 Story 3.x 현실과 맞춘다. `commitProposal`, `pushProposal`는 Story 3.2/3.3에서 승격되므로 Story 3.1은 검출 결과만 준비한다.
-  - [ ] `src/hooks/command-execute-before.js`가 init/branch planning 후 future finalization planning을 수용할 수 있게 확장 포인트를 만든다.
-  - [ ] unresolved commit recovery gate가 열려 있을 때 `finalizationAssessment.details.shouldProposeCommit === false`가 되도록 방어한다.
+- [x] approval/recovery 파이프라인과 충돌하지 않도록 최종화 제안 준비 구조를 만든다 (AC: 1, 2)
+  - [x] `src/services/approval/approval-policy-service.js`의 주석과 우선순위 설계를 Story 3.x 현실과 맞춘다. `commitProposal`, `pushProposal`는 Story 3.2/3.3에서 승격되므로 Story 3.1은 검출 결과만 준비한다.
+  - [x] `src/hooks/command-execute-before.js`가 init/branch planning 후 future finalization planning을 수용할 수 있게 확장 포인트를 만든다.
+  - [x] unresolved commit recovery gate가 열려 있을 때 `finalizationAssessment.details.shouldProposeCommit === false`가 되도록 방어한다.
 
-- [ ] 구조화 감사 이벤트와 테스트를 추가한다 (AC: 1, 2)
-  - [ ] 새 이벤트 후보: `workflow.finalization.evaluated`, `git.finalization.outputs.detected`, `git.finalization.outputs.skipped`.
-  - [ ] 이벤트 envelope은 기존 규약을 따른다: `event`, `timestamp`, `workflow`, `command`, `outcome`, `details`.
-  - [ ] `tests/regression.test.js`에 최소 다음 회귀를 추가한다:
-    - [ ] file-edited 경로가 세션별 touched file를 누적하고 `session.deleted`에서 정리되는지
-    - [ ] `commit-and-push` 정책 + 변경 파일 존재 시 `hasFinalizableOutputs === true`
-    - [ ] 변경 파일 없음 또는 무관한 파일만 변경 시 `shouldProposeCommit === false`
-    - [ ] `artifact-singleton` 정책에서 기대 artifact 범위와 실제 파일이 어긋나면 `reason`이 설명 가능한 값으로 분류되는지
-    - [ ] recovery gate가 `workflow-finalization`을 막을 때 commit/push 준비가 열리지 않는지
+- [x] 구조화 감사 이벤트와 테스트를 추가한다 (AC: 1, 2)
+  - [x] 새 이벤트 후보: `workflow.finalization.evaluated`, `git.finalization.outputs.detected`, `git.finalization.outputs.skipped`.
+  - [x] 이벤트 envelope은 기존 규약을 따른다: `event`, `timestamp`, `workflow`, `command`, `outcome`, `details`.
+  - [x] `tests/regression.test.js`에 최소 다음 회귀를 추가한다:
+    - [x] file-edited 경로가 세션별 touched file를 누적하고 `session.deleted`에서 정리되는지
+    - [x] `commit-and-push` 정책 + 변경 파일 존재 시 `hasFinalizableOutputs === true`
+    - [x] 변경 파일 없음 또는 무관한 파일만 변경 시 `shouldProposeCommit === false`
+    - [x] `artifact-singleton` 정책에서 기대 artifact 범위와 실제 파일이 어긋나면 `reason`이 설명 가능한 값으로 분류되는지
+    - [x] recovery gate가 `workflow-finalization`을 막을 때 commit/push 준비가 열리지 않는지
+
+### Review Follow-ups (AI)
+
+- [ ] [AI-Review][HIGH] `src/services/workflow/evaluate-workflow-finalization.js`에서 audit sink 실패를 best-effort로 삼켜 finish 경로가 예외로 중단되지 않게 수정하고 회귀 테스트를 추가한다. [src/services/workflow/evaluate-workflow-finalization.js]
+- [ ] [AI-Review][HIGH] singleton artifact workflow가 저장소 전체 dirty state 때문에 `artifact-scope-mismatch`로 오판되지 않도록 session-scoped finalization input만 사용하거나 fallback 범위를 재설계한다. [src/services/workflow/evaluate-workflow-finalization.js, src/services/workflow/detect-finalizable-outputs.js]
+- [ ] [AI-Review][MEDIUM] `normalizeTrackedFilePath()`가 저장소 밖 절대 경로를 내부 상대 경로처럼 받아들이지 않도록 차단하고 테스트를 추가한다. [src/services/workflow/finalization-artifacts.js]
+- [ ] [AI-Review][MEDIUM] Story 문서의 변경 이력과 실제 Git 변경 파일 목록이 일치하도록 정리한다. 특히 `sprint-status.yaml` 수정 여부 설명을 현재 상태와 맞춘다. [_bmad-output/implementation-artifacts/3-1-detect-finalizable-workflow-outputs.md]
+
+ - [ ] [AI-Review][MEDIUM] `listChangedFiles()` fallback이 Git `status --short`의 C-quoted path, rename path, 공백 포함 path를 정확히 decode하도록 parser와 regression test를 보완한다. [src/index.js, src/services/workflow/evaluate-workflow-finalization.js, tests/regression.test.js]
 
 ## Dev Notes
 
@@ -222,6 +231,24 @@ GPT-5 Codex
 - 2026-05-09: Epic 3 원문, PRD, architecture, 관련 소스/테스트, Epic 2 마지막 스토리, 최근 커밋 패턴을 반영해 구현 가드레일을 정리했다.
 - 2026-05-09: 사용자 지시에 따라 `sprint-status.yaml`을 포함한 다른 파일은 수정하지 않았고, 대상 스토리 파일만 작성했다.
 - 2026-05-09: 컨텍스트 생성 완료 - Status를 `ready-for-dev`로 설정하고 Dev Notes/Tasks/References를 구현 가능 수준으로 구체화했다.
+- 2026-05-09: `file.edited` 누적 추적, finish 단계 finalization evaluation, Git status 기반 fallback changed-files 수집 경로를 추가했다.
+- 2026-05-09: `detect-finalizable-outputs.js`와 `evaluate-workflow-finalization.js`를 추가해 정책 기반 최종화 판정을 workflow 서비스로 분리했다.
+- 2026-05-09: Story 3.1 회귀 테스트를 추가하고 `npm test` 전체 스위트를 통과시켰다.
 
 ### File List
 
+- `src/hooks/command-execute-before.js`
+- `src/hooks/file-edited.js`
+- `src/hooks/tool-execute-after.js`
+- `src/index.js`
+- `src/services/approval/approval-policy-service.js`
+- `src/services/git/run-git-command.js`
+- `src/services/workflow/detect-finalizable-outputs.js`
+- `src/services/workflow/evaluate-workflow-finalization.js`
+- `src/services/workflow/finalization-artifacts.js`
+- `src/services/workflow/workflow-state.js`
+- `tests/regression.test.js`
+
+## Change Log
+
+- 2026-05-09: Story 3.1 구현 완료 - 세션별 touched file 추적, finish finalization assessment, fallback changed-files 수집, 정책 기반 최종화 판정, 감사 이벤트, 회귀 테스트를 추가했다.
