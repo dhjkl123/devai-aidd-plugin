@@ -40,7 +40,7 @@
 
 generated: 2026-05-08 00:03:13 +09:00
 last_updated: 2026-05-09
-last_dev: 2026-05-09 (story 2-5 dev-story review-followups round 3 complete: MEDIUM Task#5 tool-execute amendment + Round 3 Architectural Note + LOW _openBlockedGate single-abandoned history entry + LOW shared permission-asked-aliases.js + verifyPermissionAskedAliasDisjointness + LOW sprint-status File List; +1 regression test; status -> done)
+last_dev: 2026-05-09 (story 3-2 dev-story complete: commitProposal generation, finish-stage approval publishing, approved commit execution, execution-failure recovery reopening, and regression coverage; status -> review)
 last_review: 2026-05-09 (story 2-5 code-review round 3: 1 MEDIUM Task#5 false claim that tool-execute hooks were extended + 3 LOW _openBlockedGate history shape / alias disjointness invariant / sprint-status.yaml File List drift; all 4 findings fixed in same session; status -> done)
 last_retro: 2026-05-09 (epic-1 + epic-2 retrospectives executed in batch; epic-1-retro-2026-05-09.md + epic-2-retro-2026-05-09.md saved; epic-1 and epic-2 transitioned in-progress -> done; epic-1-retrospective and epic-2-retrospective transitioned optional -> done)
 last_story: 2026-05-09 (stories 3-1, 3-2, 3-3, 3-4, 3-5 created in parallel via create-story workflow; statuses -> ready-for-dev)
@@ -67,8 +67,8 @@ development_status:
   epic-2-retrospective: done
 
   epic-3: in-progress
-  3-1-detect-finalizable-workflow-outputs: ready-for-dev
-  3-2-prepare-and-execute-workflow-completion-commits: ready-for-dev
+  3-1-detect-finalizable-workflow-outputs: in-progress
+  3-2-prepare-and-execute-workflow-completion-commits: review
   3-3-propose-push-only-when-a-remote-repository-is-available: ready-for-dev
   3-4-record-approval-outcomes-and-execution-results-for-audit: ready-for-dev
   3-5-preserve-reviewer-traceability-through-standard-git-history: ready-for-dev

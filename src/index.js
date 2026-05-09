@@ -16,7 +16,7 @@ import { createSessionHook } from "./hooks/session.js";
 import { createPermissionAskedHook } from "./hooks/permission-asked.js";
 import { createFileEditedHook } from "./hooks/file-edited.js";
 import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-policy.js";
-import { runGitCommand } from "./services/git/run-git-command.js";
+import { runGitAction, runGitCommand } from "./services/git/run-git-command.js";
 import { buildRecoveryPrompt } from "./services/approval/build-recovery-prompt.js";
 
 const SUPPORTED_RUNTIME = "Node.js ESM plugin runtime (Node 22 target)";
@@ -130,6 +130,11 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       runtimeConfig,
       directory,
       gitRunner: runGitCommand,
+      gitActionRunner: ({ action }) =>
+        runGitAction({
+          directory,
+          action,
+        }),
       resolvePolicy: (workflowContext) => resolveWorkflowPolicy(workflowContext, runtimeConfig.config),
       listChangedFiles() {
         try {

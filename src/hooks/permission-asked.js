@@ -43,9 +43,11 @@ import {
 import {
   confirmManualResolution,
   openRecoveryFromApproval,
+  openRecoveryFromExecution,
   readRecoveryGate,
   selectRecoveryChoice,
 } from "../services/approval/recovery-orchestrator.js";
+import { executeApprovedAction } from "../services/git/execute-approved-action.js";
 import {
   isTerminalRecoveryState,
   RECOVERY_CHOICES,
@@ -323,6 +325,50 @@ export function createPermissionAskedHook(legacyHandlers, injections = {}) {
               if (result.outcome === "resolved" && audit && Array.isArray(result.auditEvents)) {
                 for (const event of result.auditEvents) {
                   await audit.info(event.event, event);
+                }
+              }
+
+              if (
+                result.outcome === "resolved" &&
+                outcome === APPROVAL_OUTCOMES.ACCEPT &&
+                result.resolution?.actionKind === "commit"
+              ) {
+                const executionResult = await executeApprovedAction({
+                  workflowState,
+                  sessionID: input.sessionID,
+                  approvalRequest: active,
+                  resolution: result.resolution,
+                  pluginContext,
+                  audit,
+                });
+
+                if (
+                  executionResult.outcome === "executed" &&
+                  executionResult.envelope?.ok === false
+                ) {
+                  try {
+                    const recoveryResult = await openRecoveryFromExecution({
+                      workflowState,
+                      sessionID: input.sessionID,
+                      envelope: executionResult.envelope,
+                      workflow: result.resolution?.metadata?.workflow ?? active.workflow ?? null,
+                      command: result.resolution?.metadata?.command ?? active.command ?? null,
+                      audit,
+                    });
+
+                    if (recoveryResult.outcome === "opened" && recoveryResult.gate) {
+                      await deliverRecoveryPrompt({
+                        pluginContext,
+                        gate: recoveryResult.gate,
+                        audit,
+                        sessionID: input.sessionID,
+                        workflow: result.resolution?.metadata?.workflow ?? active.workflow ?? null,
+                        command: result.resolution?.metadata?.command ?? active.command ?? null,
+                      });
+                    }
+                  } catch {
+                    // Execution recovery is best-effort.
+                  }
                 }
               }
 

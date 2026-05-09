@@ -23,8 +23,9 @@ import { executeGitAction } from "./git-executor.js";
  *   branchName?: string|null,
  *   targetBranch?: string|null,
  *   correlationId?: string|null,
+ *   files?: string[]|null,
  * }} input
- * @returns {{ kind: "commit", operation: "commit", branchName: string|null, targetBranch: string|null, remoteName: null, correlationId: string|null, message: string|null }}
+ * @returns {{ kind: "commit", operation: "commit", branchName: string|null, targetBranch: string|null, remoteName: null, correlationId: string|null, message: string|null, files: string[] }}
  */
 export function buildCommitAction(input = {}) {
   return {
@@ -38,6 +39,7 @@ export function buildCommitAction(input = {}) {
         ? input.correlationId
         : null,
     message: typeof input.message === "string" ? input.message : null,
+    files: Array.isArray(input.files) ? [...input.files] : [],
   };
 }
 

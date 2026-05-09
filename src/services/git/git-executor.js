@@ -82,6 +82,8 @@ function normalizeAction(plan, approval) {
     remoteName: toNullableString(plan?.remoteName),
     correlationId: toNullableString(plan?.correlationId) ?? generateCorrelationId(),
     approvedAt: toNullableString(approval?.resolvedAt) ?? toNullableString(approval?.approvedAt),
+    message: toNullableString(plan?.message),
+    files: Array.isArray(plan?.files) ? [...plan.files] : [],
   };
 }
 

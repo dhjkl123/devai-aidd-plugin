@@ -15,12 +15,7 @@ function resolveAllowedArgs(command) {
   return [...ALLOWED_COMMANDS.get(command)];
 }
 
-export function runGitCommand({ directory, command, timeoutMs = 1500 } = {}) {
-  if (typeof directory !== "string" || directory.length === 0) {
-    throw new Error("A valid directory is required for git readiness commands.");
-  }
-
-  const args = resolveAllowedArgs(command);
+function execGit(directory, args, timeoutMs) {
   return execFileSync("git", args, {
     cwd: directory,
     encoding: "utf8",
@@ -31,4 +26,38 @@ export function runGitCommand({ directory, command, timeoutMs = 1500 } = {}) {
       GIT_TERMINAL_PROMPT: "0",
     },
   });
+}
+
+export function runGitCommand({ directory, command, timeoutMs = 1500 } = {}) {
+  if (typeof directory !== "string" || directory.length === 0) {
+    throw new Error("A valid directory is required for git readiness commands.");
+  }
+
+  const args = resolveAllowedArgs(command);
+  return execGit(directory, args, timeoutMs);
+}
+
+export async function runGitAction({ directory, action, timeoutMs = 5000 } = {}) {
+  if (typeof directory !== "string" || directory.length === 0) {
+    throw new Error("A valid directory is required for git action commands.");
+  }
+  if (!action || typeof action !== "object") {
+    throw new Error("A valid git action is required.");
+  }
+
+  if (action.kind === "commit") {
+    if (!Array.isArray(action.files) || action.files.length === 0) {
+      throw new Error("Commit actions require at least one file.");
+    }
+
+    execGit(directory, ["add", "--", ...action.files], timeoutMs);
+    const stdout = execGit(
+      directory,
+      ["commit", "-m", action.message || "Finish workflow outputs"],
+      timeoutMs,
+    );
+    return { stdout, observedState: null };
+  }
+
+  throw new Error(`Unsupported git action command: ${String(action.kind)}`);
 }

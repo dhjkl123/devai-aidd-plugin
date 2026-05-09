@@ -3208,6 +3208,258 @@ async function verifyToolExecuteAfterFinishEvaluatesFinalization() {
   );
 }
 
+async function verifyToolExecuteAfterFinishPublishesCommitApproval() {
+  const [{ createWorkflowStateStore }, { createToolExecuteAfterHook }] = await Promise.all([
+    import(`${workflowStateModuleUrl}?finish-approval=${Date.now()}`),
+    import(`${toolExecuteAfterModuleUrl}?finish-approval=${Date.now()}`),
+  ]);
+
+  const approvals = [];
+  const events = [];
+  const store = createWorkflowStateStore();
+  store.set("s-finish-approval", {
+    sessionID: "s-finish-approval",
+    commandName: "bmad-bmm-quick-dev",
+    arguments: "finish approval coverage",
+    detectedAt: "2026-05-09T00:00:00.000Z",
+    phase: "in-progress",
+    touchedFiles: [{ path: "src/index.js", kind: "code" }],
+  });
+
+  const hook = createToolExecuteAfterHook(
+    { "tool.execute.after": async () => {} },
+    {
+      workflowState: store,
+      audit: {
+        async info(message, payload) {
+          events.push({ message, payload });
+        },
+      },
+      pluginContext: {
+        directory: projectRoot,
+        resolvePolicy() {
+          return {
+            outcome: "allow",
+            details: {
+              policy: {
+                category: "implementation",
+                identityStrategy: "story",
+                branchRequired: true,
+                finalization: "commit-and-push",
+              },
+            },
+          };
+        },
+        listChangedFiles() {
+          return ["src/index.js", "README.md"];
+        },
+        async requestApproval(request) {
+          approvals.push(request);
+        },
+      },
+    },
+  );
+
+  await hook(
+    { sessionID: "s-finish-approval", tool: "finish", args: {} },
+    { changedFiles: ["src/index.js", "README.md"] },
+  );
+
+  assert.equal(approvals.length, 1, "finish hook must publish one commit approval request");
+  assert.equal(approvals[0].actionType, "commit");
+  assert.equal(approvals[0].proposal.kind, "commit");
+  assert.deepEqual(approvals[0].proposal.files, ["src/index.js", "README.md"]);
+  assert.equal(
+    approvals[0].metadata.finalization,
+    "commit-and-push",
+    "commit approval must keep workflow finalization mode metadata",
+  );
+  assert.equal(store.get("s-finish-approval").approvalCurrent?.actionType, "commit");
+  assert.ok(
+    events.some((entry) => entry.message === "approval.requested"),
+    "finish hook must emit approval.requested for commit proposals",
+  );
+}
+
+async function verifyPermissionAskedAcceptExecutesCommitProposal() {
+  const [
+    { createWorkflowStateStore },
+    { createPermissionAskedHook },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?commit-accept=${Date.now()}`),
+    import(`${permissionAskedHookModuleUrl}?commit-accept=${Date.now()}`),
+  ]);
+
+  const events = [];
+  const store = createWorkflowStateStore();
+  store.set("s-commit-accept", {
+    sessionID: "s-commit-accept",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "finish",
+    readiness: {
+      outcome: "allow",
+      details: {
+        isGitRepository: true,
+        branch: "feat/story-3-2",
+        hasRemote: true,
+      },
+    },
+    approvalCurrent: {
+      id: "approval:s-commit-accept:commit:commit",
+      actionId: "action:commit:commit",
+      sessionID: "s-commit-accept",
+      workflow: "bmad-bmm-quick-dev",
+      command: "bmad-bmm-quick-dev",
+      phase: "finish",
+      actionType: "commit",
+      status: "awaitingApproval",
+      proposal: {
+        kind: "commit",
+        action: "commit",
+        message: "Finish bmad-bmm-quick-dev: update implementation outputs",
+        artifactScope: "implementation",
+        changeCountSummary: "1 code file",
+        files: ["src/index.js"],
+        correlationId: "corr-commit-accept",
+      },
+      metadata: {
+        workflow: "bmad-bmm-quick-dev",
+        command: "bmad-bmm-quick-dev",
+      },
+    },
+    approvalHistory: [],
+    pendingActions: [],
+  });
+
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    {
+      workflowState: store,
+      audit: {
+        async info(message, payload) {
+          events.push({ message, payload });
+        },
+      },
+      pluginContext: {
+        async gitActionRunner({ action }) {
+          assert.equal(action.kind, "commit");
+          assert.deepEqual(action.files, ["src/index.js"]);
+          return {
+            observedState: {
+              headBranch: "feat/story-3-2",
+              hasRemote: true,
+            },
+          };
+        },
+      },
+    },
+  );
+
+  await hook({
+    sessionID: "s-commit-accept",
+    approvalId: "approval:s-commit-accept:commit:commit",
+    actionId: "action:commit:commit",
+    outcome: "accept",
+  });
+
+  const state = store.get("s-commit-accept");
+  assert.equal(state.approvalCurrent, null, "accept must clear the pending approval");
+  assert.equal(state.lastGitAction.kind, "commit");
+  assert.equal(state.lastGitResult.status, "succeeded");
+  assert.equal(state.pendingRecoveryContext, null);
+  assert.equal(state.commitProposal, null, "successful commit must clear commitProposal");
+  assert.ok(
+    events.some((entry) => entry.message === "git.action.executed"),
+    "commit execution must emit git.action.executed",
+  );
+}
+
+async function verifyPermissionAskedCommitFailureOpensRecovery() {
+  const [
+    { createWorkflowStateStore },
+    { createPermissionAskedHook },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?commit-failure=${Date.now()}`),
+    import(`${permissionAskedHookModuleUrl}?commit-failure=${Date.now()}`),
+  ]);
+
+  const prompts = [];
+  const store = createWorkflowStateStore();
+  store.set("s-commit-failure", {
+    sessionID: "s-commit-failure",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "finish",
+    readiness: {
+      outcome: "allow",
+      details: {
+        isGitRepository: true,
+        branch: "feat/story-3-2",
+        hasRemote: true,
+      },
+    },
+    approvalCurrent: {
+      id: "approval:s-commit-failure:commit:commit",
+      actionId: "action:commit:commit",
+      sessionID: "s-commit-failure",
+      workflow: "bmad-bmm-quick-dev",
+      command: "bmad-bmm-quick-dev",
+      phase: "finish",
+      actionType: "commit",
+      status: "awaitingApproval",
+      proposal: {
+        kind: "commit",
+        action: "commit",
+        message: "Finish bmad-bmm-quick-dev: update implementation outputs",
+        artifactScope: "implementation",
+        changeCountSummary: "1 code file",
+        files: ["src/index.js"],
+        correlationId: "corr-commit-failure",
+      },
+      metadata: {
+        workflow: "bmad-bmm-quick-dev",
+        command: "bmad-bmm-quick-dev",
+      },
+    },
+    approvalHistory: [],
+    pendingActions: [],
+  });
+
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    {
+      workflowState: store,
+      audit: {
+        async info() {},
+      },
+      pluginContext: {
+        async gitActionRunner() {
+          const error = new Error("nothing to commit");
+          error.status = 1;
+          error.stdout = "nothing to commit, working tree clean";
+          throw error;
+        },
+        async requestRecoveryDecision(gate) {
+          prompts.push(gate);
+        },
+      },
+    },
+  );
+
+  await hook({
+    sessionID: "s-commit-failure",
+    approvalId: "approval:s-commit-failure:commit:commit",
+    actionId: "action:commit:commit",
+    outcome: "accept",
+  });
+
+  const state = store.get("s-commit-failure");
+  assert.equal(state.lastGitAction.kind, "commit");
+  assert.equal(state.lastGitResult.status, "failed");
+  assert.equal(state.lastGitResult.code, "commit-failure");
+  assert.equal(state.pendingRecoveryContext.code, "commit-failure");
+  assert.equal(state.recoveryGate.actionKind, "commit");
+  assert.equal(prompts.length, 1, "commit failure must deliver one recovery prompt");
+}
 
 /**
  * L4 (Story 2.1 second review): stale Git-evaluation fields (branchProposal /
@@ -7214,6 +7466,9 @@ main()
   .then(() => verifyDetectFinalizableOutputs())
   .then(() => verifyToolExecuteAfterFinishEvaluatesFinalization())
   // Story 3.2 — prepare and execute workflow completion commits
+  .then(() => verifyToolExecuteAfterFinishPublishesCommitApproval())
+  .then(() => verifyPermissionAskedAcceptExecutesCommitProposal())
+  .then(() => verifyPermissionAskedCommitFailureOpensRecovery())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;

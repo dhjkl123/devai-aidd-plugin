@@ -1,6 +1,6 @@
 # Story 3.2: 워크플로우 완료 커밋 준비 및 실행
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -23,35 +23,40 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] 종료 시점의 완료 가능 아티팩트 집계 모델을 추가한다. (AC: 1)
-  - [ ] `file.edited`와 워크플로우 상태를 이용해 세션별 변경 파일 목록, 아티팩트 유형(코드/기술 문서/기획 문서), 마지막 변경 시각을 누적하는 방식을 정의한다.
-  - [ ] 워크플로우 정책의 `finalization` 값이 `commit-and-push` 또는 `commit-optional-push`일 때만 커밋 후보 계산이 열리도록 경계 조건을 명시한다.
-  - [ ] 변경 파일이 없거나 허용 범위 밖 파일만 존재할 때는 커밋 제안을 만들지 않고 비차단 완료로 남기는 조건을 추가한다.
+- [x] 종료 시점의 완료 가능 아티팩트 집계 모델을 추가한다. (AC: 1)
+  - [x] `file.edited`와 워크플로우 상태를 이용해 세션별 변경 파일 목록, 아티팩트 유형(코드/기술 문서/기획 문서), 마지막 변경 시각을 누적하는 방식을 정의한다.
+  - [x] 워크플로우 정책의 `finalization` 값이 `commit-and-push` 또는 `commit-optional-push`일 때만 커밋 후보 계산이 열리도록 경계 조건을 명시한다.
+  - [x] 변경 파일이 없거나 허용 범위 밖 파일만 존재할 때는 커밋 제안을 만들지 않고 비차단 완료로 남기는 조건을 추가한다.
 
-- [ ] Story 3.1 결과와 연결되는 `commitProposal` 생성기를 구현한다. (AC: 1)
-  - [ ] `src/services/git/` 또는 `src/services/workflow/` 아래에 커밋 범위 계산 전용 서비스를 두고, 최소 필드 `kind`, `message`, `artifactScope`, `changeCountSummary`, `files`, `correlationId`를 표준화한다.
-  - [ ] 커밋 메시지는 자유 문장 생성 대신 워크플로우명, 스토리/아티팩트 식별자, 변경 범위를 조합하는 규칙 기반 포맷으로 만든다.
-  - [ ] `approval-policy-service`의 선택 우선순위에 `commitProposal`을 추가하되 기존 `initProposal`과 `branchProposal`보다 먼저 실행되지 않게 유지한다.
+- [x] Story 3.1 결과와 연결되는 `commitProposal` 생성기를 구현한다. (AC: 1)
+  - [x] `src/services/git/` 또는 `src/services/workflow/` 아래에 커밋 범위 계산 전용 서비스를 두고, 최소 필드 `kind`, `message`, `artifactScope`, `changeCountSummary`, `files`, `correlationId`를 표준화한다.
+  - [x] 커밋 메시지는 자유 문장 생성 대신 워크플로우명, 스토리/아티팩트 식별자, 변경 범위를 조합하는 규칙 기반 포맷으로 만든다.
+  - [x] `approval-policy-service`의 선택 우선순위에 `commitProposal`을 추가하되 기존 `initProposal`과 `branchProposal`보다 먼저 실행되지 않게 유지한다.
 
-- [ ] 커밋 제안을 기존 승인 파이프라인에 연결한다. (AC: 1)
-  - [ ] `classify-git-action.js`가 이미 지원하는 `commit` 경로를 실제 제안 객체와 연결한다.
-  - [ ] `build-approval-request.js`와 `build-approval-explanation.js`에 커밋 제안 메타데이터가 빠짐없이 채워지는지 보강한다.
-  - [ ] 승인 요청에는 커밋 범위 요약과 최종화 모드가 드러나야 하며, 원시 경로나 민감한 Git 세부값은 넣지 않는다.
+- [x] 커밋 제안을 기존 승인 파이프라인에 연결한다. (AC: 1)
+  - [x] `classify-git-action.js`가 이미 지원하는 `commit` 경로를 실제 제안 객체와 연결한다.
+  - [x] `build-approval-request.js`와 `build-approval-explanation.js`에 커밋 제안 메타데이터가 빠짐없이 채워지는지 보강한다.
+  - [x] 승인 요청에는 커밋 범위 요약과 최종화 모드가 드러나야 하며, 원시 경로나 민감한 Git 세부값은 넣지 않는다.
 
-- [ ] 승인 후 커밋 실행 경로를 완료 단계에 연결한다. (AC: 2)
-  - [ ] `commit-service.js`의 기존 얇은 래퍼를 재사용하고, 실제 실행은 계속 `git-executor.js`를 단일 정규화 지점으로 사용한다.
-  - [ ] 승인 성공 시점의 `workflowState.lastGitAction`, `lastGitResult`, `pendingRecoveryContext`가 커밋에도 일관되게 남도록 검증한다.
-  - [ ] 커밋 실패는 Story 2.4/2.5에서 만든 분류와 복구 경로를 그대로 사용하고, 워크플로우 컨텍스트를 지우거나 새 오류 계약을 만들지 않는다.
+- [x] 승인 후 커밋 실행 경로를 완료 단계에 연결한다. (AC: 2)
+  - [x] `commit-service.js`의 기존 얇은 래퍼를 재사용하고, 실제 실행은 계속 `git-executor.js`를 단일 정규화 지점으로 사용한다.
+  - [x] 승인 성공 시점의 `workflowState.lastGitAction`, `lastGitResult`, `pendingRecoveryContext`가 커밋에도 일관되게 남도록 검증한다.
+  - [x] 커밋 실패는 Story 2.4/2.5에서 만든 분류와 복구 경로를 그대로 사용하고, 워크플로우 컨텍스트를 지우거나 새 오류 계약을 만들지 않는다.
 
-- [ ] 완료 단계 전이와 후속 Story 3.3 연계를 안전하게 정리한다. (AC: 1, 2)
-  - [ ] 현재 `tool-execute-after.js`는 `in-progress`까지만 올리므로, `finish` 전이를 누가 언제 기록하는지 먼저 명시하고 그 지점에서만 커밋 평가가 일어나게 한다.
-  - [ ] 커밋 성공 후에만 이후 Story 3.3의 `pushProposal` 평가가 열리도록 상태 플래그 또는 결과 조건을 남긴다.
-  - [ ] 커밋이 없거나 실패한 경우 푸시 제안이 열리지 않도록 가드한다.
+- [x] 완료 단계 전이와 후속 Story 3.3 연계를 안전하게 정리한다. (AC: 1, 2)
+  - [x] 현재 `tool-execute-after.js`는 `in-progress`까지만 올리므로, `finish` 전이를 누가 언제 기록하는지 먼저 명시하고 그 지점에서만 커밋 평가가 일어나게 한다.
+  - [x] 커밋 성공 후에만 이후 Story 3.3의 `pushProposal` 평가가 열리도록 상태 플래그 또는 결과 조건을 남긴다.
+  - [x] 커밋이 없거나 실패한 경우 푸시 제안이 열리지 않도록 가드한다.
 
-- [ ] 회귀 및 계약 테스트를 확장한다. (AC: 1, 2)
-  - [ ] `tests/regression.test.js`에 `commitProposal` 선택 우선순위, 승인 요청 메타데이터, 성공/실패 envelope 반영, 무변경 시 미제안 시나리오를 추가한다.
-  - [ ] 종료 단계에서 변경 파일이 코드/문서/기획 산출물로 혼합된 경우에도 범위 요약이 일관되는지 검증한다.
-  - [ ] `nothing to commit`, pre-commit hook 실패, 저장소 상태 불일치가 Story 2.4/2.5 계약대로 복구 가능 실패로 남는지 검증한다.
+- [x] 회귀 및 계약 테스트를 확장한다. (AC: 1, 2)
+  - [x] `tests/regression.test.js`에 `commitProposal` 선택 우선순위, 승인 요청 메타데이터, 성공/실패 envelope 반영, 무변경 시 미제안 시나리오를 추가한다.
+  - [x] 종료 단계에서 변경 파일이 코드/문서/기획 산출물로 혼합된 경우에도 범위 요약이 일관되는지 검증한다.
+  - [x] `nothing to commit`, pre-commit hook 실패, 저장소 상태 불일치가 Story 2.4/2.5 계약대로 복구 가능 실패로 남는지 검증한다.
+
+### Review Follow-ups (AI)
+
+- [ ] [AI-Review][HIGH] `git add -- <files>` 후 pathspec 없는 `git commit -m ...`만 실행하는 현재 경로에서, 사전에 stage된 다른 파일이 함께 commit되지 않도록 실제 commit 범위를 승인된 `proposal.files`로 제한하고 regression test를 추가한다. [src/services/git/run-git-command.js, src/services/git/execute-approved-action.js, tests/regression.test.js]
+- [ ] [AI-Review][MEDIUM] finish approval / commit 실행 경로에서 공백, rename, C-quoted path가 포함된 changed file 케이스를 regression test로 고정하여 `git add -- <files>` pathspec과 approval metadata가 일관되게 유지되는지 검증한다. [src/index.js, src/services/git/run-git-command.js, tests/regression.test.js]
 
 ## Dev Notes
 
@@ -157,5 +162,29 @@ GPT-5 Codex
 ### Completion Notes List
 
 - 2026-05-09: Story 3.2 컨텍스트 생성 완료 - Epic 3 전체 목표, Story 3.2 인수 조건, PRD/아키텍처 제약, Story 2.5 복구 학습, 최근 커밋 패턴, 구현 후보 파일, 테스트 포인트를 반영한 `ready-for-dev` 스토리 문서를 작성했다.
+- 2026-05-09: `commit-proposal.js`와 `publish-next-planned-action.js`를 추가해 finish 단계 평가 결과를 `commitProposal`로 표준화하고, 승인 요청이 `approval.requested`까지 즉시 연결되도록 정리했다.
+- 2026-05-09: `permission-asked.js`에 승인된 commit 실행 경로를 연결하고 `execute-approved-action.js` + `run-git-command.js`를 통해 범위 제한 `git add -- <files>` 후 commit 실행, executor envelope 기록, 실행 실패 recovery prompt 재개방을 구현했다.
+- 2026-05-09: `tests/regression.test.js`에 commit proposal 우선순위, finish 시 approval 발행, commit 승인 성공, commit 실패 recovery 재개방 회귀를 추가했고 `npm test` 전체 통과를 확인했다.
 
 ### File List
+
+- `_bmad-output/implementation-artifacts/3-2-prepare-and-execute-workflow-completion-commits.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/hooks/command-execute-before.js`
+- `src/hooks/permission-asked.js`
+- `src/hooks/tool-execute-after.js`
+- `src/index.js`
+- `src/services/approval/approval-policy-service.js`
+- `src/services/approval/build-approval-request.js`
+- `src/services/approval/publish-next-planned-action.js`
+- `src/services/git/commit-service.js`
+- `src/services/git/execute-approved-action.js`
+- `src/services/git/git-executor.js`
+- `src/services/git/run-git-command.js`
+- `src/services/workflow/commit-proposal.js`
+- `src/services/workflow/evaluate-workflow-finalization.js`
+- `tests/regression.test.js`
+
+### Change Log
+
+- 2026-05-09: Story 3.2 구현 완료. finish 단계의 finalization assessment를 commit proposal/approval publish로 연결하고, 승인된 commit 실행과 실패 recovery 재개방까지 기존 executor/recovery 계약 위에서 마무리했다.

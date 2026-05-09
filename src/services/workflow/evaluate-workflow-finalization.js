@@ -1,4 +1,5 @@
 import { detectFinalizableOutputs } from "./detect-finalizable-outputs.js";
+import { buildCommitProposal } from "./commit-proposal.js";
 import {
   mergeTrackedFiles,
   normalizeTrackedFileEntry,
@@ -82,6 +83,16 @@ export async function evaluateWorkflowFinalization({
     activeRecoveryGate: finishedState.recoveryGate ?? null,
   });
 
+  const commitProposal = buildCommitProposal({
+    workflowContext,
+    workflowPolicy,
+    finalizationAssessment: assessment,
+    finalizationArtifacts: {
+      matchedFiles: assessment.details?.matchedFiles ?? [],
+      ignoredFiles: assessment.details?.ignoredFiles ?? [],
+    },
+  });
+
   workflowState.set(sessionID, {
     ...finishedState,
     phase: "finish",
@@ -91,6 +102,7 @@ export async function evaluateWorkflowFinalization({
       matchedFiles: assessment.details?.matchedFiles ?? [],
       ignoredFiles: assessment.details?.ignoredFiles ?? [],
     },
+    commitProposal,
   });
 
   if (audit) {
@@ -119,6 +131,22 @@ export async function evaluateWorkflowFinalization({
         ...eventBase,
       },
     );
+    if (commitProposal) {
+      await audit.info("git.action.planned", {
+        event: "git.action.planned",
+        timestamp: new Date().toISOString(),
+        workflow: workflowContext.commandName,
+        command: workflowContext.commandName,
+        outcome: "allow",
+        details: {
+          kind: "commit",
+          action: "commit",
+          requiresApproval: true,
+          fileCount: commitProposal.files.length,
+          artifactScope: commitProposal.artifactScope,
+        },
+      });
+    }
   }
 
   return assessment;
