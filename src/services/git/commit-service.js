@@ -18,6 +18,10 @@ import { executeGitAction } from "./git-executor.js";
 /**
  * Build a normalized commit action plan suitable for the executor.
  *
+ * Optional `logger` lets callers surface a warning when `input.files` is not a
+ * usable array — silently dropping caller mistakes hides upstream contract
+ * breakages and was flagged by Story 3.2 review (LOW).
+ *
  * @param {{
  *   message?: string|null,
  *   branchName?: string|null,
@@ -25,9 +29,25 @@ import { executeGitAction } from "./git-executor.js";
  *   correlationId?: string|null,
  *   files?: string[]|null,
  * }} input
+ * @param {{ logger?: { warn?: (message: string, payload?: object) => void } | null }} [options]
  * @returns {{ kind: "commit", operation: "commit", branchName: string|null, targetBranch: string|null, remoteName: null, correlationId: string|null, message: string|null, files: string[] }}
  */
-export function buildCommitAction(input = {}) {
+export function buildCommitAction(input = {}, options = {}) {
+  const filesProvided = Object.prototype.hasOwnProperty.call(input, "files");
+  const filesArray = Array.isArray(input.files) ? [...input.files] : [];
+  if (filesProvided && !Array.isArray(input.files)) {
+    const logger = options?.logger ?? null;
+    if (logger && typeof logger.warn === "function") {
+      try {
+        logger.warn("commit-service: buildCommitAction received non-array files; falling back to []", {
+          providedType: typeof input.files,
+          correlationId: typeof input.correlationId === "string" ? input.correlationId : null,
+        });
+      } catch {
+        // best-effort logging only
+      }
+    }
+  }
   return {
     kind: "commit",
     operation: "commit",
@@ -39,7 +59,7 @@ export function buildCommitAction(input = {}) {
         ? input.correlationId
         : null,
     message: typeof input.message === "string" ? input.message : null,
-    files: Array.isArray(input.files) ? [...input.files] : [],
+    files: filesArray,
   };
 }
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { summarizeArtifactKinds } from "./finalization-artifacts.js";
 
 const KIND_LABELS = new Map([
@@ -30,12 +31,20 @@ function buildCommitMessage(workflowContext, artifactScope) {
   const workflowName =
     typeof workflowContext?.commandName === "string" && workflowContext.commandName.length > 0
       ? workflowContext.commandName
-      : "workflow";
+      : "워크플로우";
   const scope =
     typeof artifactScope === "string" && artifactScope.length > 0
       ? artifactScope
-      : "workflow";
-  return `Finish ${workflowName}: update ${scope} outputs`;
+      : "워크플로우";
+  return `워크플로우 완료(${workflowName}): ${scope} 산출물 업데이트`;
+}
+
+function generateAttemptToken() {
+  try {
+    return randomUUID();
+  } catch {
+    return `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  }
 }
 
 function buildCorrelationId(workflowContext, matchedFiles) {
@@ -43,7 +52,7 @@ function buildCorrelationId(workflowContext, matchedFiles) {
     typeof workflowContext?.sessionID === "string" && workflowContext.sessionID.length > 0
       ? workflowContext.sessionID
       : "workflow";
-  return `commit:${sessionID}:${matchedFiles.length}`;
+  return `commit:${sessionID}:${matchedFiles.length}:${generateAttemptToken()}`;
 }
 
 export function buildCommitProposal({

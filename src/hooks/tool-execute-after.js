@@ -17,7 +17,18 @@ export function createToolExecuteAfterHook(
         pluginContext,
       });
       const finishedState = workflowState?.get?.(input?.sessionID) ?? null;
-      if (assessment && finishedState?.commandName) {
+      // Story 3.2 review (MEDIUM): only publish a finish-phase approval when
+      // finalization actually produced a finishable proposal. When the
+      // assessment short-circuits (no-finalizable-outputs / finalization-not-
+      // forced / etc.), `selectNextPlannedAction` could otherwise surface a
+      // stale `branchProposal` and re-emit `approval.requested` for a branch
+      // approval that finish was never supposed to ask about.
+      const hasFinalizationProposal =
+        finishedState?.commitProposal != null || finishedState?.pushProposal != null;
+      const shouldPublishFinishApproval =
+        Boolean(finishedState?.commandName) &&
+        (assessment?.outcome === "allow" || hasFinalizationProposal);
+      if (shouldPublishFinishApproval) {
         const workflowContext = {
           commandName: finishedState.commandName,
           arguments: finishedState.arguments || "",
