@@ -1,5 +1,20 @@
 {
   // DevAI AIDD Guard global defaults
+  //
+  // FR18 — Per-team policy tuning without code changes:
+  //   Edit the keys below in this file (or in the project-level override) to
+  //   change automation behavior. The plugin re-reads this file on each
+  //   `loadRuntimeConfig` call, so changes take effect on the next workflow
+  //   command — no plugin source modification required.
+  //
+  //   Most-frequently-changed keys (recommended starting points):
+  //     - branch.defaultMergeTarget — repo's primary integration branch.
+  //     - branch.commandTypeMap     — map BMAD commands to branch type slugs.
+  //     - branch.longLivedBranches  — branches that should never be reused.
+  //     - branch.validationRegex    — enforce team naming conventions.
+  //     - workflowPolicy.<command>.branchRequired / finalization
+  //                                   — opt commands in/out of branch + commit
+  //                                     gating without touching plugin code.
   "branch": {
     "pattern": "{type}/{ticket}-{slug}",
     "defaultType": "chore",

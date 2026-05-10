@@ -1159,6 +1159,633 @@ async function verifyResolveWorkflowPolicy() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Story 4.1 — Define and Normalize Branch and Workflow Policy Configuration
+// Story 4.1 introduces a single normalization entry point in
+// `src/config/load-config.js#normalizeConfig` so downstream services
+// (branch-service, resolve-workflow-policy) consume an already-normalized
+// effective config and stop redoing per-field `|| <default>` fallbacks.
+// These tests lock that contract in place.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildStory41FsAdapter(homedir) {
+  return {
+    existsSync: fs.existsSync.bind(fs),
+    readFileSync: fs.readFileSync.bind(fs),
+    readdirSync: fs.readdirSync.bind(fs),
+    mkdirSync: fs.mkdirSync.bind(fs),
+    writeFileSync: fs.writeFileSync.bind(fs),
+    dirname: path.dirname.bind(path),
+    homedir: () => homedir,
+  };
+}
+
+const REQUIRED_BRANCH_KEYS = [
+  "pattern",
+  "defaultType",
+  "fallbackTicket",
+  "longLivedBranches",
+  "defaultMergeTarget",
+  "validationRegex",
+  "commandTypeMap",
+];
+
+function assertBranchShapeNormalized(branch, label) {
+  for (const key of REQUIRED_BRANCH_KEYS) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(branch, key),
+      `${label}: branch.${key} must exist on effective config`,
+    );
+  }
+  assert.equal(typeof branch.pattern, "string", `${label}: branch.pattern must be string`);
+  assert.equal(typeof branch.defaultType, "string", `${label}: branch.defaultType must be string`);
+  assert.equal(
+    typeof branch.fallbackTicket,
+    "string",
+    `${label}: branch.fallbackTicket must be string`,
+  );
+  assert.ok(
+    Array.isArray(branch.longLivedBranches),
+    `${label}: branch.longLivedBranches must be array`,
+  );
+  assert.equal(
+    typeof branch.defaultMergeTarget,
+    "string",
+    `${label}: branch.defaultMergeTarget must be string`,
+  );
+  assert.equal(
+    typeof branch.validationRegex,
+    "string",
+    `${label}: branch.validationRegex must be string`,
+  );
+  assert.ok(
+    branch.commandTypeMap &&
+      typeof branch.commandTypeMap === "object" &&
+      !Array.isArray(branch.commandTypeMap),
+    `${label}: branch.commandTypeMap must be plain object`,
+  );
+}
+
+/**
+ * Story 4.1 (Task 5): single-normalization contract.
+ *
+ * For every shipping config source (DEFAULT_PLUGIN_CONFIG, both jsonc
+ * templates, and the legacy json template), running them through the
+ * canonical normalization entry point must produce an effective
+ * `branch` block whose seven required keys are all present and have
+ * consistent types.
+ */
+async function verifyEffectiveConfigNormalizationContract() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s41a=${Date.now()}`);
+  const { DEFAULT_PLUGIN_CONFIG } = await import(
+    pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href
+  );
+
+  // Sanity: the in-memory default already satisfies the contract.
+  assertBranchShapeNormalized(
+    DEFAULT_PLUGIN_CONFIG.branch,
+    "verifyEffectiveConfigNormalizationContract.defaults",
+  );
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-s41-norm-"));
+  const globalConfigDir = path.join(tempRoot, "home", ".config", "opencode");
+  const projectADir = path.join(tempRoot, "projA", ".opencode");
+  const projectBDir = path.join(tempRoot, "projB", ".opencode");
+  const projectCDir = path.join(tempRoot, "projC", ".opencode");
+  fs.mkdirSync(globalConfigDir, { recursive: true });
+  fs.mkdirSync(projectADir, { recursive: true });
+  fs.mkdirSync(projectBDir, { recursive: true });
+  fs.mkdirSync(projectCDir, { recursive: true });
+
+  try {
+    const globalTemplate = fs.readFileSync(
+      path.join(projectRoot, "templates", "devai-aidd-guard.global.jsonc"),
+      "utf8",
+    );
+    const projectTemplate = fs.readFileSync(
+      path.join(projectRoot, "templates", "devai-aidd-guard.project.jsonc"),
+      "utf8",
+    );
+    const legacyTemplate = fs.readFileSync(
+      path.join(projectRoot, "templates", "legacy-opencode-aidd-plugin.json"),
+      "utf8",
+    );
+
+    const fsAdapter = buildStory41FsAdapter(path.join(tempRoot, "home"));
+
+    // Source A: only global template installed (project A)
+    fs.writeFileSync(
+      path.join(globalConfigDir, "devai-aidd-guard.global.jsonc"),
+      globalTemplate,
+      "utf8",
+    );
+    const resultGlobalOnly = loadRuntimeConfig(path.join(tempRoot, "projA"), fsAdapter);
+    assertBranchShapeNormalized(
+      resultGlobalOnly.config.branch,
+      "verifyEffectiveConfigNormalizationContract.globalTemplate",
+    );
+
+    // Source B: project template ADDED on top of global
+    fs.writeFileSync(
+      path.join(projectBDir, "devai-aidd-guard.project.jsonc"),
+      projectTemplate,
+      "utf8",
+    );
+    const resultProject = loadRuntimeConfig(path.join(tempRoot, "projB"), fsAdapter);
+    assertBranchShapeNormalized(
+      resultProject.config.branch,
+      "verifyEffectiveConfigNormalizationContract.projectTemplate",
+    );
+
+    // Source C: legacy template only (project C — no modern jsonc)
+    fs.writeFileSync(
+      path.join(projectCDir, "opencode-aidd-plugin.json"),
+      legacyTemplate,
+      "utf8",
+    );
+    // Remove the global template effect by pointing homedir at an empty dir.
+    const fsAdapterIsolated = buildStory41FsAdapter(path.join(tempRoot, "no-home"));
+    const resultLegacy = loadRuntimeConfig(path.join(tempRoot, "projC"), fsAdapterIsolated);
+    assertBranchShapeNormalized(
+      resultLegacy.config.branch,
+      "verifyEffectiveConfigNormalizationContract.legacyTemplate",
+    );
+
+    // Cross-source consistency: the keys produced by all three paths are
+    // a strict superset of REQUIRED_BRANCH_KEYS, and types match across
+    // all three results.
+    for (const key of REQUIRED_BRANCH_KEYS) {
+      const t = typeof resultGlobalOnly.config.branch[key];
+      assert.equal(
+        typeof resultProject.config.branch[key],
+        t,
+        `verifyEffectiveConfigNormalizationContract: branch.${key} type must agree across global vs project sources`,
+      );
+      assert.equal(
+        typeof resultLegacy.config.branch[key],
+        t,
+        `verifyEffectiveConfigNormalizationContract: branch.${key} type must agree across global vs legacy sources`,
+      );
+    }
+
+    // Round 2 follow-up (AI-4): Task 1.4 also requires that the templates
+    // produce the SAME effective values for the canonical branch fields
+    // when no overrides are intentionally introduced. Type-only checks
+    // would silently allow a future drift like "legacy template ships a
+    // different defaultType". Lock value equivalence on the global ↔
+    // legacy ↔ defaults axis (project template ships intentional overrides
+    // — defaultMergeTarget="main" + extra commandTypeMap entries — so we
+    // exclude project from this assertion and document the carve-out).
+    const VALUE_EQUIVALENT_KEYS = [
+      "pattern",
+      "defaultType",
+      "fallbackTicket",
+      "longLivedBranches",
+      "defaultMergeTarget",
+      "validationRegex",
+      "commandTypeMap",
+    ];
+    for (const key of VALUE_EQUIVALENT_KEYS) {
+      assert.deepEqual(
+        resultGlobalOnly.config.branch[key],
+        DEFAULT_PLUGIN_CONFIG.branch[key],
+        `verifyEffectiveConfigNormalizationContract: branch.${key} value must equal DEFAULT_PLUGIN_CONFIG.branch.${key} when only global template is installed`,
+      );
+      assert.deepEqual(
+        resultLegacy.config.branch[key],
+        DEFAULT_PLUGIN_CONFIG.branch[key],
+        `verifyEffectiveConfigNormalizationContract: branch.${key} value must equal DEFAULT_PLUGIN_CONFIG.branch.${key} when only legacy template is installed`,
+      );
+    }
+
+    // workflowPolicy must also be the canonical defaults in the global-only
+    // and legacy-only paths (neither template introduces overrides for it,
+    // and both should normalize to the same effective workflowPolicy).
+    assert.deepEqual(
+      resultGlobalOnly.config.workflowPolicy,
+      DEFAULT_PLUGIN_CONFIG.workflowPolicy,
+      "verifyEffectiveConfigNormalizationContract: global-only template must inherit DEFAULT_PLUGIN_CONFIG.workflowPolicy",
+    );
+    assert.deepEqual(
+      resultLegacy.config.workflowPolicy,
+      DEFAULT_PLUGIN_CONFIG.workflowPolicy,
+      "verifyEffectiveConfigNormalizationContract: legacy-only template must inherit DEFAULT_PLUGIN_CONFIG.workflowPolicy",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.1 (Task 5): missing-optional fallback.
+ *
+ * Distinct from Story 1.3's `verifyValidationFallback`/...LowerLayer
+ * (which cover INVALID values being dropped); this test covers the
+ * "missing optional key" path. The user provides only a partial project
+ * jsonc, and effective config still surfaces every safe default
+ * (fallbackTicket, defaultType, longLivedBranches, etc.).
+ */
+async function verifyMissingOptionalValuesFallback() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s41b=${Date.now()}`);
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-s41-miss-"));
+  const projectConfigDir = path.join(tempRoot, "project", ".opencode");
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+
+  try {
+    // Only one tiny override — every other branch.* and workflowPolicy[*] key
+    // is intentionally missing.
+    fs.writeFileSync(
+      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultMergeTarget: "develop" } }),
+      "utf8",
+    );
+
+    const fsAdapter = buildStory41FsAdapter(path.join(tempRoot, "no-home"));
+    const result = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
+
+    assert.equal(
+      result.config.branch.defaultMergeTarget,
+      "develop",
+      "verifyMissingOptionalValuesFallback: project override must apply",
+    );
+    assert.equal(
+      result.config.branch.fallbackTicket,
+      "no-ticket",
+      "verifyMissingOptionalValuesFallback: missing fallbackTicket must default to 'no-ticket'",
+    );
+    assert.equal(
+      result.config.branch.defaultType,
+      "chore",
+      "verifyMissingOptionalValuesFallback: missing defaultType must default to 'chore'",
+    );
+    assert.ok(
+      Array.isArray(result.config.branch.longLivedBranches) &&
+        result.config.branch.longLivedBranches.length > 0,
+      "verifyMissingOptionalValuesFallback: missing longLivedBranches must default to non-empty array",
+    );
+    assert.equal(
+      typeof result.config.branch.pattern,
+      "string",
+      "verifyMissingOptionalValuesFallback: missing pattern must default to string",
+    );
+    assert.ok(
+      result.config.branch.commandTypeMap &&
+        typeof result.config.branch.commandTypeMap === "object" &&
+        !Array.isArray(result.config.branch.commandTypeMap),
+      "verifyMissingOptionalValuesFallback: missing commandTypeMap must default to plain object",
+    );
+    // No layers should have been dropped — this is a "missing optional" path,
+    // not an "invalid value" path.
+    assert.deepEqual(
+      result.validation.droppedLayers,
+      [],
+      "verifyMissingOptionalValuesFallback: no layers must be dropped on missing-optional path",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.1 (Task 5): vocabulary surfacing.
+ *
+ * - Known vocabulary must NOT generate any vocabulary warning.
+ * - Unknown vocabulary (typo on `category` or `finalization`) must surface
+ *   as a `params.source === "vocabulary"` entry, but must NOT cause the
+ *   layer to be dropped or `valid` to flip — Story 1.3's forward-compat
+ *   invariant (`additionalProperties: true`) is preserved.
+ *
+ * Also asserts the inline schema in `validate-config.js` and the JSON
+ * file in `src/config/schema/runtime-config.schema.json` stay in sync at
+ * the property/required level (the deliberate LOW from Story 1.3 R2).
+ */
+async function verifyWorkflowPolicyVocabularySchema() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s41c=${Date.now()}`);
+  const { RUNTIME_CONFIG_SCHEMA, KNOWN_WORKFLOW_POLICY_VOCABULARY } = await import(
+    `${pathToFileURL(path.join(projectRoot, "src", "config", "validate-config.js")).href}?s41c=${Date.now()}`
+  );
+
+  // ── A) Known vocabulary path: silent.
+  const tempRootOk = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-s41-vocab-ok-"));
+  const projectOkDir = path.join(tempRootOk, "project", ".opencode");
+  fs.mkdirSync(projectOkDir, { recursive: true });
+  try {
+    fs.writeFileSync(
+      path.join(projectOkDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({
+        workflowPolicy: {
+          "bmad-bmm-custom": {
+            category: "implementation",
+            identityStrategy: "ticket-or-args",
+            branchRequired: true,
+            finalization: "commit-and-push",
+          },
+        },
+      }),
+      "utf8",
+    );
+    const fsAdapter = buildStory41FsAdapter(path.join(tempRootOk, "no-home"));
+    const okResult = loadRuntimeConfig(path.join(tempRootOk, "project"), fsAdapter);
+    const okVocabulary = (okResult.validation.errors || []).filter(
+      (err) => err && err.params && err.params.source === "vocabulary",
+    );
+    assert.equal(
+      okVocabulary.length,
+      0,
+      "verifyWorkflowPolicyVocabularySchema: known vocabulary must produce zero vocabulary warnings",
+    );
+    assert.equal(
+      okResult.validation.valid,
+      true,
+      "verifyWorkflowPolicyVocabularySchema: known vocabulary must keep validation.valid === true",
+    );
+  } finally {
+    fs.rmSync(tempRootOk, { recursive: true, force: true });
+  }
+
+  // ── B) Unknown vocabulary path: warning surfaces, layer survives.
+  const tempRootBad = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-s41-vocab-bad-"));
+  const projectBadDir = path.join(tempRootBad, "project", ".opencode");
+  fs.mkdirSync(projectBadDir, { recursive: true });
+  try {
+    fs.writeFileSync(
+      path.join(projectBadDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({
+        workflowPolicy: {
+          "bmad-bmm-typo": {
+            category: "implemenation",            // typo
+            identityStrategy: "ticket-or-args",
+            branchRequired: true,
+            finalization: "commit-and-pus",       // typo
+          },
+        },
+      }),
+      "utf8",
+    );
+    const fsAdapter = buildStory41FsAdapter(path.join(tempRootBad, "no-home"));
+    const badResult = loadRuntimeConfig(path.join(tempRootBad, "project"), fsAdapter);
+    const badVocabulary = (badResult.validation.errors || []).filter(
+      (err) => err && err.params && err.params.source === "vocabulary",
+    );
+    assert.equal(
+      badVocabulary.length,
+      2,
+      "verifyWorkflowPolicyVocabularySchema: two typos must produce exactly two vocabulary warnings",
+    );
+    for (const w of badVocabulary) {
+      assert.equal(
+        w.params.kind,
+        "warning",
+        "verifyWorkflowPolicyVocabularySchema: vocabulary entries must be tagged kind=warning",
+      );
+      assert.equal(
+        typeof w.params.field,
+        "string",
+        "verifyWorkflowPolicyVocabularySchema: vocabulary entries must include params.field",
+      );
+      assert.ok(
+        Array.isArray(w.params.knownValues) && w.params.knownValues.length > 0,
+        "verifyWorkflowPolicyVocabularySchema: vocabulary entries must enumerate knownValues",
+      );
+    }
+    assert.deepEqual(
+      badResult.validation.droppedLayers,
+      [],
+      "verifyWorkflowPolicyVocabularySchema: vocabulary warnings must NOT drop the layer",
+    );
+    assert.equal(
+      badResult.validation.valid,
+      true,
+      "verifyWorkflowPolicyVocabularySchema: vocabulary warnings must NOT flip validation.valid to false",
+    );
+    // The custom command's user-provided values must still be visible in
+    // the effective config (forward-compat preserved).
+    assert.equal(
+      badResult.config.workflowPolicy["bmad-bmm-typo"].category,
+      "implemenation",
+      "verifyWorkflowPolicyVocabularySchema: unknown vocabulary value must pass through unchanged",
+    );
+  } finally {
+    fs.rmSync(tempRootBad, { recursive: true, force: true });
+  }
+
+  // ── C) Inline schema vs JSON file: full deep-equality sync.
+  // Story 1.3 R2 LOW: the two copies are intentionally separate (bundle
+  // compatibility) and we accept the manual sync obligation. Round 2
+  // follow-up (AI-2): Task 2.4 explicitly requires "동일 객체임을 직접
+  // 비교" — so we now deep-compare the entire schema objects, not just
+  // top-level/branch property keys. This catches drift in
+  // `additionalProperties` flags, `type` declarations, descriptions, and
+  // every other node both copies must agree on.
+  const schemaJson = JSON.parse(
+    fs.readFileSync(
+      path.join(projectRoot, "src", "config", "schema", "runtime-config.schema.json"),
+      "utf8",
+    ),
+  );
+  // Round-trip through JSON to strip Object.freeze / function refs / undefined
+  // entries from the inline schema so the comparison is value-equality only.
+  const inlineSchemaPlain = JSON.parse(JSON.stringify(RUNTIME_CONFIG_SCHEMA));
+  assert.deepEqual(
+    inlineSchemaPlain,
+    schemaJson,
+    "verifyWorkflowPolicyVocabularySchema: inline RUNTIME_CONFIG_SCHEMA and on-disk runtime-config.schema.json must be deep-equal (Task 2.4 sync obligation)",
+  );
+  // Sanity on the vocabulary export itself.
+  assert.ok(
+    Array.isArray(KNOWN_WORKFLOW_POLICY_VOCABULARY.category) &&
+      KNOWN_WORKFLOW_POLICY_VOCABULARY.category.length > 0,
+    "verifyWorkflowPolicyVocabularySchema: KNOWN_WORKFLOW_POLICY_VOCABULARY.category must be non-empty",
+  );
+  assert.ok(
+    Array.isArray(KNOWN_WORKFLOW_POLICY_VOCABULARY.identityStrategy) &&
+      KNOWN_WORKFLOW_POLICY_VOCABULARY.identityStrategy.length > 0,
+    "verifyWorkflowPolicyVocabularySchema: KNOWN_WORKFLOW_POLICY_VOCABULARY.identityStrategy must be non-empty",
+  );
+  assert.ok(
+    Array.isArray(KNOWN_WORKFLOW_POLICY_VOCABULARY.finalization) &&
+      KNOWN_WORKFLOW_POLICY_VOCABULARY.finalization.length > 0,
+    "verifyWorkflowPolicyVocabularySchema: KNOWN_WORKFLOW_POLICY_VOCABULARY.finalization must be non-empty",
+  );
+}
+
+/**
+ * Story 4.1 (Task 5): determinism + fresh-object invariant.
+ *
+ * Calling `loadRuntimeConfig` + `resolveWorkflowPolicy` twice on the same
+ * input must produce deepEqual results AND fresh nested objects so that
+ * mutating one result cannot leak into the next call (Story 1.3 invariant).
+ */
+async function verifyEffectivePolicyDeterminism() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s41d=${Date.now()}`);
+  const { resolveWorkflowPolicy } = await import(`${resolveWorkflowPolicyModuleUrl}?s41d=${Date.now()}`);
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-s41-det-"));
+  const projectConfigDir = path.join(tempRoot, "project", ".opencode");
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+
+  try {
+    fs.writeFileSync(
+      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({
+        branch: {
+          defaultMergeTarget: "main",
+          longLivedBranches: ["main", "develop"],
+          commandTypeMap: { "bmad-bmm-dev-story": "feat" },
+        },
+      }),
+      "utf8",
+    );
+
+    const fsAdapter = buildStory41FsAdapter(path.join(tempRoot, "no-home"));
+
+    const r1 = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
+    const r2 = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
+    assert.deepEqual(
+      r1.config,
+      r2.config,
+      "verifyEffectivePolicyDeterminism: two loadRuntimeConfig calls must produce deepEqual configs",
+    );
+
+    const ctx = {
+      commandName: "bmad-bmm-dev-story",
+      arguments: "ABC-123 contract",
+      sessionID: "s-det-1",
+      detectedAt: "2026-05-10T00:00:00.000Z",
+      phase: "start",
+    };
+
+    const p1 = resolveWorkflowPolicy(ctx, r1.config);
+    const p2 = resolveWorkflowPolicy(ctx, r1.config);
+    assert.deepEqual(
+      p1,
+      p2,
+      "verifyEffectivePolicyDeterminism: resolveWorkflowPolicy must be deterministic on the same input",
+    );
+
+    // Fresh-object invariant: mutating one result must not affect the next call.
+    assert.notEqual(
+      p1,
+      p2,
+      "verifyEffectivePolicyDeterminism: resolveWorkflowPolicy must return a fresh top-level object",
+    );
+    assert.notEqual(
+      p1.details.policy,
+      p2.details.policy,
+      "verifyEffectivePolicyDeterminism: details.policy must be a fresh object on each call",
+    );
+    assert.notEqual(
+      p1.details.branch,
+      p2.details.branch,
+      "verifyEffectivePolicyDeterminism: details.branch must be a fresh object on each call",
+    );
+    p1.details.branch.longLivedBranches.push("attempted-leak");
+    p1.details.policy.category = "leaked";
+    const p3 = resolveWorkflowPolicy(ctx, r1.config);
+    assert.ok(
+      !p3.details.branch.longLivedBranches.includes("attempted-leak"),
+      "verifyEffectivePolicyDeterminism: mutation on prior longLivedBranches must NOT leak into next call",
+    );
+    assert.notEqual(
+      p3.details.policy.category,
+      "leaked",
+      "verifyEffectivePolicyDeterminism: mutation on prior policy.category must NOT leak into next call",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.1 (Task 5) — AC2: latest-policy reflection across runs.
+ *
+ * Same process, project jsonc edited between runs. The next
+ * `loadRuntimeConfig` + `resolveWorkflowPolicy` must return the new value.
+ * Also asserts that no persistent cache was introduced (back-to-back
+ * loads with the same disk state must keep producing the same result and
+ * neither `loadRuntimeConfig` nor `resolveWorkflowPolicy` reuse a stale
+ * snapshot).
+ */
+async function verifyLatestPolicyChangesReflectedAcrossRuns() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s41e=${Date.now()}`);
+  const { resolveWorkflowPolicy } = await import(`${resolveWorkflowPolicyModuleUrl}?s41e=${Date.now()}`);
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-s41-live-"));
+  const projectConfigDir = path.join(tempRoot, "project", ".opencode");
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+
+  try {
+    const cfgPath = path.join(projectConfigDir, "devai-aidd-guard.project.jsonc");
+    fs.writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        workflowPolicy: {
+          "bmad-bmm-quick-dev": {
+            category: "implementation",
+            identityStrategy: "ticket-or-args",
+            branchRequired: true,
+            finalization: "commit-and-push",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const fsAdapter = buildStory41FsAdapter(path.join(tempRoot, "no-home"));
+    const ctx = {
+      commandName: "bmad-bmm-quick-dev",
+      arguments: "ABC-123",
+      sessionID: "s-live-1",
+      detectedAt: "2026-05-10T00:00:00.000Z",
+      phase: "start",
+    };
+
+    const before = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
+    const beforePolicy = resolveWorkflowPolicy(ctx, before.config);
+    assert.equal(
+      beforePolicy.details.policy.finalization,
+      "commit-and-push",
+      "verifyLatestPolicyChangesReflectedAcrossRuns: pre-edit must reflect commit-and-push",
+    );
+
+    // Edit the project jsonc — change finalization to a different known value.
+    fs.writeFileSync(
+      cfgPath,
+      JSON.stringify({
+        workflowPolicy: {
+          "bmad-bmm-quick-dev": {
+            category: "implementation",
+            identityStrategy: "ticket-or-args",
+            branchRequired: true,
+            finalization: "no-forced-finalization",
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const after = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
+    const afterPolicy = resolveWorkflowPolicy(ctx, after.config);
+    assert.equal(
+      afterPolicy.details.policy.finalization,
+      "no-forced-finalization",
+      "verifyLatestPolicyChangesReflectedAcrossRuns: post-edit must reflect new finalization on next load",
+    );
+
+    // Also assert that calling load twice in a row on the SAME disk state
+    // produces deepEqual results — proves no in-memory persistent cache.
+    const after2 = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
+    assert.deepEqual(
+      after.config,
+      after2.config,
+      "verifyLatestPolicyChangesReflectedAcrossRuns: back-to-back loads must produce deepEqual configs (no stale cache)",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 async function verifyBranchServiceContracts() {
   const branchService = await import(`${branchServiceModuleUrl}?v=${Date.now()}`);
   const { DEFAULT_PLUGIN_CONFIG } = await import(
@@ -9939,6 +10566,12 @@ main()
   .then(() => verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability())
   .then(() => verifyStory35RecoveryGateBlocksOnlyFinalizationFollowups())
   .then(() => verifyStory35PlanningArtifactPathRemainsInScope())
+  // Story 4.1 — define and normalize branch and workflow policy configuration
+  .then(() => verifyEffectiveConfigNormalizationContract())
+  .then(() => verifyMissingOptionalValuesFallback())
+  .then(() => verifyWorkflowPolicyVocabularySchema())
+  .then(() => verifyEffectivePolicyDeterminism())
+  .then(() => verifyLatestPolicyChangesReflectedAcrossRuns())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;

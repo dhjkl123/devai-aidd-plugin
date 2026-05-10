@@ -1,6 +1,6 @@
 # Story 4.1: 브랜치 및 워크플로우 정책 구성의 정의와 정규화
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -23,39 +23,39 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] 효과적 구성(effective configuration)의 단일 정규화 계약을 `src/config/` 안에 통합한다 (AC: 1)
-  - [ ] `src/config/load-config.js`의 `normalizeConfig`가 현재 처리하는 범위(`branch.longLivedBranches` dedupe/lowercase, `branch.defaultMergeTarget` trim)를 기준선으로 두고, Story 4.1에서 누락된 `branch.pattern`/`branch.defaultType`/`branch.fallbackTicket`/`branch.validationRegex`/`branch.commandTypeMap` 안전 기본값 폴백을 같은 위치에 모아 단일 패스로 실행한다.
-  - [ ] `src/services/git/branch-service.js`의 `normalizeBranchConfig`(파일 1번 줄 ~ 15번 줄)는 Story 4.1 이후 “이미 정규화된 effective 구성”을 받는 얇은 통과 함수로 축소하거나 제거 대상으로 표시한다. `normalizeBranchConfig`를 새로 다른 호출자에게 노출하지 않는다.
-  - [ ] `src/services/workflow/resolve-workflow-policy.js`의 `branchDetails` 구성(38번 줄 이후)도 effective config가 이미 정규화돼 있다는 전제로 단순화하되, 외부 동작(`outcome`/`reason`/`message`/`details` envelope, fallback policy shape)은 변경하지 않는다.
-  - [ ] DEFAULT_PLUGIN_CONFIG와 templates/devai-aidd-guard.global.jsonc, templates/devai-aidd-guard.project.jsonc, templates/legacy-opencode-aidd-plugin.json은 모두 “정규화 후 동일한 effective 결과”를 만들 수 있어야 하며, Story 4.1은 이 정합성을 회귀 테스트로 고정한다.
+- [x] 효과적 구성(effective configuration)의 단일 정규화 계약을 `src/config/` 안에 통합한다 (AC: 1)
+  - [x] `src/config/load-config.js`의 `normalizeConfig`가 현재 처리하는 범위(`branch.longLivedBranches` dedupe/lowercase, `branch.defaultMergeTarget` trim)를 기준선으로 두고, Story 4.1에서 누락된 `branch.pattern`/`branch.defaultType`/`branch.fallbackTicket`/`branch.validationRegex`/`branch.commandTypeMap` 안전 기본값 폴백을 같은 위치에 모아 단일 패스로 실행한다.
+  - [x] `src/services/git/branch-service.js`의 `normalizeBranchConfig`(파일 1번 줄 ~ 15번 줄)는 Story 4.1 이후 “이미 정규화된 effective 구성”을 받는 얇은 통과 함수로 축소하거나 제거 대상으로 표시한다. `normalizeBranchConfig`를 새로 다른 호출자에게 노출하지 않는다.
+  - [x] `src/services/workflow/resolve-workflow-policy.js`의 `branchDetails` 구성(38번 줄 이후)도 effective config가 이미 정규화돼 있다는 전제로 단순화하되, 외부 동작(`outcome`/`reason`/`message`/`details` envelope, fallback policy shape)은 변경하지 않는다.
+  - [x] DEFAULT_PLUGIN_CONFIG와 templates/devai-aidd-guard.global.jsonc, templates/devai-aidd-guard.project.jsonc, templates/legacy-opencode-aidd-plugin.json은 모두 “정규화 후 동일한 effective 결과”를 만들 수 있어야 하며, Story 4.1은 이 정합성을 회귀 테스트로 고정한다.
 
-- [ ] 브랜치 및 워크플로우 정책 스키마를 정책 어휘 수준으로 강화한다 (AC: 1)
-  - [ ] `src/config/schema/runtime-config.schema.json`과 `src/config/validate-config.js`의 인라인 `RUNTIME_CONFIG_SCHEMA`를 동기 상태로 유지하며, `workflowPolicy[*].category`, `workflowPolicy[*].identityStrategy`, `workflowPolicy[*].finalization`에 enum 또는 명시적 허용 어휘를 추가한다. 어휘 후보는 `src/config/defaults.js`의 실제 사용값(`implementation`/`planning`/`research`/`docs`/`review`, `story`/`ticket-or-args`/`artifact-singleton`/`artifact-or-args`, `commit-and-push`/`commit-optional-push`/`no-forced-finalization`)과 `_bmad-output/planning-artifacts/architecture.md`의 “Format Patterns” 섹션을 기준으로 확정한다.
-  - [ ] Story 1.3가 도입한 `additionalProperties: true`(forward-compat) 결정과 충돌하지 않도록, 어휘 강화는 enum이 아니라 “알려진 값이면 권장, 알려지지 않은 값은 audit warning + 안전 기본 적용”으로 표현 가능한지 우선 검토한다. 강한 enum이 더 안전하다고 판단되면, `_bmad-output/planning-artifacts/sprint-change-proposal-2026-05-08.md` 패턴을 따라 결정 메모를 Story 4.1 Dev Notes에 인라인으로 남긴다.
-  - [ ] `branch.commandTypeMap` 값에 대해서는 “문자열이지만 사실상 `branch.defaultType`이 받아들이는 type 슬러그여야 한다”는 현재 묵시 계약을 명문화하되, 신규 어휘 추가를 막지 않도록 forward-compat 정책을 유지한다.
-  - [ ] schema와 인라인 `RUNTIME_CONFIG_SCHEMA` 두 사본이 차이가 생기지 않도록 회귀 테스트에서 동일 객체임을 직접 비교한다 (1.3 Round 2 LOW에서 의도적으로 수용된 sync 의무).
+- [x] 브랜치 및 워크플로우 정책 스키마를 정책 어휘 수준으로 강화한다 (AC: 1)
+  - [x] `src/config/schema/runtime-config.schema.json`과 `src/config/validate-config.js`의 인라인 `RUNTIME_CONFIG_SCHEMA`를 동기 상태로 유지하며, `workflowPolicy[*].category`, `workflowPolicy[*].identityStrategy`, `workflowPolicy[*].finalization`에 enum 또는 명시적 허용 어휘를 추가한다. 어휘 후보는 `src/config/defaults.js`의 실제 사용값(`implementation`/`planning`/`research`/`docs`/`review`, `story`/`ticket-or-args`/`artifact-singleton`/`artifact-or-args`, `commit-and-push`/`commit-optional-push`/`no-forced-finalization`)과 `_bmad-output/planning-artifacts/architecture.md`의 “Format Patterns” 섹션을 기준으로 확정한다.
+  - [x] Story 1.3가 도입한 `additionalProperties: true`(forward-compat) 결정과 충돌하지 않도록, 어휘 강화는 enum이 아니라 “알려진 값이면 권장, 알려지지 않은 값은 audit warning + 안전 기본 적용”으로 표현 가능한지 우선 검토한다. 강한 enum이 더 안전하다고 판단되면, `_bmad-output/planning-artifacts/sprint-change-proposal-2026-05-08.md` 패턴을 따라 결정 메모를 Story 4.1 Dev Notes에 인라인으로 남긴다.
+  - [x] `branch.commandTypeMap` 값에 대해서는 “문자열이지만 사실상 `branch.defaultType`이 받아들이는 type 슬러그여야 한다”는 현재 묵시 계약을 명문화하되, 신규 어휘 추가를 막지 않도록 forward-compat 정책을 유지한다.
+  - [x] schema와 인라인 `RUNTIME_CONFIG_SCHEMA` 두 사본이 차이가 생기지 않도록 회귀 테스트에서 동일 객체임을 직접 비교한다 (1.3 Round 2 LOW에서 의도적으로 수용된 sync 의무).
 
-- [ ] effective 구성을 downstream 소비자가 단일 진실 공급원으로 받도록 정리한다 (AC: 1, 2)
-  - [ ] `src/index.js`가 hook factory에 전달하는 `pluginContext`(Story 1.3 second-pass에서 6개 hook factory에 일관 전달됨)에 effective `runtimeConfig.config`만 노출하고, hook 또는 service 계층에서 `branch`/`workflowPolicy`를 다시 조립하지 않도록 보장한다.
-  - [ ] `src/services/workflow/resolve-workflow-policy.js`는 호출 시점마다 새 nested object를 생성한다는 invariant(Story 1.3 Dev Notes)를 유지하고, 재실행 시 이전 결과가 캐시되거나 mutation으로 누설되지 않는지 확인한다.
-  - [ ] 변경 시 `src/services/git/branch-service.js`, `src/services/workflow/detect-finalizable-outputs.js`, `src/services/workflow/evaluate-workflow-finalization.js`, `src/services/approval/publish-next-planned-action.js`, `src/services/approval/build-approval-explanation.js`의 정책/브랜치 사용 경로가 모두 동일한 effective 구성에서 비롯된다는 사실을 코드 주석 또는 Dev Notes에 명문화한다.
+- [x] effective 구성을 downstream 소비자가 단일 진실 공급원으로 받도록 정리한다 (AC: 1, 2)
+  - [x] `src/index.js`가 hook factory에 전달하는 `pluginContext`(Story 1.3 second-pass에서 6개 hook factory에 일관 전달됨)에 effective `runtimeConfig.config`만 노출하고, hook 또는 service 계층에서 `branch`/`workflowPolicy`를 다시 조립하지 않도록 보장한다.
+  - [x] `src/services/workflow/resolve-workflow-policy.js`는 호출 시점마다 새 nested object를 생성한다는 invariant(Story 1.3 Dev Notes)를 유지하고, 재실행 시 이전 결과가 캐시되거나 mutation으로 누설되지 않는지 확인한다.
+  - [x] 변경 시 `src/services/git/branch-service.js`, `src/services/workflow/detect-finalizable-outputs.js`, `src/services/workflow/evaluate-workflow-finalization.js`, `src/services/approval/publish-next-planned-action.js`, `src/services/approval/build-approval-explanation.js`의 정책/브랜치 사용 경로가 모두 동일한 effective 구성에서 비롯된다는 사실을 코드 주석 또는 Dev Notes에 명문화한다.
 
-- [ ] FR18 “팀별 정책 조정”을 코드 변경 없이 실현 가능하다는 점을 templates와 README에서 명시한다 (AC: 1)
-  - [ ] `templates/devai-aidd-guard.global.jsonc`와 `templates/devai-aidd-guard.project.jsonc`에 “팀이 자주 바꾸는 키” 주석 가이드를 추가한다(예: `branch.defaultMergeTarget`, `branch.commandTypeMap`, `workflowPolicy.<command>.branchRequired`/`finalization`).
-  - [ ] `README.md`의 설정 섹션(현재 65~66번 줄 근방의 글로벌/프로젝트 경로 안내)에 “브랜치 규칙과 워크플로우 정책은 코드 수정 없이 jsonc 파일로 변경할 수 있다”는 흐름 예시를 추가한다.
-  - [ ] 새 템플릿 파일을 만들지 않는다. 기존 두 jsonc 템플릿과 `templates/legacy-opencode-aidd-plugin.json`을 갱신만 한다.
+- [x] FR18 “팀별 정책 조정”을 코드 변경 없이 실현 가능하다는 점을 templates와 README에서 명시한다 (AC: 1)
+  - [x] `templates/devai-aidd-guard.global.jsonc`와 `templates/devai-aidd-guard.project.jsonc`에 “팀이 자주 바꾸는 키” 주석 가이드를 추가한다(예: `branch.defaultMergeTarget`, `branch.commandTypeMap`, `workflowPolicy.<command>.branchRequired`/`finalization`).
+  - [x] `README.md`의 설정 섹션(현재 65~66번 줄 근방의 글로벌/프로젝트 경로 안내)에 “브랜치 규칙과 워크플로우 정책은 코드 수정 없이 jsonc 파일로 변경할 수 있다”는 흐름 예시를 추가한다.
+  - [x] 새 템플릿 파일을 만들지 않는다. 기존 두 jsonc 템플릿과 `templates/legacy-opencode-aidd-plugin.json`을 갱신만 한다.
 
-- [ ] effective 구성과 결정성에 대한 회귀 테스트를 `tests/regression.test.js`에 인라인으로 추가한다 (AC: 1, 2)
-  - [ ] `verifyEffectiveConfigNormalizationContract()` — DEFAULT_PLUGIN_CONFIG, templates/devai-aidd-guard.global.jsonc, templates/devai-aidd-guard.project.jsonc, templates/legacy-opencode-aidd-plugin.json 각각을 `loadRuntimeConfig`(또는 같은 정규화 경로)로 통과시켰을 때, `branch.pattern`/`branch.defaultType`/`branch.fallbackTicket`/`branch.longLivedBranches`/`branch.defaultMergeTarget`/`branch.validationRegex`/`branch.commandTypeMap` 키가 모두 정의돼 있고 타입이 일관됨을 검증한다.
-  - [ ] `verifyMissingOptionalValuesFallback()` — 옵션 키가 누락된 프로젝트 jsonc 입력에서도 `branch.fallbackTicket`, `branch.defaultType`, `branch.longLivedBranches` 같은 안전 기본값이 effective config에 채워지는지 검증한다. Story 1.3의 `verifyValidationFallback`/`verifyValidationFallbackLowerLayer`는 “invalid 값” 시나리오를 다루므로, 본 테스트는 “missing optional” 시나리오로 의미를 분리한다.
-  - [ ] `verifyWorkflowPolicyVocabularySchema()` — schema가 강화된 어휘 또는 forward-compat 정책에 따라 정상 어휘는 통과하고, 분명한 오타(예: `finalization: "commit-and-pus"`) 또는 잘못된 카테고리(예: `category: "implemenation"`)에 대해 audit/warning 또는 schema error가 일관되게 surface되는지 검증한다.
-  - [ ] `verifyEffectivePolicyDeterminism()` — 동일한 입력 layer에서 `loadRuntimeConfig` + `resolveWorkflowPolicy`를 두 번 호출했을 때 결과가 deepEqual 동일하고, mutation을 통해 cross-call leak이 없음을 검증한다(Story 1.3가 보장한 “재호출 시 fresh nested object” invariant 회귀).
-  - [ ] `verifyLatestPolicyChangesReflectedAcrossRuns()` — 동일 프로세스 내에서 프로젝트 jsonc 내용을 변경한 뒤 `loadRuntimeConfig`를 다시 호출하면, `resolveWorkflowPolicy`가 새 값을 반환함을 확인한다(AC2의 “활성 정책은 최신 적용 가능한 설정을 반영”). 영속 캐시가 도입되지 않았다는 사실 자체도 함께 단언한다.
-  - [ ] 기존 회귀 테스트(`verifyConfigMergePrecedence`, `verifyValidationFallback`, `verifyValidationFallbackLowerLayer`, `verifyParseFailureSurfacing`, `verifyForwardCompatExtensionKeys`, `verifySchemaVersionEnforcement`, `verifyResolveWorkflowPolicy`, `verifyConfigValidationFailedAuditPayload`)가 변경 없이 그대로 통과해야 한다.
+- [x] effective 구성과 결정성에 대한 회귀 테스트를 `tests/regression.test.js`에 인라인으로 추가한다 (AC: 1, 2)
+  - [x] `verifyEffectiveConfigNormalizationContract()` — DEFAULT_PLUGIN_CONFIG, templates/devai-aidd-guard.global.jsonc, templates/devai-aidd-guard.project.jsonc, templates/legacy-opencode-aidd-plugin.json 각각을 `loadRuntimeConfig`(또는 같은 정규화 경로)로 통과시켰을 때, `branch.pattern`/`branch.defaultType`/`branch.fallbackTicket`/`branch.longLivedBranches`/`branch.defaultMergeTarget`/`branch.validationRegex`/`branch.commandTypeMap` 키가 모두 정의돼 있고 타입이 일관됨을 검증한다.
+  - [x] `verifyMissingOptionalValuesFallback()` — 옵션 키가 누락된 프로젝트 jsonc 입력에서도 `branch.fallbackTicket`, `branch.defaultType`, `branch.longLivedBranches` 같은 안전 기본값이 effective config에 채워지는지 검증한다. Story 1.3의 `verifyValidationFallback`/`verifyValidationFallbackLowerLayer`는 “invalid 값” 시나리오를 다루므로, 본 테스트는 “missing optional” 시나리오로 의미를 분리한다.
+  - [x] `verifyWorkflowPolicyVocabularySchema()` — schema가 강화된 어휘 또는 forward-compat 정책에 따라 정상 어휘는 통과하고, 분명한 오타(예: `finalization: "commit-and-pus"`) 또는 잘못된 카테고리(예: `category: "implemenation"`)에 대해 audit/warning 또는 schema error가 일관되게 surface되는지 검증한다.
+  - [x] `verifyEffectivePolicyDeterminism()` — 동일한 입력 layer에서 `loadRuntimeConfig` + `resolveWorkflowPolicy`를 두 번 호출했을 때 결과가 deepEqual 동일하고, mutation을 통해 cross-call leak이 없음을 검증한다(Story 1.3가 보장한 “재호출 시 fresh nested object” invariant 회귀).
+  - [x] `verifyLatestPolicyChangesReflectedAcrossRuns()` — 동일 프로세스 내에서 프로젝트 jsonc 내용을 변경한 뒤 `loadRuntimeConfig`를 다시 호출하면, `resolveWorkflowPolicy`가 새 값을 반환함을 확인한다(AC2의 “활성 정책은 최신 적용 가능한 설정을 반영”). 영속 캐시가 도입되지 않았다는 사실 자체도 함께 단언한다.
+  - [x] 기존 회귀 테스트(`verifyConfigMergePrecedence`, `verifyValidationFallback`, `verifyValidationFallbackLowerLayer`, `verifyParseFailureSurfacing`, `verifyForwardCompatExtensionKeys`, `verifySchemaVersionEnforcement`, `verifyResolveWorkflowPolicy`, `verifyConfigValidationFailedAuditPayload`)가 변경 없이 그대로 통과해야 한다.
 
-- [ ] Story 4.2 경계와의 충돌을 명시한다 (AC: 1, 2)
-  - [ ] 본 스토리는 “효과적 구성 정규화” 책임이며, 레거시 브리지 파일 생성/삭제(`ensureLegacyProjectConfigCompatibility`)와 `LEGACY_COMPAT_MARKER_FILE_NAME` 관리는 Story 4.2의 영역이다(`_bmad-output/planning-artifacts/sprint-change-proposal-2026-05-08.md` Proposal C). Story 4.1에서는 이 함수의 시그니처와 호출 시점을 변경하지 않는다.
-  - [ ] 본 스토리는 호환성 경로(`legacyProjectConfig`, `legacyWorkflowProjectConfig`) 자체는 그대로 두고, 정규화 결과만 통합한다. 레거시 포맷 차이는 Story 4.2에서 다룬다.
+- [x] Story 4.2 경계와의 충돌을 명시한다 (AC: 1, 2)
+  - [x] 본 스토리는 “효과적 구성 정규화” 책임이며, 레거시 브리지 파일 생성/삭제(`ensureLegacyProjectConfigCompatibility`)와 `LEGACY_COMPAT_MARKER_FILE_NAME` 관리는 Story 4.2의 영역이다(`_bmad-output/planning-artifacts/sprint-change-proposal-2026-05-08.md` Proposal C). Story 4.1에서는 이 함수의 시그니처와 호출 시점을 변경하지 않는다.
+  - [x] 본 스토리는 호환성 경로(`legacyProjectConfig`, `legacyWorkflowProjectConfig`) 자체는 그대로 두고, 정규화 결과만 통합한다. 레거시 포맷 차이는 Story 4.2에서 다룬다.
 
 ## Dev Notes
 
@@ -170,10 +170,79 @@ Status: ready-for-dev
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-opus-4-7[1m]
 
 ### Debug Log References
 
+- `npm run build` → exit 0; `dist/devai-aidd-guard.js` rebuilt at 456.4kb (no new dependency require introduced).
+- `npm test` (full regression) → exit 0; all pre-existing Story 1.3 / 2.x / 3.x checks pass; 5 new Story 4.1 verifications pass on first run.
+
+### Vocabulary Decision Memo (forward-compat over enum)
+
+- The story Task 2 lists "schema enum 강화" and "audit warning + 안전 기본 적용" as two viable options for `workflowPolicy[*].category` / `identityStrategy` / `finalization` typo surfacing.
+- We chose the **audit-warning** path. Story 1.3 deliberately accepted `additionalProperties: true` on `workflowPolicy[*]` so that an older host can still load a config produced for a newer plugin version. A strict `enum` would directly contradict that invariant: the moment a newer plugin shipped (e.g.) `category: "release"`, every older host would drop the layer and fall back to defaults. That regression is far more dangerous than a missed typo.
+- Implementation:
+  - `KNOWN_WORKFLOW_POLICY_VOCABULARY` (in `src/config/validate-config.js`) lists the recommended values.
+  - `collectWorkflowPolicyVocabularyWarnings(config)` produces audit-warning entries shaped like the rest of the validation pipeline but tagged `params: { source: "vocabulary", kind: "warning" }`.
+  - `loadRuntimeConfig` runs that collector AFTER `validateAndRecover`, so vocabulary warnings never cause a layer to be dropped.
+  - `validation.valid` only flips to false on hard errors (parse + schema + regex semantics). Vocabulary warnings reach the audit channel through `src/index.js` (which now also triggers when `errors.length > 0`) without forcing a fake "validation failed" status.
+  - JSON schema and inline `RUNTIME_CONFIG_SCHEMA` descriptions both call out "known vocabulary" + "forward-compat audit warning" so the contract is discoverable from the schema alone.
+
+### Single-Source-of-Truth Notes
+
+- Effective config normalization now happens in exactly one place: `normalizeConfig` inside `src/config/load-config.js`. All seven `branch.*` fields downstream consumers depend on (`pattern`, `defaultType`, `fallbackTicket`, `longLivedBranches`, `defaultMergeTarget`, `validationRegex`, `commandTypeMap`) are filled with safe defaults before the value reaches `runtimeConfig.config`.
+- `src/services/git/branch-service.js#normalizeBranchConfig` is reduced to a defensive shallow shape (kept for direct test callers passing raw inputs). New callers MUST consume the already-normalized `runtimeConfig.config.branch` from `pluginContext`.
+- `src/services/workflow/resolve-workflow-policy.js` no longer chains per-field `|| <default>` fallbacks. It still returns a fresh nested object on each call (Story 1.3 invariant), and `verifyEffectivePolicyDeterminism` regresses against any future cache/mutation leak.
+- Downstream consumers (`detect-finalizable-outputs.js`, `evaluate-workflow-finalization.js`, `publish-next-planned-action.js`, `build-approval-explanation.js`) read `workflowPolicy` straight from the resolved policy object; they never re-derive defaults from `branch.*`. No code changes were needed there for Story 4.1, only the cross-reference annotation captured here so future contributors do not reintroduce per-call fallbacks.
+
+### Story 4.2 Boundary
+
+- `ensureLegacyProjectConfigCompatibility` and `LEGACY_COMPAT_MARKER_FILE_NAME` are **untouched**. Story 4.1 only changed how `loadRuntimeConfig` populates `validation.errors` and how `normalizeConfig` fills branch defaults. Bridge file lifecycle (Proposal C in `sprint-change-proposal-2026-05-08.md`) remains Story 4.2's domain.
+
 ### Completion Notes List
 
+- Single normalization entry point: expanded `normalizeConfig` in `src/config/load-config.js` so `branch.pattern`, `defaultType`, `fallbackTicket`, `validationRegex`, and `commandTypeMap` all receive safe defaults in the same pass that already handled `longLivedBranches` and `defaultMergeTarget`.
+- Downstream simplification: `src/services/git/branch-service.js#normalizeBranchConfig` and `src/services/workflow/resolve-workflow-policy.js#branchDetails` are now thin defensive pass-throughs over the already-normalized effective config; external behavior (envelope shape, fallback policy shape) is unchanged.
+- Vocabulary surfacing: `collectWorkflowPolicyVocabularyWarnings` (new in `validate-config.js`) emits audit-warning entries for unknown `workflowPolicy[*]` vocabulary; warnings flow through the existing `config.validation.failed` channel without dropping the layer (forward-compat preserved). `src/index.js` audit trigger now also fires when `errors.length > 0`.
+- Schema sync: both `src/config/schema/runtime-config.schema.json` and the inline `RUNTIME_CONFIG_SCHEMA` in `validate-config.js` got matching description updates calling out the known vocabulary and the forward-compat audit warning. Sync is locked by `verifyWorkflowPolicyVocabularySchema`.
+- Templates + README: `templates/devai-aidd-guard.global.jsonc` and `templates/devai-aidd-guard.project.jsonc` got FR18-focused comment guidance covering the most-frequently-changed keys; README "설정 파일" section gained a "코드 수정 없이 정책 바꾸기 (FR18)" subsection with a concrete jsonc edit example. `templates/legacy-opencode-aidd-plugin.json` is plain JSON (no comments allowed) and was not changed; its content already aligns with `DEFAULT_PLUGIN_CONFIG`.
+- Regression tests: 5 new `verify*` functions (normalization contract, missing-optional fallback, vocabulary surfacing + schema sync, determinism + fresh-object invariant, latest-policy across runs) added to `tests/regression.test.js`. All previous Story 1.3 / 2.x / 3.x verifications still pass unchanged.
+- `npm run build` exit 0; `npm test` exit 0.
+
 ### File List
+
+- src/config/load-config.js (modified)
+- src/config/validate-config.js (modified)
+- src/config/schema/runtime-config.schema.json (modified)
+- src/services/git/branch-service.js (modified)
+- src/services/workflow/resolve-workflow-policy.js (modified)
+- src/index.js (modified)
+- templates/devai-aidd-guard.global.jsonc (modified)
+- templates/devai-aidd-guard.project.jsonc (modified)
+- README.md (modified)
+- tests/regression.test.js (modified)
+- dist/devai-aidd-guard.js (generated artifact, gitignored — rebuilt by `npm run build`)
+
+### Round 2 Review Follow-ups (2026-05-10)
+
+Round 1 found 0 CRITICAL / 0 HIGH / 4 MEDIUM / 5 LOW. Round 2 auto-fixed all 4 MEDIUM items and 4 of the 5 LOW items; the remaining LOW (AI-9, File List dist annotation) is resolved by the updated File List entry above.
+
+- AI-1 (MEDIUM, fixed): `src/services/workflow/resolve-workflow-policy.js#branchDetails` no longer redoes per-field `|| <default>` fallbacks. It now consumes the already-normalized `branch` object directly. The "single normalization entry point" claim and the code now agree. Existing `verifyResolveWorkflowPolicy` + `verifyEffectivePolicyDeterminism` continue to pass on `DEFAULT_PLUGIN_CONFIG` and on `loadRuntimeConfig` output (both fully normalized).
+- AI-2 (MEDIUM, fixed): `verifyWorkflowPolicyVocabularySchema` now does a full `assert.deepEqual(JSON.parse(JSON.stringify(RUNTIME_CONFIG_SCHEMA)), schemaJson)` to satisfy Task 2.4's "동일 객체임을 직접 비교" requirement. Drift in `additionalProperties`, `type`, descriptions, or any other node is now caught.
+- AI-3 (MEDIUM, fixed): `KNOWN_WORKFLOW_POLICY_VOCABULARY` JSDoc in `src/config/validate-config.js` now correctly attributes the vocabulary surfacing pipeline to `collectWorkflowPolicyVocabularyWarnings` + `loadRuntimeConfig` + `src/index.js` bootstrap (instead of incorrectly naming `validateRuntimeConfig` / `validateAndRecover`).
+- AI-4 (MEDIUM, fixed): `verifyEffectiveConfigNormalizationContract` now also `deepEqual`s the seven `branch.*` values and the full `workflowPolicy` against `DEFAULT_PLUGIN_CONFIG.branch[*]` / `DEFAULT_PLUGIN_CONFIG.workflowPolicy` for the global-only and legacy-only template paths (project template carve-out is documented inline). Type-only checks would have silently allowed a future template drift.
+- AI-5 (LOW, fixed): `src/services/git/branch-service.js#normalizeBranchConfig` now also exposes `defaultMergeTarget` (defensive default `""`), bringing it to the same 7-key contract `normalizeConfig` guarantees.
+- AI-6 (LOW, fixed): `collectWorkflowPolicyVocabularyWarnings` JSDoc now states `params.kind === "warning"` explicitly (instead of the ambiguous "whether the entry is a warning").
+- AI-7 (LOW, fixed): README FR18 subsection now shows a concrete vocabulary typo example (`finalization: "commit-and-puh"`) and the resulting `config.validation.failed` audit JSON, plus the filter expression operators can use to isolate vocabulary warnings.
+- AI-8 (LOW, fixed): `loadRuntimeConfig` JSDoc now documents `validation.errors` as a MIXED list (parse + schema + vocabulary) and shows the filter expression for "hard errors only" callers.
+- AI-9 (LOW, fixed): File List entry for `dist/devai-aidd-guard.js` now reads "(generated artifact, gitignored — rebuilt by `npm run build`)" so future readers immediately understand why git diff shows no change.
+
+Verification after Round 2 fixes:
+- `npm test` exit 0 — all Story 1.3 / 2.x / 3.x verifications still pass; the 5 Story 4.1 verifications (now strengthened by AI-2 + AI-4) still pass.
+- `npm run build` exit 0 — `dist/devai-aidd-guard.js` rebuilt at 455.7kb (no new dependency).
+- No new files created. No `schemaVersion` change. No new audit event types.
+
+### Change Log
+
+- 2026-05-10: Story 4.1 implementation — single-pass effective configuration normalization, vocabulary audit warnings (forward-compat preserved), template/README FR18 guidance, 5 new regression verifications. No new dependency, no schemaVersion bump (additive only).
+- 2026-05-10: Story 4.1 Round 2 review follow-ups — `resolve-workflow-policy.js#branchDetails` simplified to consume normalized branch directly (AI-1); `verifyWorkflowPolicyVocabularySchema` strengthened to full schema deep-equal (AI-2); JSDoc attribution corrected on `KNOWN_WORKFLOW_POLICY_VOCABULARY` (AI-3); `verifyEffectiveConfigNormalizationContract` extended with cross-source value equivalence (AI-4); `branch-service.js#normalizeBranchConfig` includes `defaultMergeTarget` (AI-5); `params.kind` doc clarified (AI-6); README vocabulary typo example added (AI-7); `loadRuntimeConfig` JSDoc documents mixed-errors filter (AI-8); File List dist annotation clarified (AI-9). `npm test` exit 0; `npm run build` exit 0; status `review` → `done`.

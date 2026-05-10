@@ -1,5 +1,28 @@
 {
   // DevAI AIDD Guard project overrides
+  //
+  // FR18 — Per-team policy tuning without code changes:
+  //   This file overrides the global defaults for THIS project only.
+  //   Add the keys you want to change; everything else inherits from the
+  //   global file or the plugin defaults.
+  //
+  //   Common project-level overrides:
+  //     - branch.defaultMergeTarget    — your repo's integration branch.
+  //     - branch.commandTypeMap        — per-command branch type slug map.
+  //     - workflowPolicy.<command>.branchRequired
+  //                                    — force a branch for a specific
+  //                                      workflow that defaults to optional.
+  //     - workflowPolicy.<command>.finalization
+  //                                    — switch between commit-and-push,
+  //                                      commit-optional-push, or
+  //                                      no-forced-finalization.
+  //
+  //   Vocabulary note (Story 4.1):
+  //     workflowPolicy[*].category, identityStrategy, and finalization use a
+  //     known vocabulary. Unknown values are accepted (forward-compat) but
+  //     surface as `config.validation.failed` audit warnings tagged
+  //     `params.source === "vocabulary"`. Watch your audit stream after
+  //     adding non-standard values.
   "branch": {
     "defaultMergeTarget": "main",
     "commandTypeMap": {

@@ -1,14 +1,56 @@
+// Story 4.1: This function is now a thin defensive pass-through.
+//
+// As of Story 4.1, every consumer in `src/index.js` and the hook layer
+// receives an already-normalized `runtimeConfig.config.branch` object whose
+// shape is guaranteed by `normalizeConfig` in `src/config/load-config.js`
+// (single normalization entry point). The per-field `|| <default>` chains
+// that previously lived here have been moved into that single normalization
+// pass.
+//
+// We KEEP a defensive coercion here so direct callers (older tests, future
+// callers passing raw inputs) still get a usable shape, but we DO NOT expose
+// `normalizeBranchConfig` to new callers — the canonical input is the
+// already-normalized effective config produced by `loadRuntimeConfig`.
 function normalizeBranchConfig(branchConfig = {}) {
+  if (!branchConfig || typeof branchConfig !== "object" || Array.isArray(branchConfig)) {
+    branchConfig = {};
+  }
+
+  // Defensive shallow shape — for raw/test inputs that bypassed the
+  // canonical `normalizeConfig` pipeline. When called via the standard
+  // bootstrap, every field below is already populated and these fallbacks
+  // are no-ops. Round 2 follow-up (AI-5): `defaultMergeTarget` is included
+  // so this defensive shape exposes the same 7-key contract that
+  // `normalizeConfig` guarantees on the canonical path. Previously it
+  // only carried 6 keys and direct callers reading `defaultMergeTarget`
+  // would have received `undefined`.
   return {
-    pattern: branchConfig.pattern || "{type}/{ticket}-{slug}",
-    defaultType: branchConfig.defaultType || "chore",
-    fallbackTicket: branchConfig.fallbackTicket || "no-ticket",
+    pattern:
+      typeof branchConfig.pattern === "string" && branchConfig.pattern.length > 0
+        ? branchConfig.pattern
+        : "{type}/{ticket}-{slug}",
+    defaultType:
+      typeof branchConfig.defaultType === "string" && branchConfig.defaultType.length > 0
+        ? branchConfig.defaultType
+        : "chore",
+    fallbackTicket:
+      typeof branchConfig.fallbackTicket === "string" && branchConfig.fallbackTicket.length > 0
+        ? branchConfig.fallbackTicket
+        : "no-ticket",
     longLivedBranches: Array.isArray(branchConfig.longLivedBranches)
       ? [...branchConfig.longLivedBranches]
       : ["main", "master"],
-    validationRegex: branchConfig.validationRegex || "",
+    defaultMergeTarget:
+      typeof branchConfig.defaultMergeTarget === "string"
+        ? branchConfig.defaultMergeTarget
+        : "",
+    validationRegex: typeof branchConfig.validationRegex === "string"
+      ? branchConfig.validationRegex
+      : "",
     commandTypeMap:
-      branchConfig.commandTypeMap && typeof branchConfig.commandTypeMap === "object"
+      branchConfig.commandTypeMap &&
+      typeof branchConfig.commandTypeMap === "object" &&
+      !Array.isArray(branchConfig.commandTypeMap)
         ? branchConfig.commandTypeMap
         : {},
   };

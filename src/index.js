@@ -54,7 +54,18 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
 
     // Emit config.validation.failed audit event if any config layer was dropped or had errors.
     // Best-effort only — bootstrap continues regardless of audit outcome (NFR7/NFR8).
-    if (!runtimeConfig.validation.valid || runtimeConfig.validation.droppedLayers.length > 0) {
+    //
+    // Story 4.1: `validation.errors` may also contain vocabulary warnings
+    // (`params.source === "vocabulary"`, `params.kind === "warning"`) that do
+    // NOT flip `validation.valid` to false. Triggering on
+    // `errors.length > 0` ensures those advisory entries also surface through
+    // the audit channel without forcing a layer drop or fake "validation
+    // failure" status.
+    if (
+      !runtimeConfig.validation.valid ||
+      runtimeConfig.validation.droppedLayers.length > 0 ||
+      (runtimeConfig.validation.errors || []).length > 0
+    ) {
       const normalizedErrors = (runtimeConfig.validation.errors || []).map((err) => ({
         instancePath: err.instancePath,
         message: err.message,

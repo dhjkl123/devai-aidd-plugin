@@ -50,22 +50,34 @@ export function resolveWorkflowPolicy(workflowContext, runtimeConfig) {
   const workflowPolicy = (runtimeConfig && runtimeConfig.workflowPolicy) || {};
   const branch = (runtimeConfig && runtimeConfig.branch) || {};
 
-  // Build shared branch details (used in both matched and fallback cases)
-  const commandType =
-    (branch.commandTypeMap && branch.commandTypeMap[commandName]) ||
-    branch.defaultType ||
-    "chore";
+  // Story 4.1 (Round 2 follow-up AI-1): `branchDetails` consumes the
+  // already-normalized effective `branch` object directly. `normalizeConfig`
+  // in `src/config/load-config.js` is the SINGLE entry point that fills
+  // `pattern`, `defaultType`, `fallbackTicket`, `longLivedBranches`,
+  // `defaultMergeTarget`, `validationRegex`, and `commandTypeMap` with safe
+  // defaults. We intentionally do NOT redo per-field `|| <default>`
+  // fallbacks here — that would re-introduce the duplicated normalization
+  // responsibility Round 1 flagged as contradicting the story's own
+  // "single normalization entry point" claim.
+  //
+  // Fresh-object invariant (Story 1.3): every nested object/array we expose
+  // is freshly constructed on each call so callers cannot mutate the
+  // runtimeConfig through this envelope. `verifyEffectivePolicyDeterminism`
+  // regresses against any future leak.
+  const commandTypeMap = branch.commandTypeMap || {};
+  const defaultType = branch.defaultType;
+  const commandType = commandTypeMap[commandName] || defaultType;
 
   const branchDetails = {
-    defaultType: branch.defaultType || "chore",
+    defaultType,
     commandType,
     longLivedBranches: Array.isArray(branch.longLivedBranches)
       ? [...branch.longLivedBranches]
       : [],
-    fallbackTicket: branch.fallbackTicket || "no-ticket",
-    defaultMergeTarget: branch.defaultMergeTarget || "",
-    pattern: branch.pattern || "{type}/{ticket}-{slug}",
-    validationRegex: branch.validationRegex || "",
+    fallbackTicket: branch.fallbackTicket,
+    defaultMergeTarget: branch.defaultMergeTarget,
+    pattern: branch.pattern,
+    validationRegex: branch.validationRegex,
   };
 
   // Case 2: commandName recognized but no policy entry → safe-default fallback

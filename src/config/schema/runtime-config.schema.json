@@ -54,11 +54,11 @@
         "properties": {
           "category": {
             "type": "string",
-            "description": "Policy category (e.g. implementation, planning, research, docs, review)."
+            "description": "Policy category. Known vocabulary: implementation, planning, research, docs, review. Unknown values are accepted (forward-compat) but raise a vocabulary audit warning."
           },
           "identityStrategy": {
             "type": "string",
-            "description": "Identity resolution strategy for the workflow."
+            "description": "Identity resolution strategy. Known vocabulary: story, ticket-or-args, artifact-singleton, artifact-or-args. Unknown values are accepted (forward-compat) but raise a vocabulary audit warning."
           },
           "branchRequired": {
             "type": "boolean",
@@ -66,7 +66,7 @@
           },
           "finalization": {
             "type": "string",
-            "description": "Finalization behavior (e.g. commit-and-push, commit-optional-push, no-forced-finalization)."
+            "description": "Finalization behavior. Known vocabulary: commit-and-push, commit-optional-push, no-forced-finalization. Unknown values are accepted (forward-compat) but raise a vocabulary audit warning."
           },
           "artifactKey": {
             "type": "string",

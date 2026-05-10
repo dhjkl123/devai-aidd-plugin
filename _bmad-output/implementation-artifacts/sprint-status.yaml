@@ -1,7 +1,7 @@
 ﻿# generated: 2026-05-08 00:03:13 +09:00
-# last_updated: 2026-05-10
-# last_review: 2026-05-10 (story 3-1 code-review round 2: 0 CRITICAL/HIGH, 1 MEDIUM (R1 follow-up uncommitted/mixed with story 3-3 — same pattern as story 3-2 round 3 CRITICAL), 2 LOW auto-fixed (File List entry accuracy + decodeCQuotedPath lone-surrogate U+FFFD); R1 follow-up isolated to single commit; npm test exit 0; status review -> done)
-# last_dev: 2026-05-10 (story 3-1 round-1 review follow-ups isolated: audit best-effort, singleton fallback gate, normalizeTrackedFilePath out-of-repo guard, parseStatusPorcelainPaths split into module with quoted/rename/whitespace/octal handling, doc/File List cleanup; +4 regression cases; npm test exit 0; status in-progress -> review)
+# last_updated: 2026-05-10 (story 4-1 code-review round 1+2: 0 CRITICAL / 0 HIGH / 4 MEDIUM / 5 LOW; all 4 MEDIUM (AI-1 resolveWorkflowPolicy single-source claim alignment, AI-2 schema deep-equal sync, AI-3 vocabulary JSDoc attribution, AI-4 cross-source value equivalence) + all 5 LOW auto-fixed in R2; npm test exit 0; npm run build exit 0; status review -> done)
+# last_review: 2026-05-10 (story 4-1 code-review round 1+2: 0 CRITICAL / 0 HIGH / 4 MEDIUM / 5 LOW; all 9 issues auto-fixed in R2 (AI-1..AI-9); npm test exit 0; npm run build exit 0; status review -> done)
+# last_dev: 2026-05-10 (story 4-1 dev-story complete: single-pass effective config normalization in src/config/load-config.js#normalizeConfig, branch-service + resolve-workflow-policy reduced to thin pass-throughs over already-normalized config, KNOWN_WORKFLOW_POLICY_VOCABULARY + collectWorkflowPolicyVocabularyWarnings audit-warning lane (forward-compat preserved, no enum), schema descriptions synced, FR18 jsonc template comments + README "코드 수정 없이 정책 바꾸기" subsection, +5 regression cases; npm test exit 0; status in-progress -> review)
 # last_retro: 2026-05-09 (epic-1 + epic-2 retrospectives executed in batch; epic-1-retro-2026-05-09.md + epic-2-retro-2026-05-09.md saved; epic-1 and epic-2 transitioned in-progress -> done; epic-1-retrospective and epic-2-retrospective transitioned optional -> done)
 # last_story: 2026-05-10 (stories 4-1, 4-2, 4-3, 4-4, 4-5 created in parallel via create-story workflow; epic-4 backlog -> in-progress; statuses -> ready-for-dev)
 # project: opencode-aidd-plugin
@@ -39,9 +39,9 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-05-08 00:03:13 +09:00
-last_updated: 2026-05-10 (stories 4-1, 4-2, 4-3, 4-4, 4-5 created in parallel via create-story workflow; epic-4 backlog -> in-progress; statuses -> ready-for-dev)
-last_dev: 2026-05-10 (story 3-5 dev-story complete: pathScopeSummary on commit proposal, artifactKinds + reviewer-facing scope clause in approval explanation, README reviewer guide, +7 regression cases; npm test exit 0; status in-progress -> review)
-last_review: 2026-05-10 (story 3-1 code-review round 2: 0 CRITICAL/HIGH, 1 MEDIUM (R1 follow-up uncommitted/mixed with story 3-3 — same pattern as story 3-2 round 3 CRITICAL), 2 LOW auto-fixed (File List entry accuracy + decodeCQuotedPath lone-surrogate U+FFFD); R1 follow-up isolated to single commit; npm test exit 0; status review -> done)
+last_updated: 2026-05-10 (story 4-1 code-review round 1+2: 0 CRITICAL / 0 HIGH / 4 MEDIUM / 5 LOW; all 4 MEDIUM (AI-1..AI-4) + all 5 LOW (AI-5..AI-9) auto-fixed in R2; npm test exit 0; npm run build exit 0; status review -> done)
+last_dev: 2026-05-10 (story 4-1 dev-story complete: single-pass effective config normalization in src/config/load-config.js#normalizeConfig, branch-service + resolve-workflow-policy reduced to thin pass-throughs over already-normalized config, KNOWN_WORKFLOW_POLICY_VOCABULARY + collectWorkflowPolicyVocabularyWarnings audit-warning lane (forward-compat preserved, no enum), schema descriptions synced, FR18 jsonc template comments + README "코드 수정 없이 정책 바꾸기" subsection, +5 regression cases (verifyEffectiveConfigNormalizationContract / verifyMissingOptionalValuesFallback / verifyWorkflowPolicyVocabularySchema / verifyEffectivePolicyDeterminism / verifyLatestPolicyChangesReflectedAcrossRuns); npm test exit 0; status in-progress -> review)
+last_review: 2026-05-10 (story 4-1 code-review round 1: 0 CRITICAL / 0 HIGH / 4 MEDIUM / 5 LOW; round 2 auto-fixed all 9 issues — AI-1 resolveWorkflowPolicy single-source claim alignment, AI-2 schema deep-equal sync, AI-3 vocabulary JSDoc attribution corrected, AI-4 cross-source value equivalence, AI-5 defaultMergeTarget added to defensive normalize, AI-6 params.kind doc clarified, AI-7 README vocabulary typo example, AI-8 mixed-errors filter doc, AI-9 File List dist annotation; npm test exit 0; npm run build exit 0; status review -> done)
 last_retro: 2026-05-09 (epic-1 + epic-2 retrospectives executed in batch; epic-1-retro-2026-05-09.md + epic-2-retro-2026-05-09.md saved; epic-1 and epic-2 transitioned in-progress -> done; epic-1-retrospective and epic-2-retrospective transitioned optional -> done)
 last_story: 2026-05-10 (stories 4-1, 4-2, 4-3, 4-4, 4-5 created in parallel via create-story workflow; epic-4 backlog -> in-progress; statuses -> ready-for-dev)
 project: opencode-aidd-plugin
@@ -75,7 +75,7 @@ development_status:
   epic-3-retrospective: optional
 
   epic-4: in-progress
-  4-1-define-and-normalize-branch-and-workflow-policy-configuration: ready-for-dev
+  4-1-define-and-normalize-branch-and-workflow-policy-configuration: done
   4-2-preserve-legacy-configuration-compatibility-and-bridge-files: ready-for-dev
   4-3-preserve-existing-bmad-command-compatibility-through-the-wrapper: ready-for-dev
   4-4-build-and-package-release-artifacts-reliably: ready-for-dev

@@ -68,6 +68,63 @@ bash install.sh
 
 프로젝트 설정은 글로벌 설정을 override한다. 런타임은 기존 코어 로직 호환을 위해 필요 시 레거시 설정 파일을 생성해 bridge 한다.
 
+### 코드 수정 없이 정책 바꾸기 (FR18)
+
+브랜치 규칙과 워크플로우 정책은 플러그인 소스 코드를 수정하지 않고 위 jsonc 파일만 갱신해서 변경할 수 있다. 변경은 다음 워크플로 명령 시점부터 자동으로 반영된다.
+
+흐름 예시 — 팀 통합 브랜치를 `main`에서 `develop`으로 옮기고, `bmad-bmm-quick-dev`를 강제 브랜치/커밋으로 묶고 싶다면:
+
+```jsonc
+// {project-root}/.opencode/devai-aidd-guard.project.jsonc
+{
+  "branch": {
+    "defaultMergeTarget": "develop",
+    "longLivedBranches": ["main", "master", "develop"],
+    "commandTypeMap": {
+      "bmad-bmm-dev-story": "feat",
+      "bmad-bmm-quick-dev": "feat"
+    }
+  },
+  "workflowPolicy": {
+    "bmad-bmm-quick-dev": {
+      "category": "implementation",
+      "identityStrategy": "ticket-or-args",
+      "branchRequired": true,
+      "finalization": "commit-and-push"
+    }
+  }
+}
+```
+
+자주 바꾸는 키는 다음과 같다.
+
+- `branch.defaultMergeTarget` — 통합 브랜치 이름
+- `branch.commandTypeMap` — BMAD 명령별 브랜치 타입 슬러그
+- `branch.longLivedBranches` — 재사용을 막을 장수명 브랜치 목록
+- `branch.validationRegex` — 팀 명명 규칙
+- `workflowPolicy.<command>.branchRequired` / `finalization` — 워크플로별 브랜치/커밋 강제 여부
+
+`workflowPolicy[*].category`, `identityStrategy`, `finalization`은 알려진 어휘를 권장하지만(예: `implementation`, `commit-and-push`), 미래 어휘를 도입할 수 있도록 미지의 값도 통과시킨다. 단, 미지의 값은 `config.validation.failed` 감사 이벤트에 `params.source === "vocabulary"` 경고로 노출되므로 오타를 빠르게 알 수 있다.
+
+예를 들어 `finalization: "commit-and-puh"` 같은 오타를 입력하면 다음과 같은 감사 이벤트가 노출된다.
+
+```json
+{
+  "event": "config.validation.failed",
+  "details": {
+    "errors": [
+      {
+        "instancePath": "/workflowPolicy/bmad-bmm-quick-dev/finalization",
+        "message": "Unknown finalization value \"commit-and-puh\" for bmad-bmm-quick-dev; known values: commit-and-push, commit-optional-push, no-forced-finalization",
+        "params": { "source": "vocabulary", "kind": "warning", "field": "finalization" }
+      }
+    ]
+  }
+}
+```
+
+`params.source === "vocabulary"` 항목만 필터링하면 hard error 없이 오타만 추적할 수 있다.
+
 ## 빌드와 릴리스
 
 ```bash

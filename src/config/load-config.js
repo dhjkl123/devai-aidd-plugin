@@ -11,7 +11,10 @@ import {
   PROJECT_CONFIG_DIR,
   PROJECT_CONFIG_FILE_NAME,
 } from "../utils/constants.js";
-import { validateRuntimeConfig } from "./validate-config.js";
+import {
+  collectWorkflowPolicyVocabularyWarnings,
+  validateRuntimeConfig,
+} from "./validate-config.js";
 
 function stripJsonComments(text) {
   return String(text || "")
@@ -85,9 +88,39 @@ export function mergeConfigs(layers) {
   return result;
 }
 
+// Story 4.1: Single normalization entry point for the effective configuration.
+//
+// All branch.* fields downstream consumers depend on are filled with safe
+// defaults HERE so neither `src/services/git/branch-service.js` nor
+// `src/services/workflow/resolve-workflow-policy.js` need to repeat per-field
+// `|| <default>` fallbacks. After Story 4.1, those services receive an
+// already-normalized effective config and act as thin pass-throughs.
+//
+// Design notes:
+//   - This function runs AFTER `validateAndRecover` has rejected invalid
+//     layers (per Story 1.3), so the inputs here are typed-correct OR fully
+//     missing. We therefore only need to pad missing/empty fields with the
+//     same safe defaults DEFAULT_PLUGIN_CONFIG already exposes.
+//   - We mirror DEFAULT_PLUGIN_CONFIG via `cloneDefaultConfig()` first, so
+//     any field the user did not touch starts from the canonical default.
+//   - We do NOT mutate `config`; the result is a new object suitable for
+//     `runtimeConfig.config` (which downstream treats as immutable).
+const SAFE_BRANCH_DEFAULTS = {
+  pattern: "{type}/{ticket}-{slug}",
+  defaultType: "chore",
+  fallbackTicket: "no-ticket",
+  validationRegex: "",
+};
+
 function normalizeConfig(config) {
   const merged = mergeObjects(cloneDefaultConfig(), config);
-  const configuredLongLivedBranches = Array.isArray(merged?.branch?.longLivedBranches)
+
+  if (!merged.branch || typeof merged.branch !== "object" || Array.isArray(merged.branch)) {
+    merged.branch = {};
+  }
+
+  // longLivedBranches: dedupe, lowercase, trim, drop empty.
+  const configuredLongLivedBranches = Array.isArray(merged.branch.longLivedBranches)
     ? merged.branch.longLivedBranches
     : [];
 
@@ -99,7 +132,34 @@ function normalizeConfig(config) {
     ),
   );
 
-  merged.branch.defaultMergeTarget = String(merged?.branch?.defaultMergeTarget || "").trim();
+  // defaultMergeTarget: trim only (empty string is a valid "no merge target" signal).
+  merged.branch.defaultMergeTarget = String(merged.branch.defaultMergeTarget || "").trim();
+
+  // pattern / defaultType / fallbackTicket: safe-default fallback.
+  // Story 1.3 invalid-value cases never reach here (they're dropped during
+  // validateAndRecover), so we only need to handle "missing optional" cases.
+  for (const key of ["pattern", "defaultType", "fallbackTicket"]) {
+    const value = merged.branch[key];
+    if (typeof value !== "string" || value.length === 0) {
+      merged.branch[key] = SAFE_BRANCH_DEFAULTS[key];
+    }
+  }
+
+  // validationRegex: empty string is meaningful ("no regex enforced"),
+  // so only normalize the non-string case (defensive — schema rejects this).
+  if (typeof merged.branch.validationRegex !== "string") {
+    merged.branch.validationRegex = SAFE_BRANCH_DEFAULTS.validationRegex;
+  }
+
+  // commandTypeMap: must be a plain object. Coerce non-objects to {}.
+  if (
+    !merged.branch.commandTypeMap ||
+    typeof merged.branch.commandTypeMap !== "object" ||
+    Array.isArray(merged.branch.commandTypeMap)
+  ) {
+    merged.branch.commandTypeMap = {};
+  }
+
   return merged;
 }
 
@@ -286,13 +346,24 @@ export function resolveConfigPaths(directory, fsAdapter) {
  *   - `paths`: resolved file paths
  *   - `sources`: boolean flags for which sources were found
  *   - `validation`:
- *       - `valid`: final mergedConfig passes schema validation
+ *       - `valid`: final mergedConfig passes schema/parse checks (vocabulary
+ *         warnings do NOT flip this to false — see Story 4.1 forward-compat
+ *         decision)
  *       - `recovered`: at least one layer was dropped (recovered from failure)
  *       - `droppedLayers`: layer names dropped during validation
- *       - `errors`: normalized error entries (parse failures + schema failures)
+ *       - `errors`: MIXED list of normalized entries — parse failures
+ *         + schema failures + Story 4.1 vocabulary warnings. Each entry
+ *         carries `params.source` so callers can discriminate:
+ *           * `params.source === "parseJsonc"`  → hard parse failure
+ *           * (no `params.source`)              → hard schema failure
+ *           * `params.source === "vocabulary"`  → advisory warning
+ *             (`params.kind === "warning"`)
+ *         To check for "hard errors only", filter:
+ *           `errors.filter(e => e?.params?.source !== "vocabulary")`
  *
- * Does NOT throw. Validation failures are surfaced in `validation` and the
- * caller is responsible for emitting `config.validation.failed` audit events.
+ * Does NOT throw. Validation failures and vocabulary warnings are surfaced
+ * in `validation` and the caller is responsible for emitting
+ * `config.validation.failed` audit events when `errors.length > 0`.
  */
 export function loadRuntimeConfig(directory, fsAdapter) {
   const paths = resolveConfigPaths(directory, fsAdapter);
@@ -322,8 +393,22 @@ export function loadRuntimeConfig(directory, fsAdapter) {
     projectConfig,
   );
 
-  const errors = [...parseErrors, ...schemaErrors];
+  // Story 4.1: vocabulary warnings are collected on the FINAL effective config,
+  // AFTER `validateAndRecover` has chosen which layers to accept. They surface
+  // through `validation.errors` (so the existing `config.validation.failed`
+  // audit channel picks them up) but are tagged `params.source === "vocabulary"`
+  // and `params.kind === "warning"` so they are NEVER mistaken for hard
+  // schema/parse errors. Crucially, they do NOT cause layer drops — Story 1.3's
+  // forward-compat invariant (`additionalProperties: true` on workflowPolicy[*])
+  // is preserved.
+  const vocabularyWarnings = collectWorkflowPolicyVocabularyWarnings(mergedConfig);
+
+  const errors = [...parseErrors, ...schemaErrors, ...vocabularyWarnings];
   const recovered = droppedLayers.length > 0 || parseErrors.length > 0;
+  // `valid` reflects whether the effective config passed schema/parse checks.
+  // Vocabulary warnings do not flip `valid` to false because they are advisory
+  // (forward-compat decision recorded in Story 4.1 Dev Notes).
+  const hardErrorCount = parseErrors.length + schemaErrors.length;
 
   return {
     config: mergedConfig,
@@ -335,7 +420,7 @@ export function loadRuntimeConfig(directory, fsAdapter) {
       hasLegacyProjectConfig: Boolean(legacyProjectConfig),
     },
     validation: {
-      valid: errors.length === 0,
+      valid: hardErrorCount === 0,
       recovered,
       droppedLayers,
       errors,

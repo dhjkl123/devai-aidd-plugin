@@ -4,6 +4,56 @@ import Ajv2020 from "ajv/dist/2020.js";
 export const RUNTIME_CONFIG_SCHEMA_VERSION = 1;
 
 /**
+ * Story 4.1 — Known workflow policy vocabulary.
+ *
+ * These are the values that ship with `DEFAULT_PLUGIN_CONFIG` and are
+ * actively interpreted by services. They are the "recommended" vocabulary.
+ *
+ * Forward-compat policy (decision recorded in Story 4.1 Dev Notes):
+ *   - We did NOT enforce these as a JSON-schema `enum` because Story 1.3
+ *     deliberately accepted `additionalProperties: true` on
+ *     `workflowPolicy[*]` to keep older hosts forward-compatible with newer
+ *     plugin versions.
+ *   - Surfacing pipeline (Round 2 follow-up AI-3 — corrected attribution):
+ *     1. `collectWorkflowPolicyVocabularyWarnings(config)` (this file, below)
+ *        produces audit-warning entries tagged `params.source === "vocabulary"`
+ *        and `params.kind === "warning"`. Neither `validateRuntimeConfig`
+ *        nor `validateAndRecover` is involved in surfacing vocabulary.
+ *     2. `loadRuntimeConfig` in `src/config/load-config.js` calls that
+ *        collector AFTER `validateAndRecover` has chosen which layers to
+ *        accept, then appends the warnings to `validation.errors` (alongside
+ *        parse + schema errors). Vocabulary warnings never trigger a layer
+ *        drop and never flip `validation.valid` to false.
+ *     3. `src/index.js` bootstrap (the audit trigger block) emits the
+ *        existing `config.validation.failed` event whenever
+ *        `validation.errors.length > 0`, so vocabulary warnings reach the
+ *        same audit channel as hard failures without a new event type.
+ *   - Behaviour summary: known vocabulary → silent. Unknown vocabulary →
+ *     audit warning entry + the value passes through unchanged so newer
+ *     vocabularies can be introduced ahead of host upgrades.
+ */
+export const KNOWN_WORKFLOW_POLICY_VOCABULARY = Object.freeze({
+  category: Object.freeze([
+    "implementation",
+    "planning",
+    "research",
+    "docs",
+    "review",
+  ]),
+  identityStrategy: Object.freeze([
+    "story",
+    "ticket-or-args",
+    "artifact-singleton",
+    "artifact-or-args",
+  ]),
+  finalization: Object.freeze([
+    "commit-and-push",
+    "commit-optional-push",
+    "no-forced-finalization",
+  ]),
+});
+
+/**
  * Runtime configuration JSON Schema (Draft 2020-12).
  * Inlined here so the validator works both in source and in the esbuild bundle
  * (which cannot resolve __dirname-relative readFileSync paths at runtime).
@@ -79,11 +129,15 @@ export const RUNTIME_CONFIG_SCHEMA = {
         properties: {
           category: {
             type: "string",
-            description: "Policy category (e.g. implementation, planning, research, docs, review).",
+            description:
+              "Policy category. Known vocabulary: implementation, planning, research, docs, review. " +
+              "Unknown values are accepted (forward-compat) but raise a vocabulary audit warning.",
           },
           identityStrategy: {
             type: "string",
-            description: "Identity resolution strategy for the workflow.",
+            description:
+              "Identity resolution strategy. Known vocabulary: story, ticket-or-args, artifact-singleton, artifact-or-args. " +
+              "Unknown values are accepted (forward-compat) but raise a vocabulary audit warning.",
           },
           branchRequired: {
             type: "boolean",
@@ -92,7 +146,8 @@ export const RUNTIME_CONFIG_SCHEMA = {
           finalization: {
             type: "string",
             description:
-              "Finalization behavior (e.g. commit-and-push, commit-optional-push, no-forced-finalization).",
+              "Finalization behavior. Known vocabulary: commit-and-push, commit-optional-push, no-forced-finalization. " +
+              "Unknown values are accepted (forward-compat) but raise a vocabulary audit warning.",
           },
           artifactKey: {
             type: "string",
@@ -169,4 +224,60 @@ export function validateRuntimeConfig(config) {
     valid: Boolean(valid) && semanticErrors.length === 0,
     errors: [...schemaErrors, ...semanticErrors],
   };
+}
+
+/**
+ * Story 4.1 — Vocabulary audit warnings.
+ *
+ * Surfaces typos / unknown vocabulary on `workflowPolicy[*].category`,
+ * `identityStrategy`, and `finalization` WITHOUT failing JSON schema
+ * validation (so the forward-compat policy from Story 1.3 — older hosts
+ * accepting newer vocabularies — stays intact).
+ *
+ * Returns entries shaped like the rest of the validation pipeline so audit
+ * consumers can treat them uniformly. The `params.source === "vocabulary"`
+ * tag distinguishes them from schema and parse failures, and
+ * `params.kind === "warning"` marks the entry as advisory (forward-compat
+ * allow-through) — it is currently the only kind this collector emits, so
+ * downstream code can rely on the literal value to filter vocabulary
+ * warnings out of any "hard error" check.
+ *
+ * @param {object} config - The fully-merged effective configuration.
+ * @returns {Array<object>} Audit-warning entries (may be empty).
+ */
+export function collectWorkflowPolicyVocabularyWarnings(config) {
+  const warnings = [];
+  const workflowPolicy = config && typeof config === "object" ? config.workflowPolicy : null;
+  if (!workflowPolicy || typeof workflowPolicy !== "object" || Array.isArray(workflowPolicy)) {
+    return warnings;
+  }
+
+  for (const [commandName, entry] of Object.entries(workflowPolicy)) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+
+    for (const field of ["category", "identityStrategy", "finalization"]) {
+      const value = entry[field];
+      if (typeof value !== "string" || value.length === 0) continue;
+
+      const allowed = KNOWN_WORKFLOW_POLICY_VOCABULARY[field];
+      if (!allowed.includes(value)) {
+        warnings.push({
+          instancePath: `/workflowPolicy/${commandName}/${field}`,
+          schemaPath: `#/properties/workflowPolicy/additionalProperties/properties/${field}`,
+          keyword: "vocabulary",
+          params: {
+            source: "vocabulary",
+            kind: "warning",
+            field,
+            commandName,
+            value,
+            knownValues: [...allowed],
+          },
+          message: `Unknown ${field} value "${value}" for ${commandName}; known values: ${allowed.join(", ")}`,
+        });
+      }
+    }
+  }
+
+  return warnings;
 }
