@@ -43,9 +43,11 @@ import {
 import {
   confirmManualResolution,
   openRecoveryFromApproval,
+  openRecoveryFromExecution,
   readRecoveryGate,
   selectRecoveryChoice,
 } from "../services/approval/recovery-orchestrator.js";
+import { executeApprovedAction } from "../services/git/execute-approved-action.js";
 import {
   isTerminalRecoveryState,
   RECOVERY_CHOICES,
@@ -233,11 +235,15 @@ async function deliverRecoveryPrompt({ pluginContext, gate, audit, sessionID, wo
   } catch (error) {
     if (audit) {
       try {
+        // Story 3.4 (review L1): adopt the top-level sessionID convention
+        // used by the rest of the finalization audit events so this skip
+        // event aligns with approval.resolved / git.action.skipped shape.
         await audit.info("recovery.prompt.delivery.failed", {
           event: "recovery.prompt.delivery.failed",
           timestamp: new Date().toISOString(),
           workflow: workflow ?? null,
           command: command ?? null,
+          sessionID,
           outcome: "skip",
           details: {
             reason: "prompt-delivery-failed",
@@ -321,8 +327,65 @@ export function createPermissionAskedHook(legacyHandlers, injections = {}) {
               });
 
               if (result.outcome === "resolved" && audit && Array.isArray(result.auditEvents)) {
+                // Story 3.4: emit each resolution audit event independently
+                // and best-effort. Without per-event isolation, a throwing
+                // audit sink on the first event (e.g. approval.resolved)
+                // would propagate up and prevent the second event
+                // (git.action.skipped) AND the downstream executor /
+                // recovery hand-off from running. Story 3.4 contract: a
+                // throwing logger MUST NOT abort the finalization envelope.
                 for (const event of result.auditEvents) {
-                  await audit.info(event.event, event);
+                  try {
+                    await audit.info(event.event, event);
+                  } catch {
+                    // Best-effort: keep emitting subsequent events and let
+                    // the rest of the resolution flow proceed.
+                  }
+                }
+              }
+
+              if (
+                result.outcome === "resolved" &&
+                outcome === APPROVAL_OUTCOMES.ACCEPT &&
+                (result.resolution?.actionKind === "commit" ||
+                  result.resolution?.actionKind === "push")
+              ) {
+                const executionResult = await executeApprovedAction({
+                  workflowState,
+                  sessionID: input.sessionID,
+                  approvalRequest: active,
+                  resolution: result.resolution,
+                  pluginContext,
+                  audit,
+                });
+
+                if (
+                  executionResult.outcome === "executed" &&
+                  executionResult.envelope?.ok === false
+                ) {
+                  try {
+                    const recoveryResult = await openRecoveryFromExecution({
+                      workflowState,
+                      sessionID: input.sessionID,
+                      envelope: executionResult.envelope,
+                      workflow: result.resolution?.metadata?.workflow ?? active.workflow ?? null,
+                      command: result.resolution?.metadata?.command ?? active.command ?? null,
+                      audit,
+                    });
+
+                    if (recoveryResult.outcome === "opened" && recoveryResult.gate) {
+                      await deliverRecoveryPrompt({
+                        pluginContext,
+                        gate: recoveryResult.gate,
+                        audit,
+                        sessionID: input.sessionID,
+                        workflow: result.resolution?.metadata?.workflow ?? active.workflow ?? null,
+                        command: result.resolution?.metadata?.command ?? active.command ?? null,
+                      });
+                    }
+                  } catch {
+                    // Execution recovery is best-effort.
+                  }
                 }
               }
 

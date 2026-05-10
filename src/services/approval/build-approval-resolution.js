@@ -98,6 +98,37 @@ export function buildApprovalResolution({
 }
 
 /**
+ * Story 3.4: extract a stable correlationId from the request's proposal so
+ * `approval.resolved` and `git.action.skipped` carry the same correlation
+ * axis as `git.action.executed` (set by the executor on the action plan).
+ * Falls back to null when the proposal has none (e.g. branch/init proposals
+ * built before correlation was wired through).
+ *
+ * @param {object | null | undefined} request
+ * @returns {string | null}
+ */
+function readProposalCorrelationId(request) {
+  const value = request?.proposal?.correlationId;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * Story 3.4: read the workflow finalization mode preserved by
+ * `buildApprovalRequest` on the request metadata. This is the same value the
+ * planning audit (`git.action.planned`) and the explanation payload already
+ * use, so threading it through the resolution events lets an auditor join
+ * planning → approval → execution by `finalizationMode` in addition to
+ * `correlationId`.
+ *
+ * @param {object | null | undefined} request
+ * @returns {string | null}
+ */
+function readFinalizationMode(request) {
+  const value = request?.metadata?.finalization;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
  * Builds the `approval.resolved` audit payload.
  *
  * @param {{
@@ -130,6 +161,11 @@ export function buildApprovalResolvedAudit({
       phase: resolution.metadata.phase,
       sourceHook: resolution.sourceHook,
       hadActiveApproval,
+      // Story 3.4: correlation axes so an auditor can re-assemble the
+      // approval.requested → approval.resolved → git.action.executed/skipped
+      // chain into a single finalization flow.
+      correlationId: readProposalCorrelationId(request),
+      finalizationMode: readFinalizationMode(request),
     },
   };
 }
@@ -159,6 +195,14 @@ export function buildGitActionSkippedAudit({ request, resolution, timestamp }) {
       actionType: resolution.actionType,
       reason,
       continuation: resolution.continuation,
+      // Story 3.4: same correlation axes as approval.resolved so push-deny
+      // (which produces git.action.skipped) can be joined with the prior
+      // commit-success git.action.executed event by finalizationMode + the
+      // shared workflow + sessionID without losing the local-finalized /
+      // remote-not-finalized distinction encoded in `reason`.
+      phase: resolution.metadata.phase,
+      correlationId: readProposalCorrelationId(request),
+      finalizationMode: readFinalizationMode(request),
     },
   };
 }

@@ -12,7 +12,19 @@
  * Priority order for selectNextPlannedAction:
  *   1. initProposal
  *   2. branchProposal
- *   (future: commitProposal, pushProposal — added by Story 3.x)
+ *   3. commitProposal (Story 3.2)
+ *   4. pushProposal   (Story 3.3)
+ *
+ * Story 3.5 (reviewer traceability) explicitly REUSES this priority chain
+ * rather than introducing a new approval type. The reviewer-facing scope
+ * (artifactScope, changeCountSummary, artifactKinds, pathScopeSummary) is
+ * carried inside the existing commitProposal/pushProposal payload, surfaced
+ * by `build-approval-explanation.js`, and joined to executor audit through
+ * the existing `git.action.executed` event family — Story 3.5 adds no new
+ * approval type, no new audit event name, and no proprietary review
+ * metadata path. Reviewer traceability rests on the resulting standard Git
+ * commit history (git log / git log --follow / git blame on the
+ * proposal-scope file paths).
  */
 
 /**
@@ -37,11 +49,15 @@ export function getPendingApproval(state) {
  *      init/branch proposal so queued actions are not lost.
  *   1. initProposal
  *   2. branchProposal
+ *   3. commitProposal
+ *   4. pushProposal
  *
  * @param {{
  *   pendingActions?: Array<{ proposal?: object } | null>,
  *   initProposal?: object | null,
- *   branchProposal?: object | null
+ *   branchProposal?: object | null,
+ *   commitProposal?: object | null,
+ *   pushProposal?: object | null
  * }} state
  * @returns {object | null}
  */
@@ -68,7 +84,15 @@ export function selectNextPlannedAction(state) {
     return state.branchProposal;
   }
 
-  // Future: commitProposal, pushProposal (Story 3.x)
+  // Priority 3: commitProposal (Story 3.2)
+  if (state.commitProposal && typeof state.commitProposal === "object") {
+    return state.commitProposal;
+  }
+
+  // Priority 4: pushProposal (Story 3.3)
+  if (state.pushProposal && typeof state.pushProposal === "object") {
+    return state.pushProposal;
+  }
 
   return null;
 }

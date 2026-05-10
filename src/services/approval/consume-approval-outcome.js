@@ -131,8 +131,28 @@ export function consumeApprovalOutcome({
     ? state.pendingActions
     : [];
 
+  // Story 3.3 review (Medium): clear the matching proposal slot when the
+  // active approval is denied / ignore-and-continue. Without this, the
+  // priority-3/4 selectors in selectNextPlannedAction will re-promote the
+  // same commitProposal/pushProposal on the next planning pass — the user
+  // would see the same prompt again after explicitly skipping it.
+  // Accept does not need cleanup here: the executor clears its own slot on
+  // success, and a failed accept opens a recovery gate against the same slot.
+  const isTerminalSkip =
+    outcome === APPROVAL_OUTCOMES.DENY ||
+    outcome === APPROVAL_OUTCOMES.IGNORE_AND_CONTINUE;
+  const proposalCleanup = {};
+  if (isTerminalSkip) {
+    if (resolution.actionKind === "push") {
+      proposalCleanup.pushProposal = null;
+    } else if (resolution.actionKind === "commit") {
+      proposalCleanup.commitProposal = null;
+    }
+  }
+
   workflowState.set(sessionID, {
     ...state,
+    ...proposalCleanup,
     approvalCurrent: null,
     approvalHistory: nextHistory,
     pendingActions: nextPending,

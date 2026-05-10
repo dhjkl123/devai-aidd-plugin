@@ -54,6 +54,16 @@ import { WORKFLOW_PHASES } from "./detect-workflow-context.js";
  *                                { source, correlationId, code,
  *                                  recoverable, suggestedRecoveryKind }.
  *
+ * Story 3.5 (reviewer traceability) does NOT add new state fields here.
+ * The existing finalizationAssessment / finalizationArtifacts /
+ * commitProposal / pushProposal / lastGitAction / lastGitResult slots
+ * already carry every signal Story 3.5 needs to keep "what was committed
+ * and why" reconstructable from session state. Reviewer traceability is
+ * preserved in the resulting standard Git history (git log / git blame),
+ * not in a parallel session cache — adding a redundant traceability cache
+ * here would invite drift between session state and the actual repository
+ * record.
+ *
  * Recovery gate field (Story 2.5):
  *   recoveryGate             — null when no gate is open. Otherwise the
  *                              orchestrator-owned object describing the
@@ -146,6 +156,27 @@ export function createWorkflowStateStore() {
       // gate state, options, or history through the returned snapshot.
       if (copy.recoveryGate !== null && copy.recoveryGate !== undefined) {
         copy.recoveryGate = structuredClone(copy.recoveryGate);
+      }
+      if (Array.isArray(copy.touchedFiles)) {
+        copy.touchedFiles = structuredClone(copy.touchedFiles);
+      }
+      if (
+        copy.finalizationAssessment !== null &&
+        copy.finalizationAssessment !== undefined
+      ) {
+        copy.finalizationAssessment = structuredClone(copy.finalizationAssessment);
+      }
+      if (
+        copy.finalizationArtifacts !== null &&
+        copy.finalizationArtifacts !== undefined
+      ) {
+        copy.finalizationArtifacts = structuredClone(copy.finalizationArtifacts);
+      }
+      if (copy.commitProposal !== null && copy.commitProposal !== undefined) {
+        copy.commitProposal = structuredClone(copy.commitProposal);
+      }
+      if (copy.pushProposal !== null && copy.pushProposal !== undefined) {
+        copy.pushProposal = structuredClone(copy.pushProposal);
       }
       return copy;
     },

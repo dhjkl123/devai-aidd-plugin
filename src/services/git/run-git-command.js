@@ -1,9 +1,13 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const ALLOWED_COMMANDS = new Map([
   ["rev-parse-inside-work-tree", ["rev-parse", "--is-inside-work-tree"]],
   ["symbolic-ref-short-head", ["symbolic-ref", "--short", "HEAD"]],
   ["remote-verbose", ["remote", "-v"]],
+  ["status-porcelain", ["status", "--short", "--untracked-files=all"]],
 ]);
 
 function resolveAllowedArgs(command) {
@@ -14,12 +18,7 @@ function resolveAllowedArgs(command) {
   return [...ALLOWED_COMMANDS.get(command)];
 }
 
-export function runGitCommand({ directory, command, timeoutMs = 1500 } = {}) {
-  if (typeof directory !== "string" || directory.length === 0) {
-    throw new Error("A valid directory is required for git readiness commands.");
-  }
-
-  const args = resolveAllowedArgs(command);
+function execGitSync(directory, args, timeoutMs) {
   return execFileSync("git", args, {
     cwd: directory,
     encoding: "utf8",
@@ -30,4 +29,118 @@ export function runGitCommand({ directory, command, timeoutMs = 1500 } = {}) {
       GIT_TERMINAL_PROMPT: "0",
     },
   });
+}
+
+async function execGit(directory, args, timeoutMs) {
+  const { stdout } = await execFileAsync("git", args, {
+    cwd: directory,
+    encoding: "utf8",
+    timeout: timeoutMs,
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+    },
+  });
+  return stdout;
+}
+
+export function runGitCommand({ directory, command, timeoutMs = 1500 } = {}) {
+  if (typeof directory !== "string" || directory.length === 0) {
+    throw new Error("A valid directory is required for git readiness commands.");
+  }
+
+  const args = resolveAllowedArgs(command);
+  return execGitSync(directory, args, timeoutMs);
+}
+
+/**
+ * Build the argv arrays runGitAction would use for a commit action so callers
+ * (and tests) can assert the exact pathspec that reaches `git`.
+ *
+ * Returns `{ addArgs, commitArgs }`:
+ *   - `addArgs` uses `git add -A -- <files>` so deleted files in the proposal
+ *     scope are staged for removal alongside additions/modifications. The
+ *     `-A` flag is restricted to the proposal pathspec — files outside the
+ *     scope are never affected.
+ *   - `commitArgs` repeats the pathspec on the `git commit` line so that
+ *     unrelated, previously-staged files are NOT swept into the commit. This
+ *     fix addresses the Story 3.2 review HIGH item: the prior implementation
+ *     omitted the pathspec on commit and could include files staged outside
+ *     the approved proposal.
+ *
+ * @param {{ message?: string|null, files?: string[]|null }} action
+ * @returns {{ addArgs: string[], commitArgs: string[] }}
+ */
+export function buildCommitArgs(action) {
+  if (!action || typeof action !== "object") {
+    throw new Error("A valid commit action is required.");
+  }
+  if (!Array.isArray(action.files) || action.files.length === 0) {
+    throw new Error("Commit actions require at least one file.");
+  }
+
+  const message =
+    typeof action.message === "string" && action.message.length > 0
+      ? action.message
+      : "Finish workflow outputs";
+
+  return {
+    addArgs: ["add", "-A", "--", ...action.files],
+    commitArgs: ["commit", "-m", message, "--", ...action.files],
+  };
+}
+
+/**
+ * Build the argv array runGitAction would use for a push action.
+ *
+ * @param {{ remoteName?: string|null, branchName?: string|null, targetBranch?: string|null }} action
+ * @returns {string[]}
+ */
+export function buildPushArgs(action) {
+  if (!action || typeof action !== "object") {
+    throw new Error("A valid push action is required.");
+  }
+  const remoteName =
+    typeof action.remoteName === "string" && action.remoteName.length > 0
+      ? action.remoteName
+      : "origin";
+  const branchName =
+    typeof action.branchName === "string" && action.branchName.length > 0
+      ? action.branchName
+      : null;
+  const targetBranch =
+    typeof action.targetBranch === "string" && action.targetBranch.length > 0
+      ? action.targetBranch
+      : branchName;
+
+  if (!branchName) {
+    throw new Error("Push actions require a branch name.");
+  }
+
+  const refspec = targetBranch && targetBranch !== branchName ? `${branchName}:${targetBranch}` : branchName;
+  return ["push", remoteName, refspec];
+}
+
+export async function runGitAction({ directory, action, timeoutMs = 5000 } = {}) {
+  if (typeof directory !== "string" || directory.length === 0) {
+    throw new Error("A valid directory is required for git action commands.");
+  }
+  if (!action || typeof action !== "object") {
+    throw new Error("A valid git action is required.");
+  }
+
+  if (action.kind === "commit") {
+    const { addArgs, commitArgs } = buildCommitArgs(action);
+    await execGit(directory, addArgs, timeoutMs);
+    const stdout = await execGit(directory, commitArgs, timeoutMs);
+    return { stdout, observedState: null };
+  }
+
+  if (action.kind === "push") {
+    const args = buildPushArgs(action);
+    const stdout = await execGit(directory, args, timeoutMs);
+    return { stdout, observedState: null };
+  }
+
+  throw new Error(`Unsupported git action command: ${String(action.kind)}`);
 }

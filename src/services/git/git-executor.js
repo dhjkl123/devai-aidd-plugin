@@ -82,6 +82,8 @@ function normalizeAction(plan, approval) {
     remoteName: toNullableString(plan?.remoteName),
     correlationId: toNullableString(plan?.correlationId) ?? generateCorrelationId(),
     approvedAt: toNullableString(approval?.resolvedAt) ?? toNullableString(approval?.approvedAt),
+    message: toNullableString(plan?.message),
+    files: Array.isArray(plan?.files) ? [...plan.files] : [],
   };
 }
 
@@ -160,16 +162,32 @@ function buildFailureEnvelope({ action, classification }) {
 
 function buildAuditEvent({ envelope, workflowContext }) {
   const command = toNullableString(workflowContext?.commandName);
+  // Story 3.4: surface actionId (deterministic per-action identifier from the
+  // approval contract) and finalizationMode (workflowPolicy.finalization) as
+  // first-class details so an auditor can join planning → approval → execution
+  // by the same axes used by `approval.requested` / `approval.resolved` /
+  // `git.action.skipped`. The executor is the natural normalization point;
+  // we accept these as workflowContext fields rather than mutating the plan
+  // shape so the existing executor envelope contract stays stable.
+  const actionId =
+    toNullableString(workflowContext?.actionId) ?? envelope.action.correlationId;
+  const finalizationMode = toNullableString(workflowContext?.finalizationMode);
   return {
     event: "git.action.executed",
     timestamp: new Date().toISOString(),
     workflow: command,
     command,
+    // Story 3.4: surface sessionID at top-level alongside workflow/command
+    // (mirrors the same shape on approval.requested / approval.resolved /
+    // git.action.skipped) so audit consumers can group all events for one
+    // finalization flow without digging into details.
+    sessionID: toNullableString(workflowContext?.sessionID),
     outcome: envelope.ok ? "succeeded" : "failed",
     details: {
       sessionID: toNullableString(workflowContext?.sessionID),
       phase: "end",
       actionKind: envelope.action.kind,
+      actionId,
       operation: envelope.action.operation,
       code: envelope.code,
       branch: envelope.action.branchName,
@@ -178,6 +196,7 @@ function buildAuditEvent({ envelope, workflowContext }) {
       recoverable: envelope.details?.recoverable === true,
       stderrSummary: envelope.details?.stderrSummary ?? null,
       correlationId: envelope.action.correlationId,
+      finalizationMode,
     },
   };
 }

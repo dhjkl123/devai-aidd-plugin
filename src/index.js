@@ -16,8 +16,9 @@ import { createSessionHook } from "./hooks/session.js";
 import { createPermissionAskedHook } from "./hooks/permission-asked.js";
 import { createFileEditedHook } from "./hooks/file-edited.js";
 import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-policy.js";
-import { runGitCommand } from "./services/git/run-git-command.js";
+import { runGitAction, runGitCommand } from "./services/git/run-git-command.js";
 import { buildRecoveryPrompt } from "./services/approval/build-recovery-prompt.js";
+import { parseStatusPorcelainPaths } from "./services/workflow/parse-status-porcelain.js";
 
 const SUPPORTED_RUNTIME = "Node.js ESM plugin runtime (Node 22 target)";
 
@@ -59,27 +60,37 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         message: err.message,
         params: err.params,
       }));
-      await audit.info("config.validation.failed", {
-        event: "config.validation.failed",
-        timestamp: new Date().toISOString(),
-        workflow: null,
-        command: null,
-        details: {
-          droppedLayers: runtimeConfig.validation.droppedLayers,
-          errors: normalizedErrors,
-        },
-      });
+      // Story 3.4 (review L2): bootstrap audit emissions are best-effort —
+      // a throwing logger here must not crash plugin bootstrap.
+      try {
+        await audit.info("config.validation.failed", {
+          event: "config.validation.failed",
+          timestamp: new Date().toISOString(),
+          workflow: null,
+          command: null,
+          details: {
+            droppedLayers: runtimeConfig.validation.droppedLayers,
+            errors: normalizedErrors,
+          },
+        });
+      } catch {
+        // best-effort
+      }
     }
 
     ensureLegacyProjectConfigCompatibility(directory, fsAdapter, runtimeConfig);
 
-    await audit.info("plugin bootstrap", {
-      workflowCommandCount: workflowCommands.size,
-      hasGlobalConfig: runtimeConfig.sources.hasGlobalConfig,
-      hasProjectConfig: runtimeConfig.sources.hasProjectConfig,
-      hasLegacyProjectConfig: runtimeConfig.sources.hasLegacyProjectConfig,
-      supportedRuntime: SUPPORTED_RUNTIME,
-    });
+    try {
+      await audit.info("plugin bootstrap", {
+        workflowCommandCount: workflowCommands.size,
+        hasGlobalConfig: runtimeConfig.sources.hasGlobalConfig,
+        hasProjectConfig: runtimeConfig.sources.hasProjectConfig,
+        hasLegacyProjectConfig: runtimeConfig.sources.hasLegacyProjectConfig,
+        supportedRuntime: SUPPORTED_RUNTIME,
+      });
+    } catch {
+      // best-effort
+    }
 
     const legacyHandlers = await DevaiGitWorkflowPlugin({
       client,
@@ -94,10 +105,14 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       (hookName) => typeof legacyHandlers[hookName] !== "function",
     );
     if (wrapperOnlyHooks.length > 0) {
-      await audit.info("plugin bootstrap registered no-op hooks", {
-        hooks: wrapperOnlyHooks,
-        reason: "no legacy handler present; wrapper returns undefined for these hook names",
-      });
+      try {
+        await audit.info("plugin bootstrap registered no-op hooks", {
+          hooks: wrapperOnlyHooks,
+          reason: "no legacy handler present; wrapper returns undefined for these hook names",
+        });
+      } catch {
+        // best-effort
+      }
     }
 
     const workflowState = createWorkflowStateStore();
@@ -115,7 +130,23 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       runtimeConfig,
       directory,
       gitRunner: runGitCommand,
+      gitActionRunner: ({ action }) =>
+        runGitAction({
+          directory,
+          action,
+        }),
       resolvePolicy: (workflowContext) => resolveWorkflowPolicy(workflowContext, runtimeConfig.config),
+      listChangedFiles() {
+        try {
+          const stdout = runGitCommand({
+            directory,
+            command: "status-porcelain",
+          });
+          return parseStatusPorcelainPaths(stdout);
+        } catch {
+          return [];
+        }
+      },
 
       // Prompt adapter — delegates to runtime client.session.promptAsync.
       // Injected here so hook tests can substitute a mock without touching client.
@@ -213,7 +244,11 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       // these factories — keep the injection surface minimal so the contract
       // matches the consumer (mirrors the LOW-3 cleanup on permission.asked).
       "tool.execute.before": createToolExecuteBeforeHook(legacyHandlers, { workflowState }),
-      "tool.execute.after": createToolExecuteAfterHook(legacyHandlers, { workflowState }),
+      "tool.execute.after": createToolExecuteAfterHook(legacyHandlers, {
+        workflowState,
+        audit,
+        pluginContext,
+      }),
       "permission.asked": createPermissionAskedHook(legacyHandlers, {
         // Story 2.5 (MEDIUM review): pluginContext is now consumed so the
         // hook can deliver recovery prompts via `requestRecoveryDecision`
@@ -223,7 +258,7 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         audit,
         pluginContext,
       }),
-      "file.edited": createFileEditedHook(legacyHandlers, { pluginContext }),
+      "file.edited": createFileEditedHook(legacyHandlers, { workflowState, pluginContext }),
       event: createSessionHook(legacyHandlers, { workflowState, pluginContext }),
     };
   } catch (error) {

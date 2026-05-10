@@ -1,0 +1,305 @@
+import { publishNextPlannedAction } from "../approval/publish-next-planned-action.js";
+import { buildCommitAction, executeCommit } from "./commit-service.js";
+import { buildPushAction, executePush } from "./push-service.js";
+
+function buildRepositorySnapshot(state) {
+  const details = state?.readiness?.details ?? {};
+  if (!state?.readiness || typeof details !== "object") {
+    return null;
+  }
+
+  return {
+    repositoryReady: details.isGitRepository === true,
+    headBranch: typeof details.branch === "string" ? details.branch : null,
+    hasRemote: details.hasRemote === true,
+    remoteNames: Array.isArray(details.remoteNames) ? [...details.remoteNames] : [],
+  };
+}
+
+function buildWorkflowContext(sessionID, approvalRequest, extras = {}) {
+  return {
+    sessionID,
+    commandName: approvalRequest.command ?? approvalRequest.workflow ?? null,
+    phase: approvalRequest.phase ?? "finish",
+    // Story 3.4: thread the deterministic actionId and finalization mode
+    // into the executor so `git.action.executed` carries the same correlation
+    // axes as `approval.requested` / `approval.resolved`. The executor reads
+    // these as optional `workflowContext` fields, so passing them here keeps
+    // the executor signature stable.
+    actionId: approvalRequest.actionId ?? null,
+    finalizationMode: extras.finalizationMode ?? null,
+  };
+}
+
+function resolveWorkflowPolicy(pluginContext, workflowContext) {
+  const resolvedPolicy = pluginContext?.resolvePolicy?.(workflowContext);
+  return resolvedPolicy?.outcome === "allow" ? resolvedPolicy.details?.policy ?? null : null;
+}
+
+function buildPushCorrelationId(sessionID, remoteName, branchName) {
+  // Suffix with timestamp so retry attempts get distinct correlationIds
+  // (audit timelines for retry collisions otherwise overwrite each other).
+  const ts = Date.now().toString(36);
+  return `push:${sessionID}:${remoteName}:${branchName}:${ts}`;
+}
+
+function buildPushProposal({ sessionID, workflowPolicy, repositorySnapshot, observedState }) {
+  const finalizationMode = workflowPolicy?.finalization;
+  if (
+    finalizationMode !== "commit-and-push" &&
+    finalizationMode !== "commit-optional-push"
+  ) {
+    return null;
+  }
+
+  const hasRemote =
+    observedState?.hasRemote === true || repositorySnapshot?.hasRemote === true;
+  if (!hasRemote) {
+    return null;
+  }
+
+  const remoteName = Array.isArray(repositorySnapshot?.remoteNames)
+    ? repositorySnapshot.remoteNames.find(
+        (name) => typeof name === "string" && name.length > 0,
+      ) ?? null
+    : null;
+  const branchName =
+    typeof observedState?.headBranch === "string" && observedState.headBranch.length > 0
+      ? observedState.headBranch
+      : typeof repositorySnapshot?.headBranch === "string" && repositorySnapshot.headBranch.length > 0
+        ? repositorySnapshot.headBranch
+        : null;
+
+  if (!remoteName || !branchName) {
+    return null;
+  }
+
+  return buildPushAction({
+    remoteName,
+    branchName,
+    targetBranch: branchName,
+    correlationId: buildPushCorrelationId(sessionID, remoteName, branchName),
+  });
+}
+
+async function publishPushApprovalIfNeeded({
+  workflowState,
+  sessionID,
+  approvalRequest,
+  pluginContext,
+  audit,
+  repositorySnapshot,
+  observedState,
+}) {
+  const workflowContext = buildWorkflowContext(sessionID, approvalRequest);
+  const workflowPolicy = resolveWorkflowPolicy(pluginContext, workflowContext);
+  const pushProposal = buildPushProposal({
+    sessionID,
+    workflowPolicy,
+    repositorySnapshot,
+    observedState,
+  });
+  const nextState = workflowState.get(sessionID) ?? {};
+
+  workflowState.set(sessionID, {
+    ...nextState,
+    commitProposal: null,
+    pushProposal,
+  });
+
+  if (!pushProposal) {
+    return;
+  }
+
+  if (audit) {
+    // Audit is best-effort (per evaluate-workflow-finalization pattern). A
+    // throwing logger must NOT prevent publishNextPlannedAction from running,
+    // otherwise pushProposal sits in state without the user ever seeing the
+    // approval prompt.
+    try {
+      await audit.info("git.action.planned", {
+        event: "git.action.planned",
+        timestamp: new Date().toISOString(),
+        workflow: workflowContext.commandName,
+        command: workflowContext.commandName,
+        sessionID,
+        outcome: "allow",
+        details: {
+          kind: "push",
+          action: "push",
+          requiresApproval: true,
+          actionId: pushProposal.correlationId ?? null,
+          correlationId: pushProposal.correlationId ?? null,
+          phase: workflowContext.phase ?? null,
+          finalizationMode: workflowPolicy?.finalization ?? null,
+          remoteName: pushProposal.remoteName,
+          branchName: pushProposal.branchName,
+        },
+      });
+    } catch {
+      // Audit failure is itself best-effort.
+    }
+  }
+
+  await publishNextPlannedAction({
+    workflowState,
+    workflowContext,
+    workflowPolicy,
+    audit,
+    pluginContext,
+  });
+}
+
+export async function executeApprovedAction({
+  workflowState,
+  sessionID,
+  approvalRequest,
+  resolution = null,
+  pluginContext = null,
+  audit = null,
+} = {}) {
+  if (!workflowState || !sessionID || !approvalRequest) {
+    return { outcome: "skip", reason: "missing-context" };
+  }
+
+  const state = workflowState.get(sessionID) ?? {};
+  const repositorySnapshot = buildRepositorySnapshot(state);
+  // Story 3.4: derive finalizationMode from the request metadata first (it
+  // was set by buildApprovalRequest from the workflow policy at planning
+  // time) and fall back to a fresh policy resolve so executor audit always
+  // carries the correct mode even if the request was reconstructed by a
+  // re-entry path.
+  const requestFinalizationMode =
+    typeof approvalRequest?.metadata?.finalization === "string" &&
+    approvalRequest.metadata.finalization.length > 0
+      ? approvalRequest.metadata.finalization
+      : null;
+  const baseWorkflowContext = buildWorkflowContext(sessionID, approvalRequest, {
+    finalizationMode: requestFinalizationMode,
+  });
+  const liveFinalizationMode =
+    requestFinalizationMode ??
+    resolveWorkflowPolicy(pluginContext, baseWorkflowContext)?.finalization ??
+    null;
+  const workflowContext = {
+    ...baseWorkflowContext,
+    finalizationMode: liveFinalizationMode,
+  };
+  const approvedAt = resolution?.resolvedAt ?? new Date().toISOString();
+
+  let envelope;
+  if (approvalRequest.actionType === "commit" && approvalRequest.proposal?.kind === "commit") {
+    const plan = buildCommitAction({
+      message: approvalRequest.proposal.message,
+      branchName: repositorySnapshot?.headBranch ?? null,
+      correlationId: approvalRequest.proposal.correlationId ?? null,
+      files: approvalRequest.proposal.files ?? [],
+    });
+
+    envelope = await executeCommit({
+      plan,
+      approval: { resolvedAt: approvedAt },
+      expectedState: repositorySnapshot,
+      repositorySnapshot,
+      workflowContext,
+      gitRunner: pluginContext?.gitActionRunner ?? null,
+      audit,
+      workflowState,
+    });
+
+    if (envelope.ok) {
+      // Executor envelope places observed post-action state under details
+      // (see git-executor.js); reach for it there instead of envelope root.
+      await publishPushApprovalIfNeeded({
+        workflowState,
+        sessionID,
+        approvalRequest,
+        pluginContext,
+        audit,
+        repositorySnapshot,
+        observedState: envelope.details?.observedState ?? null,
+      });
+    }
+  } else if (
+    approvalRequest.actionType === "push" &&
+    approvalRequest.proposal?.kind === "push"
+  ) {
+    const branchName =
+      approvalRequest.proposal.branchName ??
+      approvalRequest.proposal.branch ??
+      repositorySnapshot?.headBranch ??
+      null;
+    const targetBranch =
+      approvalRequest.proposal.targetBranch ?? branchName ?? null;
+    // Trust the proposal's remoteName: it was validated by buildPushAction
+    // when the push proposal was first published. A silent "origin" default
+    // here would mask an upstream regression that lets a null through.
+    const remoteName =
+      approvalRequest.proposal.remoteName ??
+      approvalRequest.proposal.remote ??
+      null;
+
+    const plan = buildPushAction({
+      branchName,
+      targetBranch,
+      remoteName,
+      correlationId: approvalRequest.proposal.correlationId ?? null,
+    });
+
+    envelope = await executePush({
+      plan,
+      approval: { resolvedAt: approvedAt },
+      expectedState: repositorySnapshot,
+      repositorySnapshot,
+      workflowContext,
+      gitRunner: pluginContext?.gitActionRunner ?? null,
+      audit,
+      workflowState,
+    });
+
+    if (envelope.ok) {
+      const nextState = workflowState.get(sessionID) ?? {};
+      workflowState.set(sessionID, {
+        ...nextState,
+        pushProposal: null,
+      });
+    }
+  } else {
+    // Surface the silent skip so a newly-added actionType is observable in
+    // audit instead of disappearing through this branch unnoticed.
+    if (audit) {
+      try {
+        // Story 3.4 (review M2): keep the unsupported-actionType skip event
+        // on the same correlation axes as the runtime skip events emitted
+        // from build-approval-resolution.js so an auditor sees a uniform
+        // git.action.skipped shape across all skip causes.
+        await audit.info("git.action.skipped", {
+          event: "git.action.skipped",
+          timestamp: new Date().toISOString(),
+          workflow: workflowContext.commandName,
+          command: workflowContext.commandName,
+          sessionID,
+          outcome: "skip",
+          details: {
+            reason: "unsupported-action-type",
+            actionKind: approvalRequest?.proposal?.kind ?? null,
+            actionType: approvalRequest?.actionType ?? null,
+            actionId: approvalRequest?.actionId ?? null,
+            correlationId: approvalRequest?.proposal?.correlationId ?? null,
+            phase: workflowContext.phase ?? null,
+            finalizationMode: workflowContext.finalizationMode ?? null,
+            proposalKind: approvalRequest?.proposal?.kind ?? null,
+          },
+        });
+      } catch {
+        // Audit failure is itself best-effort.
+      }
+    }
+    return { outcome: "skip", reason: "unsupported-action-type" };
+  }
+
+  return {
+    outcome: "executed",
+    envelope,
+  };
+}
