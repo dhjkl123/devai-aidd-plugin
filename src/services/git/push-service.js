@@ -35,10 +35,15 @@ import { executeGitAction } from "./git-executor.js";
  */
 export function buildPushAction(input = {}) {
   const branchName = typeof input.branchName === "string" ? input.branchName : null;
-  const remoteName =
-    typeof input.remoteName === "string" && input.remoteName.length > 0
-      ? input.remoteName
-      : "origin";
+  // Story 3.3 review (Low): require an explicit remoteName from the caller.
+  // A silent "origin" fallback would allow an upstream regression to push to
+  // a non-existent remote.
+  if (typeof input.remoteName !== "string" || input.remoteName.length === 0) {
+    throw new TypeError(
+      "buildPushAction requires a non-empty remoteName from the caller",
+    );
+  }
+  const remoteName = input.remoteName;
   return {
     kind: "push",
     action: "push",
@@ -71,7 +76,10 @@ export function buildPushAction(input = {}) {
  * @returns {Promise<object>} executor envelope
  */
 export async function executePush(params = {}) {
-  const plan = params.plan ?? buildPushAction({});
+  if (!params.plan) {
+    throw new TypeError("executePush requires a plan from buildPushAction");
+  }
+  const plan = params.plan;
   return executeGitAction({
     plan,
     approval: params.approval ?? null,

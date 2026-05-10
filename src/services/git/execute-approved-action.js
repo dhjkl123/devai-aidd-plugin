@@ -30,7 +30,10 @@ function resolveWorkflowPolicy(pluginContext, workflowContext) {
 }
 
 function buildPushCorrelationId(sessionID, remoteName, branchName) {
-  return `push:${sessionID}:${remoteName}:${branchName}`;
+  // Suffix with timestamp so retry attempts get distinct correlationIds
+  // (audit timelines for retry collisions otherwise overwrite each other).
+  const ts = Date.now().toString(36);
+  return `push:${sessionID}:${remoteName}:${branchName}:${ts}`;
 }
 
 function buildPushProposal({ sessionID, workflowPolicy, repositorySnapshot, observedState }) {
@@ -102,20 +105,33 @@ async function publishPushApprovalIfNeeded({
   }
 
   if (audit) {
-    await audit.info("git.action.planned", {
-      event: "git.action.planned",
-      timestamp: new Date().toISOString(),
-      workflow: workflowContext.commandName,
-      command: workflowContext.commandName,
-      outcome: "allow",
-      details: {
-        kind: "push",
-        action: "push",
-        requiresApproval: true,
-        remoteName: pushProposal.remoteName,
-        branchName: pushProposal.branchName,
-      },
-    });
+    // Audit is best-effort (per evaluate-workflow-finalization pattern). A
+    // throwing logger must NOT prevent publishNextPlannedAction from running,
+    // otherwise pushProposal sits in state without the user ever seeing the
+    // approval prompt.
+    try {
+      await audit.info("git.action.planned", {
+        event: "git.action.planned",
+        timestamp: new Date().toISOString(),
+        workflow: workflowContext.commandName,
+        command: workflowContext.commandName,
+        sessionID,
+        outcome: "allow",
+        details: {
+          kind: "push",
+          action: "push",
+          requiresApproval: true,
+          actionId: pushProposal.correlationId ?? null,
+          correlationId: pushProposal.correlationId ?? null,
+          phase: workflowContext.phase ?? null,
+          finalizationMode: workflowPolicy?.finalization ?? null,
+          remoteName: pushProposal.remoteName,
+          branchName: pushProposal.branchName,
+        },
+      });
+    } catch {
+      // Audit failure is itself best-effort.
+    }
   }
 
   await publishNextPlannedAction({
@@ -165,6 +181,8 @@ export async function executeApprovedAction({
     });
 
     if (envelope.ok) {
+      // Executor envelope places observed post-action state under details
+      // (see git-executor.js); reach for it there instead of envelope root.
       await publishPushApprovalIfNeeded({
         workflowState,
         sessionID,
@@ -172,7 +190,7 @@ export async function executeApprovedAction({
         pluginContext,
         audit,
         repositorySnapshot,
-        observedState: envelope.observedState ?? null,
+        observedState: envelope.details?.observedState ?? null,
       });
     }
   } else if (
@@ -186,10 +204,13 @@ export async function executeApprovedAction({
       null;
     const targetBranch =
       approvalRequest.proposal.targetBranch ?? branchName ?? null;
+    // Trust the proposal's remoteName: it was validated by buildPushAction
+    // when the push proposal was first published. A silent "origin" default
+    // here would mask an upstream regression that lets a null through.
     const remoteName =
       approvalRequest.proposal.remoteName ??
       approvalRequest.proposal.remote ??
-      "origin";
+      null;
 
     const plan = buildPushAction({
       branchName,
@@ -217,6 +238,27 @@ export async function executeApprovedAction({
       });
     }
   } else {
+    // Surface the silent skip so a newly-added actionType is observable in
+    // audit instead of disappearing through this branch unnoticed.
+    if (audit) {
+      try {
+        await audit.info("git.action.skipped", {
+          event: "git.action.skipped",
+          timestamp: new Date().toISOString(),
+          workflow: workflowContext.commandName,
+          command: workflowContext.commandName,
+          sessionID,
+          outcome: "skip",
+          details: {
+            reason: "unsupported-action-type",
+            actionType: approvalRequest?.actionType ?? null,
+            proposalKind: approvalRequest?.proposal?.kind ?? null,
+          },
+        });
+      } catch {
+        // Audit failure is itself best-effort.
+      }
+    }
     return { outcome: "skip", reason: "unsupported-action-type" };
   }
 

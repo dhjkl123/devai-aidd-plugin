@@ -1,6 +1,6 @@
 ﻿# Story 3.3: ?먭꺽 ??μ냼媛 ?ъ슜 媛?ν븳 寃쎌슦?먮쭔 ?몄떆 ?쒖븞
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -53,12 +53,16 @@ Status: in-progress
 
 ### Review Follow-ups (AI)
 
-- [ ] [AI-Review][Medium] `envelope.observedState`는 항상 undefined — executor envelope에서 observedState는 `envelope.details.observedState`에 위치. `publishPushApprovalIfNeeded` 호출 시 `envelope.details?.observedState ?? null`로 수정해야 post-commit observedState로 hasRemote/headBranch를 판정한다는 설계 의도가 실제로 동작한다. [src/services/git/execute-approved-action.js:175]
-- [ ] [AI-Review][Medium] push approval deny / ignore-and-continue 후 stale `pushProposal`이 정리되지 않음 — recovery gate가 `continue-without-automation`(terminal)로 종료된 뒤 `publishNextPlannedAction` 재진입 시 동일 push approval이 재게시될 수 있다. consume-approval-outcome 또는 recovery 종료 경로에서 push 거부/무시 시 `pushProposal: null`로 정리하거나, 재게시를 막는 별도 가드를 추가해야 한다. (Story 3.2 commitProposal에도 동일 패턴 존재) [src/services/approval/consume-approval-outcome.js, src/services/git/execute-approved-action.js]
-- [ ] [AI-Review][Medium] Subtask 5 "remote URL 노출 금지" 회귀 테스트가 간접적 — 현재는 `targetRemoteLabel === "origin"`만 단언. push approval/audit 경로에 실제 full URL이 흘러왔을 때 redaction이 작동하는지 직접 검증하는 테스트(예: 가상의 URL 형태 remoteName이 들어왔을 때 metadata.explanation.fields와 audit details에서 모두 차단되는지)를 추가한다. [tests/regression.test.js]
-- [ ] [AI-Review][Low] `buildPushAction`이 `remoteName` 누락 시 조용히 "origin" 디폴트 — 상류 가드가 정상 동작하지 않으면 잘못된 origin으로 push 시도 가능. 명시적 입력 검증 또는 caller 측에서 null/empty를 반드시 거르도록 계약을 강화한다. [src/services/git/push-service.js:38-41]
-- [ ] [AI-Review][Low] `buildPushCorrelationId`가 sessionID/remote/branch만으로 구성되어 retry 간 동일 — 재시도 audit 추적 시 식별 어려움. attempt 카운터 또는 timestamp suffix를 결합해야 한다. (Story 3.2 commit correlationId도 같은 패턴) [src/services/git/execute-approved-action.js:32-34]
-- [ ] [AI-Review][Low] `executeApprovedAction`의 actionType dispatch가 if/else if/else 체인 — 새 actionType 추가 시 silent skip 위험. 명시적 supported set 또는 분기 가드를 추가해 미지원 케이스에 명확한 에러를 노출하도록 개선한다. [src/services/git/execute-approved-action.js:148-221]
+#### Round 1 (resolved in commit "Address Story 3.3 review round 1 follow-ups")
+
+- [x] [AI-Review][Medium] `envelope.observedState`는 항상 undefined — `envelope.details?.observedState ?? null`로 수정. [src/services/git/execute-approved-action.js]
+- [x] [AI-Review][Medium] push approval deny / ignore-and-continue 후 stale `pushProposal` / `commitProposal`이 정리되지 않음 — `consumeApprovalOutcome`에서 deny/ignore-and-continue + `actionKind === "push"|"commit"`일 때 해당 proposal slot을 null로 정리. [src/services/approval/consume-approval-outcome.js]
+- [x] [AI-Review][Medium] (드롭) Subtask 5 "remote URL 노출 금지" 회귀 테스트가 간접적이라는 지적은 이미 무효 — `tests/regression.test.js`에 직접 redaction 테스트가 추가되어 있음 (전체 URL 형태 `remoteName`을 주고 prompt body·metadata JSON·`targetRemoteLabel === null`을 모두 단언).
+- [x] [AI-Review][Medium] `git.action.planned` push payload에 `audit` 호출이 try/catch로 감싸져 있지 않음 — best-effort 계약 위반 가능. try/catch로 감싸 logger 실패가 `publishNextPlannedAction`을 막지 않도록 수정. [src/services/git/execute-approved-action.js]
+- [x] [AI-Review][Low] `buildPushAction`이 `remoteName` 누락 시 조용히 "origin" 디폴트 — `TypeError`로 거절, 호출부의 `?? "origin"` fallback도 제거. [src/services/git/push-service.js, src/services/git/execute-approved-action.js]
+- [x] [AI-Review][Low] `buildPushCorrelationId`가 sessionID/remote/branch만으로 구성되어 retry 간 동일 — `Date.now().toString(36)` suffix 추가로 재시도 간 distinct 보장. [src/services/git/execute-approved-action.js]
+- [x] [AI-Review][Low] `executeApprovedAction`의 actionType dispatch가 if/else if/else 체인 — 미지원 케이스에서 `git.action.skipped` (`reason: "unsupported-action-type"`) audit 이벤트 emit 추가. [src/services/git/execute-approved-action.js]
+- [x] [AI-Review][Low] `git.action.planned` push payload가 `actionId / correlationId / sessionID / phase / finalizationMode` 결여 — Story 2.x audit 컨벤션에 맞춰 추가. [src/services/git/execute-approved-action.js]
 
 ## Dev Notes
 
