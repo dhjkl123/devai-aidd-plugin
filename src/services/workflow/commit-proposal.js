@@ -48,6 +48,10 @@ function generateAttemptToken() {
 }
 
 function buildCorrelationId(workflowContext, matchedFiles) {
+  // The UUID token disambiguates separate proposal generations (e.g. two
+  // finish evaluations on the same session/file count). Within a single
+  // proposal lifecycle, retries reuse the stored correlationId on purpose so
+  // audit consumers can trace all execution attempts back to one proposal.
   const sessionID =
     typeof workflowContext?.sessionID === "string" && workflowContext.sessionID.length > 0
       ? workflowContext.sessionID

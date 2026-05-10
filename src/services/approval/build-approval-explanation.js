@@ -205,9 +205,17 @@ function buildCommitExplanation(commitProposal, workflowPolicy) {
     finalizationMode: workflowPolicy?.finalization || null,
   };
 
-  const intentSummary = "워크플로에서 산출된 변경을 커밋으로 남기려고 한다.";
-  const impactSummary =
-    "승인 시 staged/eligible 변경이 단일 커밋 기록으로 추가된다. 푸시는 별도 승인이다.";
+  // Story 3.2 review (LOW Round 4): surface artifactScope and changeCountSummary
+  // directly in the visible prompt body so users can act on the scope without
+  // depending on the runtime UI rendering metadata.fields.
+  const scopeSegment = fields.changeCountSummary
+    ? `${fields.artifactScope}, ${fields.changeCountSummary}`
+    : fields.artifactScope;
+  const intentSummary = `워크플로에서 산출된 변경(${scopeSegment})을 커밋으로 남기려고 한다.`;
+  const finalizationSegment = fields.finalizationMode
+    ? ` 최종화 모드: ${fields.finalizationMode}.`
+    : "";
+  const impactSummary = `승인 시 staged/eligible 변경이 단일 커밋 기록으로 추가된다. 푸시는 별도 승인이다.${finalizationSegment}`;
 
   return { fields, intentSummary, impactSummary };
 }

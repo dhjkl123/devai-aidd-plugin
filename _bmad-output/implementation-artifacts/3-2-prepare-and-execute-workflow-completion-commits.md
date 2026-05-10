@@ -1,6 +1,6 @@
 # Story 3.2: 워크플로우 완료 커밋 준비 및 실행
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -78,6 +78,12 @@ Status: review
 - [x] [AI-Review][MEDIUM] File List(188-203)는 `d48c019` 기준으로 정확하나, 현 워킹 트리에는 `src/services/approval/approval-policy-service.js`(참조 파일이라고 분리해 두었지만 modified), `src/services/approval/build-approval-explanation.js`, `src/services/git/push-service.js`, `src/services/workflow/workflow-state.js` 변경이 어디에도 등록되지 않은 채 modified 상태로 남아 있다. Story 3.2 후속분과 Story 3.3 진행분의 commit 분리 후 File List를 워킹 트리 기준으로 다시 정렬해야 한다. [_bmad-output/implementation-artifacts/3-2-prepare-and-execute-workflow-completion-commits.md:188-208]
 - [x] [AI-Review][LOW] (Round 2 [LOW] 미해결 회귀) `buildCommitMessage`가 `Finish ${workflowName}: update ${scope} outputs` 영문으로 하드코딩되어 있다. 프로젝트 `document_output_language: 한국어`와 일관되도록 한국어 템플릿으로 정리. [src/services/workflow/commit-proposal.js:30-39]
 - [x] [AI-Review][LOW] (Round 2 [LOW] 미해결 회귀) `buildCommitAction`이 `input.files`가 array가 아닐 때 silent하게 `[]`로 떨어뜨린다. warn/audit 로그 한 줄을 남겨 잘못된 호출이 관측 가능하도록 보강. [src/services/git/commit-service.js:30-44]
+
+#### Round 4 (2026-05-10 code-review)
+
+- [x] [AI-Review][LOW] 승인 prompt 본문(`prompt.lines`)에 `artifactScope`/`changeCountSummary`/`finalizationMode`가 노출되지 않아 사용자 가시성이 metadata UI 렌더링 여부에 의존한다. `buildCommitExplanation`의 `intentSummary`/`impactSummary`를 동적으로 합성해 본문에서 직접 보이게 보강. [src/services/approval/build-approval-explanation.js:195-220]
+- [x] [AI-Review][LOW] `commitProposal.correlationId`가 한 proposal 생애 내 재시도에서는 동일 ID로 유지되는 의도(같은 proposal에 묶인 모든 시도를 하나로 추적)를 코드에 명시. 별도 attempt-level 분리가 필요하면 executor 단에서 처리하도록 위임. [src/services/workflow/commit-proposal.js:50-60]
+- 관찰만(픽스 보류): 프로덕션 `executeApprovedAction` 경로가 `repositorySnapshot`을 `expectedState`/`repositorySnapshot` 양쪽에 동일 객체로 전달해 preflight drift가 통합 경로에서는 감지되지 않음. Epic 2 executor 계약의 한계로 Story 3.2 범위 외. 별도 backlog 후보. [src/services/git/execute-approved-action.js, src/services/git/git-executor.js]
 
 ## Dev Notes
 
@@ -238,3 +244,4 @@ GPT-5 Codex
 - 2026-05-09: Addressed code review findings — 9 items resolved (HIGH 1 + MEDIUM 5 + LOW 3). `git commit` pathspec 적용 + `git add -A`로 삭제/rename 통합, `runGitAction` 비동기화, `commitProposal.correlationId` 충돌 방지, finish 분기 가드, 한국어 commit 템플릿, `buildCommitAction` 경고 로그, File List에서 `approval-policy-service.js`를 참조 파일 섹션으로 분리. 회귀 테스트 12건 추가 후 `npm test` 전체 통과(exit 0). Status in-progress → review.
 - 2026-05-09: Code review round 3 — Story 3.2 commit `d48c019` 기준으로 1 CRITICAL + 2 HIGH + 5 MEDIUM + 2 LOW finding을 `Review Follow-ups (AI) > Round 3` 액션 아이템으로 등록. 핵심 발견: 직전 라운드에서 `Resolved`로 선언한 9건 중 8건이 working tree에만 존재하고 미커밋이며 Story 3.3 진행분과 섞여 있음. d48c019 단독으로 보면 commit pathspec(HIGH), `git add -A` deletion 처리(HIGH), async `runGitAction`, correlationId 충돌, finish 분기 가드, 회귀 5건이 모두 미반영 상태. Status review → in-progress.
 - 2026-05-09: Addressed code review round 3 findings — 10 items resolved (CRITICAL 1 + HIGH 2 + MEDIUM 5 + LOW 2). working tree에 흩어져 있던 Story 3.2 후속(commit pathspec, `git add -A` deletion 처리, async `runGitAction`, `commitProposal.correlationId` UUID 토큰, `tool-execute-after.js` finish 가드, 한국어 commit 템플릿, `buildCommitAction` 비배열 warn, regression 5건 보강)을 Story 3.3 진행분(`push-service.js`, `build-approval-explanation.js`, `workflow-state.js`, `approval-policy-service.js`, `build-approval-request.js`, `execute-approved-action.js`, `permission-asked.js`, `_bmad-output/.../3-3-*.md`)과 분리해 단독 commit 후보로 정리. File List에 본 구현 commit과 후속 분리 commit 섹션을 분리해서 다시 정렬. 단독 분리 후 `npm test` 전체 통과(exit 0). Status in-progress → review.
+- 2026-05-10: Code review round 4 — HIGH/CRITICAL/MEDIUM 0건. LOW 2건 자동 수정 (`buildCommitExplanation` 본문에 scope/count/finalizationMode 노출, `commitProposal.correlationId` 의도 주석 명시). Preflight drift 통합 경로 한계 1건은 Epic 2 계약 범위로 관찰만 기록. `npm test` 전체 통과(exit 0). Status review → done.
