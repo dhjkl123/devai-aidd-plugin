@@ -14,6 +14,17 @@
  *   2. branchProposal
  *   3. commitProposal (Story 3.2)
  *   4. pushProposal   (Story 3.3)
+ *
+ * Story 3.5 (reviewer traceability) explicitly REUSES this priority chain
+ * rather than introducing a new approval type. The reviewer-facing scope
+ * (artifactScope, changeCountSummary, artifactKinds, pathScopeSummary) is
+ * carried inside the existing commitProposal/pushProposal payload, surfaced
+ * by `build-approval-explanation.js`, and joined to executor audit through
+ * the existing `git.action.executed` event family — Story 3.5 adds no new
+ * approval type, no new audit event name, and no proprietary review
+ * metadata path. Reviewer traceability rests on the resulting standard Git
+ * commit history (git log / git log --follow / git blame on the
+ * proposal-scope file paths).
  */
 
 /**

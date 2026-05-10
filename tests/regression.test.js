@@ -9196,6 +9196,611 @@ async function verifyStory34CommitSuccessThenPushDenyPreservesAuditChain() {
   );
 }
 
+/* ─────────────────────────────────────────────────────────────────────── */
+/*           Story 3.5 — preserve reviewer traceability through            */
+/*                       standard Git history                              */
+/* ─────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Story 3.5 (AC1, AC2): a code-only commit proposal must surface artifactKinds
+ * and a reviewer-friendly pathScopeSummary built from the same matchedFiles
+ * Story 3.1 detected. The summary must use repo-relative prefixes the reviewer
+ * can paste into `git log -- <prefix>`, and per-file basenames must NOT leak
+ * outside the proposal's `files` field.
+ */
+async function verifyStory35CommitProposalCodeOnlyScope() {
+  const { buildCommitProposal } = await import(
+    `${commitProposalModuleUrl}?s35-code-only=${Date.now()}`
+  );
+
+  const proposal = buildCommitProposal({
+    workflowContext: {
+      sessionID: "s-35-code",
+      commandName: "bmad-bmm-quick-dev",
+      phase: "finish",
+    },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "story",
+      finalization: "commit-and-push",
+    },
+    finalizationAssessment: {
+      outcome: "allow",
+      reason: "finalizable-outputs-detected",
+      details: { shouldProposeCommit: true, artifactScope: "implementation" },
+    },
+    finalizationArtifacts: {
+      matchedFiles: [
+        { path: "src/services/git/commit-service.js", kind: "code" },
+        { path: "src/hooks/permission-asked.js", kind: "code" },
+        { path: "tests/regression.test.js", kind: "code" },
+      ],
+    },
+  });
+
+  assert.ok(proposal, "code-only finalization must produce a commit proposal");
+  assert.deepEqual(
+    proposal.artifactKinds,
+    ["code"],
+    "artifactKinds must enumerate only the kinds present in the matched scope",
+  );
+  assert.equal(
+    proposal.changeCountSummary,
+    "3 code files",
+    "changeCountSummary must aggregate code file counts",
+  );
+  assert.deepEqual(
+    proposal.pathScopeSummary,
+    [
+      { prefix: "src/", label: "code/src", count: 2 },
+      { prefix: "tests/", label: "code/tests", count: 1 },
+    ],
+    "pathScopeSummary must be ordered by canonical bucket priority and use repo-relative prefixes",
+  );
+  // No basenames may appear in the path-scope summary; only the bucket prefix
+  // is reviewer-facing.
+  assert.ok(
+    proposal.pathScopeSummary.every((entry) => !/\.js$/.test(entry.prefix)),
+    "pathScopeSummary entries must NOT contain per-file basenames",
+  );
+}
+
+/**
+ * Story 3.5 (AC1, AC2): a docs-only commit proposal (technical-doc + planning-
+ * artifact) must aggregate kinds correctly and emit the doc-bucket prefixes
+ * reviewers can paste into `git log -- <prefix>`.
+ */
+async function verifyStory35CommitProposalDocsOnlyScope() {
+  const { buildCommitProposal } = await import(
+    `${commitProposalModuleUrl}?s35-docs-only=${Date.now()}`
+  );
+
+  const proposal = buildCommitProposal({
+    workflowContext: {
+      sessionID: "s-35-docs",
+      commandName: "bmad-bmm-quick-dev",
+      phase: "finish",
+    },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "story",
+      finalization: "commit-and-push",
+    },
+    finalizationAssessment: {
+      outcome: "allow",
+      reason: "finalizable-outputs-detected",
+      details: { shouldProposeCommit: true, artifactScope: "implementation" },
+    },
+    finalizationArtifacts: {
+      matchedFiles: [
+        { path: "_bmad-output/implementation-artifacts/3-5-foo.md", kind: "technical-doc" },
+        { path: "_bmad-output/planning-artifacts/architecture.md", kind: "planning-artifact" },
+        { path: "README.md", kind: "technical-doc" },
+      ],
+    },
+  });
+
+  assert.ok(proposal, "docs-only finalization must produce a commit proposal");
+  assert.deepEqual(
+    [...proposal.artifactKinds].sort(),
+    ["planning-artifact", "technical-doc"],
+    "artifactKinds must enumerate every document kind present in the scope",
+  );
+  // pathScopeSummary order: docs/technical and planning/implementation buckets,
+  // README.md classified as doc/readme single-file bucket.
+  const prefixes = proposal.pathScopeSummary.map((entry) => entry.prefix);
+  assert.deepEqual(
+    prefixes,
+    [
+      "_bmad-output/planning-artifacts/",
+      "_bmad-output/implementation-artifacts/",
+      "README.md",
+    ],
+    "docs-only pathScopeSummary must surface planning + implementation + README buckets in canonical order",
+  );
+  for (const entry of proposal.pathScopeSummary) {
+    assert.ok(
+      entry.count >= 1,
+      "every reported pathScopeSummary bucket must have a positive count",
+    );
+  }
+}
+
+/**
+ * Story 3.5 (AC2): mixed code+docs proposals must roll up both families into a
+ * single proposal whose path-scope summary cleanly separates code buckets from
+ * doc buckets — the reviewer can then walk both `git log -- src/` and
+ * `git log -- _bmad-output/...` from the same commit.
+ */
+async function verifyStory35CommitProposalMixedScope() {
+  const { buildCommitProposal } = await import(
+    `${commitProposalModuleUrl}?s35-mixed=${Date.now()}`
+  );
+
+  const proposal = buildCommitProposal({
+    workflowContext: {
+      sessionID: "s-35-mixed",
+      commandName: "bmad-bmm-quick-dev",
+      phase: "finish",
+    },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "story",
+      finalization: "commit-and-push",
+    },
+    finalizationAssessment: {
+      outcome: "allow",
+      reason: "finalizable-outputs-detected",
+      details: { shouldProposeCommit: true, artifactScope: "implementation" },
+    },
+    finalizationArtifacts: {
+      matchedFiles: [
+        { path: "src/services/git/commit-service.js", kind: "code" },
+        { path: "_bmad-output/implementation-artifacts/3-5-foo.md", kind: "technical-doc" },
+        { path: "tests/regression.test.js", kind: "code" },
+      ],
+    },
+  });
+
+  assert.ok(proposal, "mixed finalization must produce a commit proposal");
+  assert.deepEqual(
+    [...proposal.artifactKinds].sort(),
+    ["code", "technical-doc"],
+    "artifactKinds must include both code and technical-doc",
+  );
+  assert.equal(
+    proposal.changeCountSummary,
+    "2 code files, 1 technical-doc file",
+    "changeCountSummary must list code first then docs",
+  );
+  // src/ and tests/ buckets come before doc/ buckets in canonical order.
+  const summary = proposal.pathScopeSummary;
+  const srcIdx = summary.findIndex((entry) => entry.prefix === "src/");
+  const testsIdx = summary.findIndex((entry) => entry.prefix === "tests/");
+  const docsIdx = summary.findIndex(
+    (entry) => entry.prefix === "_bmad-output/implementation-artifacts/",
+  );
+  assert.ok(srcIdx >= 0 && testsIdx >= 0 && docsIdx >= 0, "all expected buckets must be reported");
+  assert.ok(srcIdx < docsIdx, "code buckets must precede doc buckets in pathScopeSummary");
+  assert.ok(testsIdx < docsIdx, "tests bucket must precede doc bucket in pathScopeSummary");
+  assert.equal(summary.find((entry) => entry.prefix === "src/").count, 1);
+  assert.equal(summary.find((entry) => entry.prefix === "tests/").count, 1);
+  assert.equal(
+    summary.find((entry) => entry.prefix === "_bmad-output/implementation-artifacts/").count,
+    1,
+  );
+}
+
+/**
+ * Story 3.5 (AC1): the approval explanation must surface artifactScope,
+ * changeCountSummary, artifactKinds, and pathScopeSummary so the reviewer can
+ * map the prompt to standard `git log -- <prefix>` commands. Sensitive data
+ * (absolute paths, full remote URLs, raw stderr) must NOT appear anywhere in
+ * the explanation payload.
+ */
+async function verifyStory35CommitExplanationSurfacesScopeWithoutSensitiveData() {
+  const { buildApprovalExplanation } = await import(
+    `${buildApprovalExplanationModuleUrl}?s35-explain=${Date.now()}`
+  );
+
+  const explanation = buildApprovalExplanation({
+    actionCategory: "commit",
+    workflowContext: {
+      commandName: "bmad-bmm-quick-dev",
+      sessionID: "s-35-explain",
+    },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "story",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    commitProposal: {
+      kind: "commit",
+      action: "commit",
+      message: "워크플로우 완료(bmad-bmm-quick-dev): implementation 산출물 업데이트",
+      artifactScope: "implementation",
+      artifactKinds: ["code", "technical-doc"],
+      changeCountSummary: "2 code files, 1 technical-doc file",
+      pathScopeSummary: [
+        { prefix: "src/", label: "code/src", count: 2 },
+        { prefix: "_bmad-output/implementation-artifacts/", label: "doc/implementation-artifact", count: 1 },
+      ],
+      // The proposal carries explicit files for git pathspec assembly, but the
+      // explanation must NEVER copy them out — pathScopeSummary is the only
+      // reviewer-facing surface.
+      files: ["src/index.js", "src/hooks/permission-asked.js", "_bmad-output/implementation-artifacts/3-5.md"],
+    },
+  });
+
+  // Story 3.5: artifactKinds and pathScopeSummary must be exposed on the
+  // explanation fields contract.
+  assert.deepEqual(
+    explanation.fields.artifactKinds,
+    ["code", "technical-doc"],
+    "explanation.fields must expose artifactKinds for reviewers",
+  );
+  assert.deepEqual(
+    explanation.fields.pathScopeSummary,
+    [
+      { prefix: "src/", label: "code/src", count: 2 },
+      { prefix: "_bmad-output/implementation-artifacts/", label: "doc/implementation-artifact", count: 1 },
+    ],
+    "explanation.fields must expose pathScopeSummary verbatim from the proposal",
+  );
+  assert.equal(explanation.fields.artifactScope, "implementation");
+  assert.equal(
+    explanation.fields.changeCountSummary,
+    "2 code files, 1 technical-doc file",
+  );
+  assert.equal(explanation.fields.finalizationMode, "commit-and-push");
+
+  // The reviewer-facing impactSummary must mention the bucket prefixes so the
+  // user can paste them into `git log -- <prefix>`.
+  assert.match(explanation.impactSummary, /src\//);
+  assert.match(explanation.impactSummary, /_bmad-output\/implementation-artifacts\//);
+
+  // Story 3.5 sensitive-data guard: absolute paths, full remote URLs, raw
+  // stderr fragments must NOT leak into the explanation payload anywhere.
+  const serialized = JSON.stringify(explanation);
+  assert.ok(
+    !/[A-Z]:\\Users\\/.test(serialized),
+    "explanation must NOT contain Windows absolute paths",
+  );
+  assert.ok(
+    !/^\/(Users|home)\//m.test(serialized),
+    "explanation must NOT contain POSIX absolute paths",
+  );
+  assert.ok(
+    !/https?:\/\//.test(serialized),
+    "explanation must NOT contain remote URL prefixes",
+  );
+  assert.ok(
+    !/permission-asked\.js/.test(serialized) &&
+      !/3-5\.md/.test(serialized) &&
+      !/index\.js/.test(serialized),
+    "explanation must NOT leak per-file basenames from commitProposal.files",
+  );
+}
+
+/**
+ * Story 3.5 (AC1, AC2): even when a push fails after a successful commit, the
+ * already-recorded local commit must remain reviewable via standard Git tools.
+ * The audit log must keep the commit's git.action.executed entry, the workflow
+ * state must keep the commit recorded in lastGitAction/lastGitResult, and the
+ * push proposal/state machine must be the only thing that gets rolled back —
+ * never the commit traceability itself.
+ */
+async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability() {
+  const [
+    { createWorkflowStateStore },
+    { createPermissionAskedHook },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?s35-push-fail=${Date.now()}`),
+    import(`${permissionAskedHookModuleUrl}?s35-push-fail=${Date.now()}`),
+  ]);
+
+  const events = [];
+  const audit = {
+    async info(message, payload) {
+      events.push({ message, payload });
+    },
+  };
+  const store = createWorkflowStateStore();
+  store.set("s-35-push-fail", {
+    sessionID: "s-35-push-fail",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "finish",
+    readiness: {
+      outcome: "allow",
+      details: {
+        isGitRepository: true,
+        branch: "feat/story-3-5",
+        hasRemote: true,
+        remoteNames: ["origin"],
+      },
+    },
+    approvalCurrent: {
+      id: "approval:s-35-push-fail:commit:commit",
+      actionId: "action:commit:commit",
+      sessionID: "s-35-push-fail",
+      workflow: "bmad-bmm-quick-dev",
+      command: "bmad-bmm-quick-dev",
+      phase: "finish",
+      actionType: "commit",
+      status: "awaitingApproval",
+      proposal: {
+        kind: "commit",
+        action: "commit",
+        message: "워크플로우 완료(bmad-bmm-quick-dev): implementation 산출물 업데이트",
+        artifactScope: "implementation",
+        artifactKinds: ["code"],
+        changeCountSummary: "1 code file",
+        pathScopeSummary: [{ prefix: "src/", label: "code/src", count: 1 }],
+        files: ["src/index.js"],
+        correlationId: "corr-35-commit",
+      },
+      metadata: {
+        workflow: "bmad-bmm-quick-dev",
+        command: "bmad-bmm-quick-dev",
+        finalization: "commit-and-push",
+      },
+    },
+    approvalHistory: [],
+    pendingActions: [],
+    commitProposal: {
+      kind: "commit",
+      action: "commit",
+      message: "워크플로우 완료(bmad-bmm-quick-dev): implementation 산출물 업데이트",
+      artifactScope: "implementation",
+      artifactKinds: ["code"],
+      changeCountSummary: "1 code file",
+      pathScopeSummary: [{ prefix: "src/", label: "code/src", count: 1 }],
+      files: ["src/index.js"],
+      correlationId: "corr-35-commit",
+    },
+  });
+
+  let runnerCall = 0;
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    {
+      workflowState: store,
+      audit,
+      pluginContext: {
+        resolvePolicy() {
+          return {
+            outcome: "allow",
+            details: {
+              policy: {
+                category: "implementation",
+                identityStrategy: "story",
+                branchRequired: true,
+                finalization: "commit-and-push",
+              },
+            },
+          };
+        },
+        async gitActionRunner({ action }) {
+          runnerCall += 1;
+          if (action.kind === "commit") {
+            return {
+              observedState: { headBranch: "feat/story-3-5", hasRemote: true },
+            };
+          }
+          if (action.kind === "push") {
+            // Push fails after a successful local commit. Story 3.5 contract:
+            // the reviewer-facing local commit history must NOT be rolled back
+            // because of a push failure — the commit envelope/audit must stay.
+            const error = new Error("push rejected by remote");
+            error.status = 1;
+            error.stderr = "remote: rejected (non-fast-forward)\nTo origin\n";
+            throw error;
+          }
+          throw new Error(`unexpected action ${action.kind}`);
+        },
+        async requestApproval() {
+          /* no-op — runtime would deliver the prompt; assertions read state */
+        },
+        async requestRecoveryDecision() {
+          /* no-op — recovery prompt delivery exercised in Story 2.5 tests */
+        },
+      },
+    },
+  );
+
+  // Step 1: accept commit (success). This emits git.action.executed (commit).
+  await hook({
+    sessionID: "s-35-push-fail",
+    approvalId: "approval:s-35-push-fail:commit:commit",
+    actionId: "action:commit:commit",
+    outcome: "accept",
+  });
+
+  const afterCommit = store.get("s-35-push-fail");
+  assert.equal(afterCommit.lastGitAction?.kind, "commit", "commit must be the last recorded git action");
+  assert.equal(afterCommit.lastGitResult?.status, "succeeded", "commit must record succeeded status");
+  assert.equal(afterCommit.commitProposal, null, "commit success must clear commitProposal");
+  assert.equal(afterCommit.approvalCurrent?.actionType, "push", "push approval must be the next active request");
+  const pushApprovalId = afterCommit.approvalCurrent.id;
+  const pushActionId = afterCommit.approvalCurrent.actionId;
+
+  // Step 2: accept push (failure). The push runner throws.
+  await hook({
+    sessionID: "s-35-push-fail",
+    approvalId: pushApprovalId,
+    actionId: pushActionId,
+    outcome: "accept",
+  });
+
+  const afterPush = store.get("s-35-push-fail");
+  // Push failure rewrites lastGitAction/Result to the push attempt — that is
+  // expected by Story 2.5 — but the commit's git.action.executed audit row
+  // must still exist in the audit log so reviewers can reconstruct
+  // "local-finalized, remote-not-finalized" exclusively from standard Git
+  // history + audit.
+  assert.equal(afterPush.lastGitAction?.kind, "push");
+  assert.equal(afterPush.lastGitResult?.status, "failed");
+
+  const commitExecuted = events.filter(
+    (e) => e.message === "git.action.executed" && e.payload?.details?.actionKind === "commit",
+  );
+  const pushExecuted = events.filter(
+    (e) => e.message === "git.action.executed" && e.payload?.details?.actionKind === "push",
+  );
+  assert.equal(
+    commitExecuted.length,
+    1,
+    "the commit's git.action.executed entry must remain in the audit log even after push failure",
+  );
+  assert.equal(commitExecuted[0].payload.outcome, "succeeded");
+  assert.equal(commitExecuted[0].payload.details.correlationId, "corr-35-commit");
+  assert.equal(pushExecuted.length, 1, "the failed push must also produce a git.action.executed entry");
+  assert.equal(pushExecuted[0].payload.outcome, "failed");
+
+  // Story 3.5 sensitive-data guard: the audit payload may carry a sanitized,
+  // collapsed stderrSummary (the classifier already trims to ≤240 chars and
+  // collapses whitespace into single spaces) but it must NEVER carry the raw
+  // multi-line stderr text or any full remote URL. We scan the serialized
+  // payload for embedded newlines and URL prefixes — both would indicate the
+  // sanitization layer was bypassed.
+  const pushPayload = JSON.stringify(pushExecuted[0].payload);
+  assert.ok(
+    !/\\n/.test(pushPayload),
+    "push failure audit must NOT include raw multi-line stderr (newlines escape into the JSON if leaked)",
+  );
+  assert.ok(
+    !/https?:\/\//.test(pushPayload),
+    "push failure audit must NOT include remote URLs",
+  );
+  // The sanitized stderrSummary is an allowed, length-bounded field. We
+  // assert the field exists for traceability AND that it cannot exceed the
+  // classifier's 240-char cap (any longer = sanitization was bypassed).
+  const stderrSummary = pushExecuted[0].payload?.details?.stderrSummary;
+  assert.ok(
+    stderrSummary === null || (typeof stderrSummary === "string" && stderrSummary.length <= 240),
+    "push failure stderrSummary must be either null or a sanitized ≤240-char string",
+  );
+  assert.equal(runnerCall, 2, "exactly two runner invocations: one commit, one push");
+}
+
+/**
+ * Story 3.5 (AC2): a workflow-finalization recovery gate must block subsequent
+ * finalization proposals (commit/push) but MUST NOT block non-finalization
+ * activity. This guarantees that an open recovery prompt cannot indefinitely
+ * silence the rest of the workflow envelope, while still preventing duplicate
+ * commits/pushes that would fragment reviewer traceability.
+ */
+async function verifyStory35RecoveryGateBlocksOnlyFinalizationFollowups() {
+  const { detectFinalizableOutputs } = await import(
+    `${detectFinalizableOutputsModuleUrl}?s35-gate=${Date.now()}`
+  );
+
+  const baseInput = {
+    workflowContext: {
+      sessionID: "s-35-gate",
+      commandName: "bmad-bmm-quick-dev",
+      phase: "finish",
+    },
+    workflowPolicy: {
+      category: "implementation",
+      identityStrategy: "story",
+      finalization: "commit-and-push",
+    },
+    trackedFiles: [{ path: "src/index.js", kind: "code" }],
+    repositorySnapshot: {
+      changedFiles: [{ path: "src/index.js", kind: "code" }],
+    },
+  };
+
+  // (a) No gate → finalization is allowed.
+  const allowed = detectFinalizableOutputs({ ...baseInput });
+  assert.equal(allowed.outcome, "allow", "no recovery gate → finalization must be allowed");
+
+  // (b) Gate with workflow-finalization scope → finalization is blocked.
+  const blocked = detectFinalizableOutputs({
+    ...baseInput,
+    activeRecoveryGate: {
+      gateId: "g-35",
+      blockingScope: "workflow-finalization",
+      state: "awaiting-recovery-decision",
+    },
+  });
+  assert.equal(blocked.outcome, "skip");
+  assert.equal(
+    blocked.reason,
+    "finalization-blocked",
+    "workflow-finalization gate must surface finalization-blocked reason",
+  );
+
+  // (c) Gate with a non-finalization scope must NOT block finalization (the
+  // gate is unrelated). This is the symmetric guarantee — only the explicit
+  // "workflow-finalization" scope is finalization-blocking.
+  const unrelated = detectFinalizableOutputs({
+    ...baseInput,
+    activeRecoveryGate: {
+      gateId: "g-35-other",
+      blockingScope: "branch-create",
+      state: "awaiting-recovery-decision",
+    },
+  });
+  assert.equal(
+    unrelated.outcome,
+    "allow",
+    "non-finalization recovery gate must NOT block finalization detection",
+  );
+}
+
+/**
+ * Story 3.5 (AC1): a planning-artifact-only commit (e.g. PRD/architecture
+ * updates) must still produce a commit proposal so reviewers can trace
+ * planning-artifact changes through standard Git history. The proposal's
+ * pathScopeSummary must surface the planning-artifact prefix.
+ */
+async function verifyStory35PlanningArtifactPathRemainsInScope() {
+  const { buildCommitProposal } = await import(
+    `${commitProposalModuleUrl}?s35-planning=${Date.now()}`
+  );
+
+  const proposal = buildCommitProposal({
+    workflowContext: {
+      sessionID: "s-35-planning",
+      commandName: "bmad-bmm-create-prd",
+      phase: "finish",
+    },
+    workflowPolicy: {
+      category: "planning",
+      identityStrategy: "artifact-singleton",
+      artifactKey: "prd",
+      finalization: "commit-optional-push",
+    },
+    finalizationAssessment: {
+      outcome: "allow",
+      reason: "finalizable-outputs-detected",
+      details: { shouldProposeCommit: true, artifactScope: "prd" },
+    },
+    finalizationArtifacts: {
+      matchedFiles: [
+        { path: "_bmad-output/planning-artifacts/prd.md", kind: "planning-artifact" },
+      ],
+    },
+  });
+
+  assert.ok(proposal, "planning-artifact-only finalization must produce a commit proposal");
+  assert.deepEqual(proposal.artifactKinds, ["planning-artifact"]);
+  assert.deepEqual(
+    proposal.pathScopeSummary,
+    [
+      {
+        prefix: "_bmad-output/planning-artifacts/",
+        label: "doc/planning-artifact",
+        count: 1,
+      },
+    ],
+    "planning-artifact bucket must be the only entry for a singleton planning commit",
+  );
+}
+
 main()
   .then(() => verifyBootstrapFailureShape())
   .then(() => verifyMissingLegacyBootstrapDependencyFails())
@@ -9326,6 +9931,14 @@ main()
   .then(() => verifyStory34GitActionExecutedCarriesCorrelationAxes())
   .then(() => verifyStory34GitExecutorEnvelopeSurvivesAuditThrow())
   .then(() => verifyStory34CommitSuccessThenPushDenyPreservesAuditChain())
+  // Story 3.5 — preserve reviewer traceability through standard Git history
+  .then(() => verifyStory35CommitProposalCodeOnlyScope())
+  .then(() => verifyStory35CommitProposalDocsOnlyScope())
+  .then(() => verifyStory35CommitProposalMixedScope())
+  .then(() => verifyStory35CommitExplanationSurfacesScopeWithoutSensitiveData())
+  .then(() => verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability())
+  .then(() => verifyStory35RecoveryGateBlocksOnlyFinalizationFollowups())
+  .then(() => verifyStory35PlanningArtifactPathRemainsInScope())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;

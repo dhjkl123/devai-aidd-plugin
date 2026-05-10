@@ -7,8 +7,16 @@
  * Supported proposal kinds:
  *   - branchProposal  → actionType: "branch/create" | "branch/switch"
  *   - initProposal    → actionType: "init"
- *   - (future) commitProposal → actionType: "commit"
- *   - (future) pushProposal   → actionType: "push"
+ *   - commitProposal  → actionType: "commit"  (Story 3.2)
+ *   - pushProposal    → actionType: "push"    (Story 3.3)
+ *
+ * Story 3.5 (reviewer traceability) deliberately keeps using the existing
+ * commit/push action types rather than introducing new categories. The
+ * reviewer-facing scope summaries (artifactScope, artifactKinds,
+ * changeCountSummary, pathScopeSummary) live inside the proposal payload
+ * the explanation builder already consumes; no new actionType, audit event,
+ * or proprietary metadata channel is required for traceability — the final
+ * commit on the working branch is the canonical source.
  *
  * Output shape:
  *   { kind, actionType, actionLabel, requiresApproval: true }

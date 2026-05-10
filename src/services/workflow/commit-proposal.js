@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { summarizeArtifactKinds } from "./finalization-artifacts.js";
+import {
+  summarizeArtifactKinds,
+  summarizePathScope,
+} from "./finalization-artifacts.js";
 
 const KIND_LABELS = new Map([
   ["code", "code"],
@@ -86,6 +89,13 @@ export function buildCommitProposal({
     artifactScope,
     artifactKinds: summarizeArtifactKinds(matchedFiles),
     changeCountSummary: summarizeChangeCount(matchedFiles),
+    // Story 3.5: pathScopeSummary surfaces a reviewer-friendly path-bucket
+    // summary so the approval prompt and audit metadata can describe the
+    // commit scope using prefixes the reviewer can paste into
+    // `git log -- <prefix>`. The full `files` list stays inside the proposal
+    // for git pathspec assembly only — basenames never reach the approval
+    // explanation or audit payload.
+    pathScopeSummary: summarizePathScope(matchedFiles),
     files: matchedFiles.map((entry) => entry.path),
     correlationId: buildCorrelationId(workflowContext, matchedFiles),
   };

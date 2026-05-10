@@ -1,6 +1,6 @@
 # Story 3.5: 표준 Git 이력을 통한 리뷰어 추적성 보존
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -23,39 +23,39 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] 워크플로우 산출물 추적성 계약을 명문화하고 최종화 입력 범위를 표준 Git 기준으로 확정한다 (AC: 1, 2)
-  - [ ] Story 3.1의 “finalizable artifacts” 판정 결과를 그대로 받아 재사용하고, Story 3.5에서 별도의 산출물 탐지 규칙을 만들지 않는다.
-  - [ ] 코드, 기술 문서, 기획 산출물의 최소 범주를 현재 저장소 구조에 맞게 정의한다: `src/`, `tests/`, `README.md`, `_bmad-output/planning-artifacts/`, `_bmad-output/implementation-artifacts/`.
-  - [ ] 추적성의 근거를 “일반 Git 커밋 이력 + 파일 경로별 이력 + blame 가능성”으로 고정하고, 전용 DB/별도 감사 저장소/비표준 리뷰 메타데이터를 필수 조건으로 만들지 않는다.
+- [x] 워크플로우 산출물 추적성 계약을 명문화하고 최종화 입력 범위를 표준 Git 기준으로 확정한다 (AC: 1, 2)
+  - [x] Story 3.1의 “finalizable artifacts” 판정 결과를 그대로 받아 재사용하고, Story 3.5에서 별도의 산출물 탐지 규칙을 만들지 않는다.
+  - [x] 코드, 기술 문서, 기획 산출물의 최소 범주를 현재 저장소 구조에 맞게 정의한다: `src/`, `tests/`, `README.md`, `_bmad-output/planning-artifacts/`, `_bmad-output/implementation-artifacts/`.
+  - [x] 추적성의 근거를 “일반 Git 커밋 이력 + 파일 경로별 이력 + blame 가능성”으로 고정하고, 전용 DB/별도 감사 저장소/비표준 리뷰 메타데이터를 필수 조건으로 만들지 않는다.
 
-- [ ] 커밋 제안 단계에서 리뷰어가 일반 Git 도구로 바로 따라갈 수 있는 산출물 범위를 조립한다 (AC: 1, 2)
-  - [ ] `src/services/git/commit-service.js`의 얇은 실행 경계를 유지하고, 별도 실행기나 훅 내부 Git 호출을 추가하지 않는다.
-  - [ ] Story 3.2 구현 시 사용할 commit proposal 객체에 `artifactScope`, `changeCountSummary`, 산출물 경로 목록 또는 동등한 요약 필드를 추가해 `build-approval-explanation.js`가 사람 읽기 가능한 범위를 설명할 수 있게 한다.
-  - [ ] 코드와 문서가 동시에 변경된 경우 하나의 커밋에 함께 담아도 되는지, 또는 정책상 분리해야 하는지를 `workflowPolicy.finalization`과 충돌하지 않는 방식으로 표현한다.
-  - [ ] 커밋 메시지 또는 메타데이터는 Git 자체가 이미 제공하는 책임 추적을 대체하지 않고, 표준 `git log -- <path>`와 `git blame` 사용성을 보조하는 범위에만 머문다.
+- [x] 커밋 제안 단계에서 리뷰어가 일반 Git 도구로 바로 따라갈 수 있는 산출물 범위를 조립한다 (AC: 1, 2)
+  - [x] `src/services/git/commit-service.js`의 얇은 실행 경계를 유지하고, 별도 실행기나 훅 내부 Git 호출을 추가하지 않는다.
+  - [x] Story 3.2 구현 시 사용할 commit proposal 객체에 `artifactScope`, `changeCountSummary`, 산출물 경로 목록 또는 동등한 요약 필드를 추가해 `build-approval-explanation.js`가 사람 읽기 가능한 범위를 설명할 수 있게 한다.
+  - [x] 코드와 문서가 동시에 변경된 경우 하나의 커밋에 함께 담아도 되는지, 또는 정책상 분리해야 하는지를 `workflowPolicy.finalization`과 충돌하지 않는 방식으로 표현한다.
+  - [x] 커밋 메시지 또는 메타데이터는 Git 자체가 이미 제공하는 책임 추적을 대체하지 않고, 표준 `git log -- <path>`와 `git blame` 사용성을 보조하는 범위에만 머문다.
 
-- [ ] 최종화 제안이 기존 승인/상태 저장 파이프라인에 자연스럽게 연결되도록 확장한다 (AC: 1, 2)
-  - [ ] `src/services/approval/approval-policy-service.js`의 Story 3.x 확장 포인트를 사용해 `commitProposal`, `pushProposal` 우선순위를 추가한다.
-  - [ ] `src/services/approval/classify-git-action.js`와 `src/services/approval/build-approval-request.js`의 기존 commit/push 지원 경로를 재사용하고, Story 3.5 때문에 별도 승인 타입을 만들지 않는다.
-  - [ ] `src/hooks/command-execute-before.js`는 계속 얇게 유지하고, finish phase에서 최종화 proposal만 저장/승격하며 실제 범위 계산과 요약은 service 계층으로 보낸다.
-  - [ ] `src/services/workflow/workflow-state.js`에는 리뷰어 추적을 위해 필요한 최종화 proposal 상태만 저장하고, 추적성을 위해 별도 글로벌 캐시를 만들지 않는다.
+- [x] 최종화 제안이 기존 승인/상태 저장 파이프라인에 자연스럽게 연결되도록 확장한다 (AC: 1, 2)
+  - [x] `src/services/approval/approval-policy-service.js`의 Story 3.x 확장 포인트를 사용해 `commitProposal`, `pushProposal` 우선순위를 추가한다.
+  - [x] `src/services/approval/classify-git-action.js`와 `src/services/approval/build-approval-request.js`의 기존 commit/push 지원 경로를 재사용하고, Story 3.5 때문에 별도 승인 타입을 만들지 않는다.
+  - [x] `src/hooks/command-execute-before.js`는 계속 얇게 유지하고, finish phase에서 최종화 proposal만 저장/승격하며 실제 범위 계산과 요약은 service 계층으로 보낸다.
+  - [x] `src/services/workflow/workflow-state.js`에는 리뷰어 추적을 위해 필요한 최종화 proposal 상태만 저장하고, 추적성을 위해 별도 글로벌 캐시를 만들지 않는다.
 
-- [ ] 리뷰어가 표준 Git 명령으로 책임을 추적할 수 있도록 산출물 구성과 설명을 정제한다 (AC: 1, 2)
-  - [ ] 승인 프롬프트와 Dev-facing 설명에는 “어떤 파일 범주가 커밋 대상인지”를 드러내되, 전체 절대경로나 민감한 원격 URL은 노출하지 않는다.
-  - [ ] 코드와 문서를 함께 커밋하는 경우에도 파일별 Git 이력과 blame이 깨지지 않도록 파일 이동/재생성보다 기존 파일 갱신을 우선한다.
-  - [ ] 문서 산출물은 `_bmad-output` 아래에서 일반 Git 파일로 남아야 하며, 외부 전용 저장소나 숨겨진 메타데이터 파일로만 추적되게 만들지 않는다.
-  - [ ] Story 3.4의 audit 이벤트는 “승인/실행 결과 추적” 용도이고, Story 3.5의 핵심 성공 기준은 여전히 Git 이력 자체라는 점을 문서와 테스트에서 분리해 표현한다.
+- [x] 리뷰어가 표준 Git 명령으로 책임을 추적할 수 있도록 산출물 구성과 설명을 정제한다 (AC: 1, 2)
+  - [x] 승인 프롬프트와 Dev-facing 설명에는 “어떤 파일 범주가 커밋 대상인지”를 드러내되, 전체 절대경로나 민감한 원격 URL은 노출하지 않는다.
+  - [x] 코드와 문서를 함께 커밋하는 경우에도 파일별 Git 이력과 blame이 깨지지 않도록 파일 이동/재생성보다 기존 파일 갱신을 우선한다.
+  - [x] 문서 산출물은 `_bmad-output` 아래에서 일반 Git 파일로 남아야 하며, 외부 전용 저장소나 숨겨진 메타데이터 파일로만 추적되게 만들지 않는다.
+  - [x] Story 3.4의 audit 이벤트는 “승인/실행 결과 추적” 용도이고, Story 3.5의 핵심 성공 기준은 여전히 Git 이력 자체라는 점을 문서와 테스트에서 분리해 표현한다.
 
-- [ ] README 및 회귀 테스트에 표준 Git 추적 사용 시나리오를 추가한다 (AC: 1, 2)
-  - [ ] README에는 리뷰어가 사용할 기본 검증 흐름 예시를 추가한다: `git log -- <path>`, 필요 시 `git log --follow -- <file>`, `git blame <file>`.
-  - [ ] 회귀 테스트는 commit proposal이 코드/문서/기획 산출물 범위를 올바르게 묶는지, push 실패가 로컬 커밋의 추적성을 무효화하지 않는지 검증한다.
-  - [ ] 승인 설명 및 감사 이벤트 테스트는 경로 범위 요약은 포함하되 민감 정보가 새지 않는지 확인한다.
+- [x] README 및 회귀 테스트에 표준 Git 추적 사용 시나리오를 추가한다 (AC: 1, 2)
+  - [x] README에는 리뷰어가 사용할 기본 검증 흐름 예시를 추가한다: `git log -- <path>`, 필요 시 `git log --follow -- <file>`, `git blame <file>`.
+  - [x] 회귀 테스트는 commit proposal이 코드/문서/기획 산출물 범위를 올바르게 묶는지, push 실패가 로컬 커밋의 추적성을 무효화하지 않는지 검증한다.
+  - [x] 승인 설명 및 감사 이벤트 테스트는 경로 범위 요약은 포함하되 민감 정보가 새지 않는지 확인한다.
 
-- [ ] Story 3.5 전용 회귀/계약 테스트를 추가해 표준 Git 추적성을 보장한다 (AC: 1, 2)
-  - [ ] `tests/regression.test.js`에 commit proposal 범위, finalization 게이팅, push 이후/실패 이후의 traceability 보존을 검증하는 테스트를 추가한다.
-  - [ ] 파일 단위 이력 관점에서 문서와 코드가 함께 포함된 커밋의 승인 설명이 `artifactScope`와 변경 요약을 안정적으로 노출하는지 검증한다.
-  - [ ] “코드만”, “문서만”, “코드+문서 혼합” 세 경우 모두 일반 Git 이력으로 설명 가능한 커밋 범위가 만들어지는지 검증한다.
-  - [ ] Story 2.5 recovery와 연결해 commit 또는 push 실패 후에도 이미 기록된 로컬 커밋 이력의 추적성은 유지되고, recovery gate가 후속 최종화만 차단하는지 검증한다.
+- [x] Story 3.5 전용 회귀/계약 테스트를 추가해 표준 Git 추적성을 보장한다 (AC: 1, 2)
+  - [x] `tests/regression.test.js`에 commit proposal 범위, finalization 게이팅, push 이후/실패 이후의 traceability 보존을 검증하는 테스트를 추가한다.
+  - [x] 파일 단위 이력 관점에서 문서와 코드가 함께 포함된 커밋의 승인 설명이 `artifactScope`와 변경 요약을 안정적으로 노출하는지 검증한다.
+  - [x] “코드만”, “문서만”, “코드+문서 혼합” 세 경우 모두 일반 Git 이력으로 설명 가능한 커밋 범위가 만들어지는지 검증한다.
+  - [x] Story 2.5 recovery와 연결해 commit 또는 push 실패 후에도 이미 기록된 로컬 커밋 이력의 추적성은 유지되고, recovery gate가 후속 최종화만 차단하는지 검증한다.
 
 ## Dev Notes
 
@@ -170,5 +170,32 @@ GPT-5 Codex
 - Epic 3 전체 맥락, Story 3.5 요구사항, Story 2.5 학습, 최근 커밋 패턴, 구현 후보 경로, 테스트 포인트를 수집해 한국어 스토리 컨텍스트를 생성했다.
 - 대상 스토리 파일이 존재하지 않아 지정 경로에 새로 생성했다.
 - `project-context.md` 부재를 확인했고, 대신 PRD/Epics/Architecture/README/실제 소스 및 테스트 기준으로 컨텍스트를 보강했다.
+- 2026-05-10 dev-story 실행: Story 3.5 구현 완료. Story 3.1~3.4가 이미 commit/push 파이프라인과 audit 이벤트 체인을 마련했으므로, Story 3.5는 “표준 Git 도구로 리뷰 가능한 commit scope/설명을 정제 + 회귀 테스트로 계약 고정” 방향으로 최소 변경에 집중했다.
+  - `src/services/workflow/finalization-artifacts.js`에 `summarizePathScope()`와 PATH_SCOPE_BUCKETS/SINGLE_FILE_DOC_BUCKETS 테이블을 추가해, 리뷰어가 그대로 `git log -- <prefix>`에 붙일 수 있는 prefix-기반 path 요약을 결정적 순서로 생성한다. 파일 basename은 절대 노출되지 않는다.
+  - `src/services/workflow/commit-proposal.js`의 `buildCommitProposal()`이 새 `pathScopeSummary` 필드를 commit proposal에 포함시키도록 확장. 기존 `artifactScope`/`artifactKinds`/`changeCountSummary`는 그대로 유지.
+  - `src/services/approval/build-approval-explanation.js`의 `buildCommitExplanation()`이 `artifactKinds`와 `pathScopeSummary`를 fields/impactSummary에 surface. 새 한국어 clause로 “리뷰어는 표준 Git 도구로 ... 경로 이력을 확인할 수 있다”를 추가했다. 절대경로/원격 URL/raw stderr는 노출되지 않는다.
+  - `src/services/approval/approval-policy-service.js`, `src/services/approval/classify-git-action.js`, `src/services/workflow/workflow-state.js`에 Story 3.5 reuse 계약 주석을 추가 — 새 approval type, 새 audit event, 새 state 필드를 도입하지 않는다는 invariant를 코드 옆 문서로 박았다. (실제 동작 변경 없음)
+  - `README.md`에 “표준 Git 도구로 워크플로 산출물 추적하기” 섹션 추가 — `git log -- <path>`, `git log --follow -- <file>`, `git blame <file>`, `git log --grep "워크플로우 완료"` 워크플로 예시 포함.
+  - `tests/regression.test.js`에 Story 3.5 전용 회귀 7건 추가:
+    - `verifyStory35CommitProposalCodeOnlyScope` (code-only)
+    - `verifyStory35CommitProposalDocsOnlyScope` (docs-only: technical-doc + planning-artifact + README)
+    - `verifyStory35CommitProposalMixedScope` (code+docs 혼합 + bucket 순서)
+    - `verifyStory35CommitExplanationSurfacesScopeWithoutSensitiveData` (artifactKinds/pathScopeSummary surface, basename/abs-path/URL leak 가드)
+    - `verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability` (commit success 후 push fail 시 commit audit 보존)
+    - `verifyStory35RecoveryGateBlocksOnlyFinalizationFollowups` (`workflow-finalization` blockingScope만 finalization 차단)
+    - `verifyStory35PlanningArtifactPathRemainsInScope` (planning-artifact-only commit + path bucket)
+- `npm test` 통과 (exit 0). `npm run build` 재실행 (`dist/devai-aidd-guard.js`).
+- Story 3.5는 새 audit event를 도입하지 않았다 (Story 3.4의 이벤트 패밀리 재사용). 새 approval type, 새 dependency, package.json 변경 없음.
 
 ### File List
+
+- `src/services/workflow/finalization-artifacts.js` — `summarizePathScope()`, `PATH_SCOPE_BUCKETS`, `SINGLE_FILE_DOC_BUCKETS` 추가 (Story 3.5)
+- `src/services/workflow/commit-proposal.js` — commit proposal에 `pathScopeSummary` 필드 추가
+- `src/services/approval/build-approval-explanation.js` — commit explanation에 `artifactKinds`/`pathScopeSummary` surface, 한국어 reviewer clause 추가
+- `src/services/approval/approval-policy-service.js` — Story 3.5 reuse 계약 주석 (동작 변경 없음)
+- `src/services/approval/classify-git-action.js` — Story 3.5 reuse 계약 주석 (동작 변경 없음)
+- `src/services/workflow/workflow-state.js` — Story 3.5 “새 state 필드 추가하지 않는다” invariant 주석 (동작 변경 없음)
+- `README.md` — “표준 Git 도구로 워크플로 산출물 추적하기” 섹션 추가
+- `tests/regression.test.js` — Story 3.5 회귀 7건 + main() chain 등록
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — Story 3.5 status: ready-for-dev → in-progress → review
+- `_bmad-output/implementation-artifacts/3-5-preserve-reviewer-traceability-through-standard-git-history.md` — Status: review, 모든 task/subtask 체크, Completion Notes 업데이트, File List 추가

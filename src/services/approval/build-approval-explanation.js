@@ -193,6 +193,29 @@ function buildInitExplanation(initProposal, readiness) {
 }
 
 function buildCommitExplanation(commitProposal, workflowPolicy) {
+  // Story 3.5: surface artifactKinds and pathScopeSummary so the approval body
+  // describes commit scope using categories and `git log -- <prefix>`-friendly
+  // buckets. Per-file basenames must never reach the explanation payload —
+  // upstream commit-proposal.js intentionally derives both summaries from
+  // matchedFiles before the approval explanation runs.
+  const rawArtifactKinds = Array.isArray(commitProposal?.artifactKinds)
+    ? commitProposal.artifactKinds.filter((kind) => typeof kind === "string" && kind.length > 0)
+    : [];
+  const rawPathScopeSummary = Array.isArray(commitProposal?.pathScopeSummary)
+    ? commitProposal.pathScopeSummary
+        .filter(
+          (entry) =>
+            entry &&
+            typeof entry.prefix === "string" &&
+            entry.prefix.length > 0 &&
+            typeof entry.label === "string" &&
+            entry.label.length > 0 &&
+            Number.isInteger(entry.count) &&
+            entry.count > 0,
+        )
+        .map((entry) => ({ prefix: entry.prefix, label: entry.label, count: entry.count }))
+    : [];
+
   const fields = {
     artifactScope:
       typeof commitProposal?.artifactScope === "string"
@@ -203,6 +226,8 @@ function buildCommitExplanation(commitProposal, workflowPolicy) {
         ? commitProposal.changeCountSummary
         : null,
     finalizationMode: workflowPolicy?.finalization || null,
+    artifactKinds: rawArtifactKinds,
+    pathScopeSummary: rawPathScopeSummary,
   };
 
   // Story 3.2 review (LOW Round 4): surface artifactScope and changeCountSummary
@@ -215,7 +240,16 @@ function buildCommitExplanation(commitProposal, workflowPolicy) {
   const finalizationSegment = fields.finalizationMode
     ? ` 최종화 모드: ${fields.finalizationMode}.`
     : "";
-  const impactSummary = `승인 시 staged/eligible 변경이 단일 커밋 기록으로 추가된다. 푸시는 별도 승인이다.${finalizationSegment}`;
+  // Story 3.5: append a reviewer-facing scope clause that points to standard
+  // Git inspection commands. The clause uses the same path buckets the
+  // reviewer can paste into `git log -- <prefix>`.
+  const reviewerSegment =
+    rawPathScopeSummary.length > 0
+      ? ` 리뷰어는 표준 Git 도구로 ${rawPathScopeSummary
+          .map((entry) => `${entry.prefix} (${entry.count})`)
+          .join(", ")} 경로 이력을 확인할 수 있다.`
+      : "";
+  const impactSummary = `승인 시 staged/eligible 변경이 단일 커밋 기록으로 추가된다. 푸시는 별도 승인이다.${finalizationSegment}${reviewerSegment}`;
 
   return { fields, intentSummary, impactSummary };
 }

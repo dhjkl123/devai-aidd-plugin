@@ -54,6 +54,16 @@ import { WORKFLOW_PHASES } from "./detect-workflow-context.js";
  *                                { source, correlationId, code,
  *                                  recoverable, suggestedRecoveryKind }.
  *
+ * Story 3.5 (reviewer traceability) does NOT add new state fields here.
+ * The existing finalizationAssessment / finalizationArtifacts /
+ * commitProposal / pushProposal / lastGitAction / lastGitResult slots
+ * already carry every signal Story 3.5 needs to keep "what was committed
+ * and why" reconstructable from session state. Reviewer traceability is
+ * preserved in the resulting standard Git history (git log / git blame),
+ * not in a parallel session cache — adding a redundant traceability cache
+ * here would invite drift between session state and the actual repository
+ * record.
+ *
  * Recovery gate field (Story 2.5):
  *   recoveryGate             — null when no gate is open. Otherwise the
  *                              orchestrator-owned object describing the

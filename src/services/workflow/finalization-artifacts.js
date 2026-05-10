@@ -150,3 +150,110 @@ export function artifactScopeMatches(artifactKey, files) {
 export function summarizeArtifactKinds(files) {
   return [...new Set((Array.isArray(files) ? files : []).map((entry) => entry.kind).filter(Boolean))];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Story 3.5: reviewer-facing path scope summary.
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Story 3.5 requires reviewer-facing approval prompts and audit metadata to
+// describe "어떤 파일 범주가 커밋 대상인지" without leaking full absolute paths
+// or per-file basenames. The commit proposal already carries the explicit
+// `files` list (kept inside the proposal for git pathspec assembly), but the
+// approval explanation must surface a coarser, sanitized summary the reviewer
+// can map back onto standard `git log -- <path>` queries.
+//
+// PATH_SCOPE_BUCKETS is the canonical, ordered list of repository path
+// prefixes the plugin classifies as finalizable scopes. Buckets are derived
+// from the same prefix tables this module already uses for `splitFinalizableFiles`,
+// so the contract stays single-sourced — adding a new finalizable prefix
+// requires updating this list as well.
+//
+// Each bucket exposes:
+//   - prefix : the standard repo-relative prefix reviewers can paste into
+//              `git log -- <prefix>` directly.
+//   - label  : a short reviewer-facing identifier (English, kept stable so
+//              regression tests can pin it deterministically).
+//
+// `summarizePathScope` returns a deterministically-ordered array of
+// { prefix, label, count } entries — one per bucket that received at least
+// one matched file — plus an "other" bucket carrying counts for files whose
+// path did not match any known prefix. Per-file basenames are never
+// surfaced and the matched file's full path never leaves the proposal.
+const PATH_SCOPE_BUCKETS = [
+  { prefix: "src/", label: "code/src" },
+  { prefix: "tests/", label: "code/tests" },
+  { prefix: "scripts/", label: "code/scripts" },
+  { prefix: "templates/", label: "code/templates" },
+  { prefix: "installer/", label: "code/installer" },
+  { prefix: "dist/", label: "code/dist" },
+  { prefix: "release/", label: "code/release" },
+  { prefix: "docs/", label: "doc/technical" },
+  { prefix: PLANNING_ARTIFACT_PREFIX, label: "doc/planning-artifact" },
+  { prefix: IMPLEMENTATION_ARTIFACT_PREFIX, label: "doc/implementation-artifact" },
+];
+
+const SINGLE_FILE_DOC_BUCKETS = new Map([
+  ["README.md", { prefix: "README.md", label: "doc/readme" }],
+  ["CHANGELOG.md", { prefix: "CHANGELOG.md", label: "doc/changelog" }],
+]);
+
+/**
+ * Build a reviewer-facing path-scope summary from a normalized matchedFiles
+ * list. Returned entries are ordered to match PATH_SCOPE_BUCKETS so the
+ * approval body and audit metadata render deterministically.
+ *
+ * The summary intentionally drops per-file basenames: reviewers should be
+ * able to map each bucket to a `git log -- <prefix>` invocation without the
+ * approval prompt ever leaking individual filenames or absolute paths.
+ *
+ * @param {Array<{ path?: string }> | null} files
+ * @returns {Array<{ prefix: string, label: string, count: number }>}
+ */
+export function summarizePathScope(files) {
+  const counts = new Map();
+  const order = [];
+
+  function increment(bucket) {
+    if (!counts.has(bucket.prefix)) {
+      counts.set(bucket.prefix, { prefix: bucket.prefix, label: bucket.label, count: 0 });
+      order.push(bucket.prefix);
+    }
+    counts.get(bucket.prefix).count += 1;
+  }
+
+  for (const entry of Array.isArray(files) ? files : []) {
+    const filePath = typeof entry === "string" ? entry : entry?.path;
+    if (typeof filePath !== "string" || filePath.length === 0) {
+      continue;
+    }
+
+    const exactBucket = SINGLE_FILE_DOC_BUCKETS.get(filePath);
+    if (exactBucket) {
+      increment(exactBucket);
+      continue;
+    }
+
+    const matched = PATH_SCOPE_BUCKETS.find((bucket) =>
+      filePath.startsWith(bucket.prefix),
+    );
+    if (matched) {
+      increment(matched);
+      continue;
+    }
+
+    increment({ prefix: "other", label: "other" });
+  }
+
+  // Story 3.5 invariant: ordering is determined by PATH_SCOPE_BUCKETS so that
+  // approval-explanation snapshots and audit metadata are stable across
+  // arbitrary input orderings.
+  const orderedPrefixes = [
+    ...PATH_SCOPE_BUCKETS.map((bucket) => bucket.prefix),
+    ...[...SINGLE_FILE_DOC_BUCKETS.values()].map((bucket) => bucket.prefix),
+    "other",
+  ];
+
+  return orderedPrefixes
+    .filter((prefix) => counts.has(prefix))
+    .map((prefix) => counts.get(prefix));
+}

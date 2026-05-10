@@ -91,6 +91,30 @@ npm run release
 
 실제 workflow 판단 로직은 기존 단일 파일을 `src/policies/legacy/devai-aidd-guard-core.js`로 옮겨 최대한 그대로 유지했다.
 
+## 표준 Git 도구로 워크플로 산출물 추적하기
+
+DevAI AIDD Guard는 워크플로 최종화 시 코드와 문서를 단일 커밋으로 묶어 일반 Git 이력에 기록한다. 별도 전용 리뷰 시스템 없이도 표준 Git 도구만으로 책임 추적이 가능하도록 설계되었다.
+
+리뷰어가 사용할 기본 검증 흐름은 아래와 같다.
+
+```bash
+# 1) 특정 경로에 영향을 준 워크플로 커밋 이력 확인
+git log -- src/
+git log -- _bmad-output/planning-artifacts/
+git log -- _bmad-output/implementation-artifacts/
+
+# 2) 파일 이름 변경까지 추적해야 할 때
+git log --follow -- src/services/git/commit-service.js
+
+# 3) 라인 단위 최종 수정자 확인
+git blame README.md
+
+# 4) 워크플로 단위 변경 묶음 검토 (커밋 메시지에 워크플로 식별자 포함)
+git log --grep "워크플로우 완료"
+```
+
+승인 프롬프트는 커밋 대상 경로를 `pathScopeSummary` 형태(예: `src/ (2)`, `_bmad-output/implementation-artifacts/ (1)`)로 요약해서 보여주므로, 리뷰어는 동일 prefix를 그대로 `git log -- <prefix>`에 붙여 넣어 변경 이력을 따라갈 수 있다. 절대경로나 원격 URL은 승인/감사 페이로드에 노출되지 않는다.
+
 ## 롤백
 
 - 최신 버전에서 이전 버전으로 되돌리려면 `release/devai-aidd-guard/versions/<version>/install.ps1` 또는 `install.sh`를 사용한다.
