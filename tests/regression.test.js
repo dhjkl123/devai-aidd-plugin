@@ -2140,6 +2140,7 @@ async function verifyApprovalPolicyServiceContracts() {
   const initProposal = { kind: "init", directory: "/tmp" };
   const branchProposal = { kind: "branch", action: "create", name: "feat/X" };
   const commitProposal = { kind: "commit", message: "Finish workflow outputs" };
+  const pushProposal = { kind: "push", action: "push", remoteName: "origin", branchName: "feat/X" };
 
   assert.deepEqual(
     selectNextPlannedAction({ initProposal }),
@@ -2165,6 +2166,16 @@ async function verifyApprovalPolicyServiceContracts() {
     selectNextPlannedAction({ branchProposal, commitProposal }),
     branchProposal,
     "selectNextPlannedAction: branchProposal takes priority over commitProposal",
+  );
+  assert.deepEqual(
+    selectNextPlannedAction({ pushProposal }),
+    pushProposal,
+    "selectNextPlannedAction: pushProposal alone selected",
+  );
+  assert.deepEqual(
+    selectNextPlannedAction({ commitProposal, pushProposal }),
+    commitProposal,
+    "selectNextPlannedAction: commitProposal takes priority over pushProposal",
   );
 
   // evaluateRequestGate
@@ -3474,6 +3485,441 @@ async function verifyPermissionAskedCommitFailureOpensRecovery() {
   assert.equal(state.pendingRecoveryContext.code, "commit-failure");
   assert.equal(state.recoveryGate.actionKind, "commit");
   assert.equal(prompts.length, 1, "commit failure must deliver one recovery prompt");
+}
+
+async function verifyPermissionAskedAcceptCommitPublishesPushApproval() {
+  const [
+    { createWorkflowStateStore },
+    { createPermissionAskedHook },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?commit-then-push=${Date.now()}`),
+    import(`${permissionAskedHookModuleUrl}?commit-then-push=${Date.now()}`),
+  ]);
+
+  const approvals = [];
+  const events = [];
+  const store = createWorkflowStateStore();
+  store.set("s-commit-then-push", {
+    sessionID: "s-commit-then-push",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "finish",
+    readiness: {
+      outcome: "allow",
+      details: {
+        isGitRepository: true,
+        branch: "feat/story-3-3",
+        hasRemote: true,
+        remoteNames: ["origin"],
+      },
+    },
+    approvalCurrent: {
+      id: "approval:s-commit-then-push:commit:commit",
+      actionId: "action:commit:commit",
+      sessionID: "s-commit-then-push",
+      workflow: "bmad-bmm-quick-dev",
+      command: "bmad-bmm-quick-dev",
+      phase: "finish",
+      actionType: "commit",
+      status: "awaitingApproval",
+      proposal: {
+        kind: "commit",
+        action: "commit",
+        message: "Finish bmad-bmm-quick-dev: update implementation outputs",
+        artifactScope: "implementation",
+        changeCountSummary: "1 code file",
+        files: ["src/index.js"],
+        correlationId: "corr-commit-then-push",
+      },
+      metadata: {
+        workflow: "bmad-bmm-quick-dev",
+        command: "bmad-bmm-quick-dev",
+      },
+    },
+    approvalHistory: [],
+    pendingActions: [],
+    commitProposal: {
+      kind: "commit",
+      action: "commit",
+      message: "Finish bmad-bmm-quick-dev: update implementation outputs",
+      artifactScope: "implementation",
+      changeCountSummary: "1 code file",
+      files: ["src/index.js"],
+      correlationId: "corr-commit-then-push",
+    },
+  });
+
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    {
+      workflowState: store,
+      audit: {
+        async info(message, payload) {
+          events.push({ message, payload });
+        },
+      },
+      pluginContext: {
+        resolvePolicy() {
+          return {
+            outcome: "allow",
+            details: {
+              policy: {
+                category: "implementation",
+                identityStrategy: "story",
+                branchRequired: true,
+                finalization: "commit-and-push",
+              },
+            },
+          };
+        },
+        async gitActionRunner({ action }) {
+          assert.equal(action.kind, "commit");
+          return {
+            observedState: {
+              headBranch: "feat/story-3-3",
+              hasRemote: true,
+            },
+          };
+        },
+        async requestApproval(request) {
+          approvals.push(request);
+        },
+      },
+    },
+  );
+
+  await hook({
+    sessionID: "s-commit-then-push",
+    approvalId: "approval:s-commit-then-push:commit:commit",
+    actionId: "action:commit:commit",
+    outcome: "accept",
+  });
+
+  const state = store.get("s-commit-then-push");
+  assert.equal(state.commitProposal, null, "successful commit must clear commitProposal");
+  assert.equal(state.pushProposal?.kind, "push", "successful commit must prepare push proposal");
+  assert.equal(state.approvalCurrent?.actionType, "push", "push approval must become the active request");
+  assert.equal(approvals.length, 1, "exactly one push approval must be requested");
+  assert.equal(approvals[0].actionType, "push");
+  assert.equal(approvals[0].proposal.remoteName, "origin");
+  assert.equal(approvals[0].proposal.branchName, "feat/story-3-3");
+  assert.equal(
+    approvals[0].metadata.explanation.fields.targetRemoteLabel,
+    "origin",
+    "push approval must expose only the remote label",
+  );
+  assert.ok(
+    events.some((entry) => entry.message === "git.action.planned" && entry.payload?.details?.kind === "push"),
+    "commit success must emit a planned push event",
+  );
+}
+
+async function verifyPermissionAskedAcceptCommitSuppressesPushWithoutRemote() {
+  const [
+    { createWorkflowStateStore },
+    { createPermissionAskedHook },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?commit-no-remote=${Date.now()}`),
+    import(`${permissionAskedHookModuleUrl}?commit-no-remote=${Date.now()}`),
+  ]);
+
+  const approvals = [];
+  const store = createWorkflowStateStore();
+  store.set("s-commit-no-remote", {
+    sessionID: "s-commit-no-remote",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "finish",
+    readiness: {
+      outcome: "allow",
+      details: {
+        isGitRepository: true,
+        branch: "feat/story-3-3",
+        hasRemote: false,
+        remoteNames: [],
+      },
+    },
+    approvalCurrent: {
+      id: "approval:s-commit-no-remote:commit:commit",
+      actionId: "action:commit:commit",
+      sessionID: "s-commit-no-remote",
+      workflow: "bmad-bmm-quick-dev",
+      command: "bmad-bmm-quick-dev",
+      phase: "finish",
+      actionType: "commit",
+      status: "awaitingApproval",
+      proposal: {
+        kind: "commit",
+        action: "commit",
+        message: "Finish bmad-bmm-quick-dev: update implementation outputs",
+        artifactScope: "implementation",
+        changeCountSummary: "1 code file",
+        files: ["src/index.js"],
+        correlationId: "corr-commit-no-remote",
+      },
+      metadata: {
+        workflow: "bmad-bmm-quick-dev",
+        command: "bmad-bmm-quick-dev",
+      },
+    },
+    approvalHistory: [],
+    pendingActions: [],
+    commitProposal: {
+      kind: "commit",
+      action: "commit",
+      message: "Finish bmad-bmm-quick-dev: update implementation outputs",
+      artifactScope: "implementation",
+      changeCountSummary: "1 code file",
+      files: ["src/index.js"],
+      correlationId: "corr-commit-no-remote",
+    },
+  });
+
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    {
+      workflowState: store,
+      pluginContext: {
+        resolvePolicy() {
+          return {
+            outcome: "allow",
+            details: {
+              policy: {
+                category: "implementation",
+                identityStrategy: "story",
+                branchRequired: true,
+                finalization: "commit-and-push",
+              },
+            },
+          };
+        },
+        async gitActionRunner() {
+          return {
+            observedState: {
+              headBranch: "feat/story-3-3",
+              hasRemote: false,
+            },
+          };
+        },
+        async requestApproval(request) {
+          approvals.push(request);
+        },
+      },
+    },
+  );
+
+  await hook({
+    sessionID: "s-commit-no-remote",
+    approvalId: "approval:s-commit-no-remote:commit:commit",
+    actionId: "action:commit:commit",
+    outcome: "accept",
+  });
+
+  const state = store.get("s-commit-no-remote");
+  assert.equal(state.commitProposal, null);
+  assert.equal(state.pushProposal, null, "missing remote must suppress push proposal creation");
+  assert.equal(state.approvalCurrent, null, "missing remote must not create a follow-up approval");
+  assert.equal(approvals.length, 0, "missing remote must not request push approval");
+}
+
+async function verifyPermissionAskedAcceptExecutesPushProposal() {
+  const [
+    { createWorkflowStateStore },
+    { createPermissionAskedHook },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?push-accept=${Date.now()}`),
+    import(`${permissionAskedHookModuleUrl}?push-accept=${Date.now()}`),
+  ]);
+
+  const events = [];
+  const store = createWorkflowStateStore();
+  store.set("s-push-accept", {
+    sessionID: "s-push-accept",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "finish",
+    readiness: {
+      outcome: "allow",
+      details: {
+        isGitRepository: true,
+        branch: "feat/story-3-3",
+        hasRemote: true,
+        remoteNames: ["origin"],
+      },
+    },
+    approvalCurrent: {
+      id: "approval:s-push-accept:push:push",
+      actionId: "action:push:push",
+      sessionID: "s-push-accept",
+      workflow: "bmad-bmm-quick-dev",
+      command: "bmad-bmm-quick-dev",
+      phase: "finish",
+      actionType: "push",
+      status: "awaitingApproval",
+      proposal: {
+        kind: "push",
+        action: "push",
+        branchName: "feat/story-3-3",
+        targetBranch: "feat/story-3-3",
+        remoteName: "origin",
+        remote: "origin",
+        branch: "feat/story-3-3",
+        correlationId: "corr-push-accept",
+      },
+      metadata: {
+        workflow: "bmad-bmm-quick-dev",
+        command: "bmad-bmm-quick-dev",
+      },
+    },
+    approvalHistory: [],
+    pendingActions: [],
+    pushProposal: {
+      kind: "push",
+      action: "push",
+      branchName: "feat/story-3-3",
+      targetBranch: "feat/story-3-3",
+      remoteName: "origin",
+      remote: "origin",
+      branch: "feat/story-3-3",
+      correlationId: "corr-push-accept",
+    },
+    lastGitAction: { kind: "commit", operation: "commit", branchName: "feat/story-3-3" },
+    lastGitResult: { ok: true, status: "succeeded", code: null, message: null, correlationId: "corr-commit-done" },
+  });
+
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    {
+      workflowState: store,
+      audit: {
+        async info(message, payload) {
+          events.push({ message, payload });
+        },
+      },
+      pluginContext: {
+        async gitActionRunner({ action }) {
+          assert.equal(action.kind, "push");
+          assert.equal(action.remoteName, "origin");
+          assert.equal(action.branchName, "feat/story-3-3");
+          return {
+            observedState: {
+              headBranch: "feat/story-3-3",
+              hasRemote: true,
+            },
+          };
+        },
+      },
+    },
+  );
+
+  await hook({
+    sessionID: "s-push-accept",
+    approvalId: "approval:s-push-accept:push:push",
+    actionId: "action:push:push",
+    outcome: "accept",
+  });
+
+  const state = store.get("s-push-accept");
+  assert.equal(state.approvalCurrent, null, "push accept must clear the pending approval");
+  assert.equal(state.pushProposal, null, "successful push must clear pushProposal");
+  assert.equal(state.lastGitAction.kind, "push");
+  assert.equal(state.lastGitResult.status, "succeeded");
+  assert.ok(
+    events.some((entry) => entry.message === "git.action.executed" && entry.payload?.details?.actionKind === "push"),
+    "push execution must emit git.action.executed",
+  );
+}
+
+async function verifyPermissionAskedPushFailureOpensRecovery() {
+  const [
+    { createWorkflowStateStore },
+    { createPermissionAskedHook },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?push-failure=${Date.now()}`),
+    import(`${permissionAskedHookModuleUrl}?push-failure=${Date.now()}`),
+  ]);
+
+  const prompts = [];
+  const store = createWorkflowStateStore();
+  store.set("s-push-failure", {
+    sessionID: "s-push-failure",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "finish",
+    readiness: {
+      outcome: "allow",
+      details: {
+        isGitRepository: true,
+        branch: "feat/story-3-3",
+        hasRemote: true,
+        remoteNames: ["origin"],
+      },
+    },
+    approvalCurrent: {
+      id: "approval:s-push-failure:push:push",
+      actionId: "action:push:push",
+      sessionID: "s-push-failure",
+      workflow: "bmad-bmm-quick-dev",
+      command: "bmad-bmm-quick-dev",
+      phase: "finish",
+      actionType: "push",
+      status: "awaitingApproval",
+      proposal: {
+        kind: "push",
+        action: "push",
+        branchName: "feat/story-3-3",
+        targetBranch: "feat/story-3-3",
+        remoteName: "origin",
+        remote: "origin",
+        branch: "feat/story-3-3",
+        correlationId: "corr-push-failure",
+      },
+      metadata: {
+        workflow: "bmad-bmm-quick-dev",
+        command: "bmad-bmm-quick-dev",
+      },
+    },
+    approvalHistory: [],
+    pendingActions: [],
+    pushProposal: {
+      kind: "push",
+      action: "push",
+      branchName: "feat/story-3-3",
+      targetBranch: "feat/story-3-3",
+      remoteName: "origin",
+      remote: "origin",
+      branch: "feat/story-3-3",
+      correlationId: "corr-push-failure",
+    },
+  });
+
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    {
+      workflowState: store,
+      pluginContext: {
+        async gitActionRunner() {
+          const error = new Error("push rejected");
+          error.status = 1;
+          error.stderr = "remote rejected non-fast-forward";
+          throw error;
+        },
+        async requestRecoveryDecision(gate) {
+          prompts.push(gate);
+        },
+      },
+    },
+  );
+
+  await hook({
+    sessionID: "s-push-failure",
+    approvalId: "approval:s-push-failure:push:push",
+    actionId: "action:push:push",
+    outcome: "accept",
+  });
+
+  const state = store.get("s-push-failure");
+  assert.equal(state.lastGitAction.kind, "push");
+  assert.equal(state.lastGitResult.status, "failed");
+  assert.equal(state.lastGitResult.code, "push-rejection");
+  assert.equal(state.recoveryGate?.actionKind, "push");
+  assert.equal(prompts.length, 1, "push failure must open and deliver a recovery gate");
 }
 
 /**
@@ -8435,6 +8881,10 @@ main()
   .then(() => verifyToolExecuteAfterFinishPublishesCommitApproval())
   .then(() => verifyPermissionAskedAcceptExecutesCommitProposal())
   .then(() => verifyPermissionAskedCommitFailureOpensRecovery())
+  .then(() => verifyPermissionAskedAcceptCommitPublishesPushApproval())
+  .then(() => verifyPermissionAskedAcceptCommitSuppressesPushWithoutRemote())
+  .then(() => verifyPermissionAskedAcceptExecutesPushProposal())
+  .then(() => verifyPermissionAskedPushFailureOpensRecovery())
   // Story 3.2 review follow-up coverage
   .then(() => verifyBuildCommitArgsScopesPathspecToProposal())
   .then(() => verifyRunGitActionRejectsStagedFilesOutsideProposal())

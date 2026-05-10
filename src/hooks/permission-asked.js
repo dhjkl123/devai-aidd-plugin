@@ -331,7 +331,8 @@ export function createPermissionAskedHook(legacyHandlers, injections = {}) {
               if (
                 result.outcome === "resolved" &&
                 outcome === APPROVAL_OUTCOMES.ACCEPT &&
-                result.resolution?.actionKind === "commit"
+                (result.resolution?.actionKind === "commit" ||
+                  result.resolution?.actionKind === "push")
               ) {
                 const executionResult = await executeApprovedAction({
                   workflowState,

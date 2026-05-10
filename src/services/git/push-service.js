@@ -21,17 +21,33 @@ import { executeGitAction } from "./git-executor.js";
  *   remoteName?: string|null,
  *   correlationId?: string|null,
  * }} input
- * @returns {{ kind: "push", operation: "push", branchName: string|null, targetBranch: string|null, remoteName: string, correlationId: string|null }}
+ * @returns {{
+ *   kind: "push",
+ *   action: "push",
+ *   operation: "push",
+ *   branchName: string|null,
+ *   branch: string|null,
+ *   targetBranch: string|null,
+ *   remoteName: string,
+ *   remote: string,
+ *   correlationId: string|null
+ * }}
  */
 export function buildPushAction(input = {}) {
+  const branchName = typeof input.branchName === "string" ? input.branchName : null;
+  const remoteName =
+    typeof input.remoteName === "string" && input.remoteName.length > 0
+      ? input.remoteName
+      : "origin";
   return {
     kind: "push",
+    action: "push",
     operation: "push",
-    branchName: typeof input.branchName === "string" ? input.branchName : null,
+    branchName,
+    branch: branchName,
     targetBranch: typeof input.targetBranch === "string" ? input.targetBranch : null,
-    remoteName: typeof input.remoteName === "string" && input.remoteName.length > 0
-      ? input.remoteName
-      : "origin",
+    remoteName,
+    remote: remoteName,
     correlationId:
       typeof input.correlationId === "string" && input.correlationId.length > 0
         ? input.correlationId

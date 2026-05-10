@@ -165,6 +165,9 @@ export function createWorkflowStateStore() {
       if (copy.commitProposal !== null && copy.commitProposal !== undefined) {
         copy.commitProposal = structuredClone(copy.commitProposal);
       }
+      if (copy.pushProposal !== null && copy.pushProposal !== undefined) {
+        copy.pushProposal = structuredClone(copy.pushProposal);
+      }
       return copy;
     },
 

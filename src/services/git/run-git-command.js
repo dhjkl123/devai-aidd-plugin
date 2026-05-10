@@ -90,6 +90,37 @@ export function buildCommitArgs(action) {
   };
 }
 
+/**
+ * Build the argv array runGitAction would use for a push action.
+ *
+ * @param {{ remoteName?: string|null, branchName?: string|null, targetBranch?: string|null }} action
+ * @returns {string[]}
+ */
+export function buildPushArgs(action) {
+  if (!action || typeof action !== "object") {
+    throw new Error("A valid push action is required.");
+  }
+  const remoteName =
+    typeof action.remoteName === "string" && action.remoteName.length > 0
+      ? action.remoteName
+      : "origin";
+  const branchName =
+    typeof action.branchName === "string" && action.branchName.length > 0
+      ? action.branchName
+      : null;
+  const targetBranch =
+    typeof action.targetBranch === "string" && action.targetBranch.length > 0
+      ? action.targetBranch
+      : branchName;
+
+  if (!branchName) {
+    throw new Error("Push actions require a branch name.");
+  }
+
+  const refspec = targetBranch && targetBranch !== branchName ? `${branchName}:${targetBranch}` : branchName;
+  return ["push", remoteName, refspec];
+}
+
 export async function runGitAction({ directory, action, timeoutMs = 5000 } = {}) {
   if (typeof directory !== "string" || directory.length === 0) {
     throw new Error("A valid directory is required for git action commands.");
@@ -102,6 +133,12 @@ export async function runGitAction({ directory, action, timeoutMs = 5000 } = {})
     const { addArgs, commitArgs } = buildCommitArgs(action);
     await execGit(directory, addArgs, timeoutMs);
     const stdout = await execGit(directory, commitArgs, timeoutMs);
+    return { stdout, observedState: null };
+  }
+
+  if (action.kind === "push") {
+    const args = buildPushArgs(action);
+    const stdout = await execGit(directory, args, timeoutMs);
     return { stdout, observedState: null };
   }
 

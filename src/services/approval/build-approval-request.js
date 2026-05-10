@@ -64,6 +64,15 @@ function buildProposalFingerprint(proposal) {
   if (proposal.message) {
     parts.push(`message:${proposal.message}`);
   }
+  if (proposal.remoteName) {
+    parts.push(`remote:${proposal.remoteName}`);
+  }
+  if (proposal.branchName) {
+    parts.push(`branch:${proposal.branchName}`);
+  }
+  if (proposal.targetBranch) {
+    parts.push(`target:${proposal.targetBranch}`);
+  }
   if (Array.isArray(proposal.files) && proposal.files.length > 0) {
     parts.push(`files:${proposal.files.join(",")}`);
   }

@@ -222,8 +222,8 @@ function buildCommitExplanation(commitProposal, workflowPolicy) {
 
 function buildPushExplanation(pushProposal, workflowPolicy) {
   const fields = {
-    targetRemoteLabel: redactRemoteLabel(pushProposal?.remote),
-    targetBranchLabel: redactBranchLabel(pushProposal?.branch),
+    targetRemoteLabel: redactRemoteLabel(pushProposal?.remote ?? pushProposal?.remoteName),
+    targetBranchLabel: redactBranchLabel(pushProposal?.branch ?? pushProposal?.branchName),
     finalizationMode: workflowPolicy?.finalization || null,
   };
 

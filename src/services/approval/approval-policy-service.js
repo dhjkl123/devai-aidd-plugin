@@ -39,12 +39,14 @@ export function getPendingApproval(state) {
  *   1. initProposal
  *   2. branchProposal
  *   3. commitProposal
+ *   4. pushProposal
  *
  * @param {{
  *   pendingActions?: Array<{ proposal?: object } | null>,
  *   initProposal?: object | null,
  *   branchProposal?: object | null,
- *   commitProposal?: object | null
+ *   commitProposal?: object | null,
+ *   pushProposal?: object | null
  * }} state
  * @returns {object | null}
  */
@@ -76,7 +78,10 @@ export function selectNextPlannedAction(state) {
     return state.commitProposal;
   }
 
-  // Future: pushProposal (Story 3.3)
+  // Priority 4: pushProposal (Story 3.3)
+  if (state.pushProposal && typeof state.pushProposal === "object") {
+    return state.pushProposal;
+  }
 
   return null;
 }
