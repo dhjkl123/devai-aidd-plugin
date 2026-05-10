@@ -30,9 +30,18 @@ export function normalizeTrackedFilePath(filePath, repositoryRoot = null) {
   }
 
   normalized = normalizeSeparators(normalized).replace(/^\.\//, "");
-  while (normalized.startsWith("../")) {
-    normalized = normalized.slice(3);
+
+  // Story 3.1 review (MEDIUM): paths that resolve outside the repository
+  // root must NOT be coerced into in-repo-looking relatives. Prior code
+  // stripped leading `../` prefixes one slice at a time, which silently
+  // converted `/some/other/repo/file.js` into `some/other/repo/file.js`
+  // and then classified it as in-repo. Reject any traversal-prefixed
+  // result instead so finalization detection only ever considers files
+  // genuinely beneath the repository root.
+  if (normalized.startsWith("../") || normalized === "..") {
+    return null;
   }
+
   return normalized.length > 0 ? normalized : null;
 }
 

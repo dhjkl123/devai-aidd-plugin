@@ -5,7 +5,7 @@ import {
   normalizeTrackedFileEntry,
 } from "./finalization-artifacts.js";
 
-function extractChangedFiles(input, output, pluginContext) {
+function extractChangedFiles(input, output, pluginContext, workflowPolicy) {
   const fallbackFiles = [];
 
   if (Array.isArray(output?.changedFiles)) {
@@ -18,7 +18,21 @@ function extractChangedFiles(input, output, pluginContext) {
     fallbackFiles.push(...input.args.changedFiles);
   }
 
-  if (fallbackFiles.length === 0 && typeof pluginContext?.listChangedFiles === "function") {
+  // Story 3.1 review (HIGH): singleton artifact policies must NOT use the
+  // repo-wide `git status` fallback. Otherwise a workflow whose only legit
+  // touched output is e.g. `_bmad-output/planning-artifacts/prd.md` would
+  // capture every unrelated dirty file in the repo and then flunk
+  // `artifactScopeMatches` with `artifact-scope-mismatch`. Singleton workflows
+  // are presumed to only mutate their declared artifact, so we trust
+  // session-scoped touchedFiles + explicit input/output channels exclusively.
+  const isSingletonArtifactPolicy =
+    workflowPolicy?.identityStrategy === "artifact-singleton";
+
+  if (
+    !isSingletonArtifactPolicy &&
+    fallbackFiles.length === 0 &&
+    typeof pluginContext?.listChangedFiles === "function"
+  ) {
     try {
       const pluginFiles = pluginContext.listChangedFiles();
       if (Array.isArray(pluginFiles)) {
@@ -67,7 +81,7 @@ export async function evaluateWorkflowFinalization({
     (Array.isArray(finishedState.touchedFiles) ? finishedState.touchedFiles : [])
       .map((entry) => normalizeTrackedFileEntry(entry, pluginContext?.directory))
       .filter(Boolean),
-    extractChangedFiles(input, output, pluginContext)
+    extractChangedFiles(input, output, pluginContext, workflowPolicy)
       .map((entry) => normalizeTrackedFileEntry(entry, pluginContext?.directory))
       .filter(Boolean),
   );
@@ -105,6 +119,11 @@ export async function evaluateWorkflowFinalization({
     commitProposal,
   });
 
+  // Story 3.1 review (HIGH): audit is best-effort. A throwing audit sink
+  // must NEVER abort the finish path — finalization assessment is already
+  // persisted to workflowState by this point, and downstream stories
+  // (3.2 commit, 3.3 push) depend on it being available regardless of the
+  // audit channel's health.
   if (audit) {
     const eventBase = {
       timestamp: new Date().toISOString(),
@@ -116,36 +135,48 @@ export async function evaluateWorkflowFinalization({
         ...assessment.details,
       },
     };
-    await audit.info("workflow.finalization.evaluated", {
-      event: "workflow.finalization.evaluated",
-      ...eventBase,
-    });
-    await audit.info(
-      assessment.details?.hasFinalizableOutputs
-        ? "git.finalization.outputs.detected"
-        : "git.finalization.outputs.skipped",
-      {
-        event: assessment.details?.hasFinalizableOutputs
+    try {
+      await audit.info("workflow.finalization.evaluated", {
+        event: "workflow.finalization.evaluated",
+        ...eventBase,
+      });
+    } catch {
+      // best-effort
+    }
+    try {
+      await audit.info(
+        assessment.details?.hasFinalizableOutputs
           ? "git.finalization.outputs.detected"
           : "git.finalization.outputs.skipped",
-        ...eventBase,
-      },
-    );
-    if (commitProposal) {
-      await audit.info("git.action.planned", {
-        event: "git.action.planned",
-        timestamp: new Date().toISOString(),
-        workflow: workflowContext.commandName,
-        command: workflowContext.commandName,
-        outcome: "allow",
-        details: {
-          kind: "commit",
-          action: "commit",
-          requiresApproval: true,
-          fileCount: commitProposal.files.length,
-          artifactScope: commitProposal.artifactScope,
+        {
+          event: assessment.details?.hasFinalizableOutputs
+            ? "git.finalization.outputs.detected"
+            : "git.finalization.outputs.skipped",
+          ...eventBase,
         },
-      });
+      );
+    } catch {
+      // best-effort
+    }
+    if (commitProposal) {
+      try {
+        await audit.info("git.action.planned", {
+          event: "git.action.planned",
+          timestamp: new Date().toISOString(),
+          workflow: workflowContext.commandName,
+          command: workflowContext.commandName,
+          outcome: "allow",
+          details: {
+            kind: "commit",
+            action: "commit",
+            requiresApproval: true,
+            fileCount: commitProposal.files.length,
+            artifactScope: commitProposal.artifactScope,
+          },
+        });
+      } catch {
+        // best-effort
+      }
     }
   }
 

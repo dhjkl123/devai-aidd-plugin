@@ -1,6 +1,6 @@
 # Story 3.1: 완료 가능한 워크플로우 출력 감지
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -67,12 +67,19 @@ Status: in-progress
 
 ### Review Follow-ups (AI)
 
-- [ ] [AI-Review][HIGH] `src/services/workflow/evaluate-workflow-finalization.js`에서 audit sink 실패를 best-effort로 삼켜 finish 경로가 예외로 중단되지 않게 수정하고 회귀 테스트를 추가한다. [src/services/workflow/evaluate-workflow-finalization.js]
-- [ ] [AI-Review][HIGH] singleton artifact workflow가 저장소 전체 dirty state 때문에 `artifact-scope-mismatch`로 오판되지 않도록 session-scoped finalization input만 사용하거나 fallback 범위를 재설계한다. [src/services/workflow/evaluate-workflow-finalization.js, src/services/workflow/detect-finalizable-outputs.js]
-- [ ] [AI-Review][MEDIUM] `normalizeTrackedFilePath()`가 저장소 밖 절대 경로를 내부 상대 경로처럼 받아들이지 않도록 차단하고 테스트를 추가한다. [src/services/workflow/finalization-artifacts.js]
-- [ ] [AI-Review][MEDIUM] Story 문서의 변경 이력과 실제 Git 변경 파일 목록이 일치하도록 정리한다. 특히 `sprint-status.yaml` 수정 여부 설명을 현재 상태와 맞춘다. [_bmad-output/implementation-artifacts/3-1-detect-finalizable-workflow-outputs.md]
+- [x] [AI-Review][HIGH] `src/services/workflow/evaluate-workflow-finalization.js`에서 audit sink 실패를 best-effort로 삼켜 finish 경로가 예외로 중단되지 않게 수정하고 회귀 테스트를 추가한다. [src/services/workflow/evaluate-workflow-finalization.js]
+- [x] [AI-Review][HIGH] singleton artifact workflow가 저장소 전체 dirty state 때문에 `artifact-scope-mismatch`로 오판되지 않도록 session-scoped finalization input만 사용하거나 fallback 범위를 재설계한다. [src/services/workflow/evaluate-workflow-finalization.js, src/services/workflow/detect-finalizable-outputs.js]
+- [x] [AI-Review][MEDIUM] `normalizeTrackedFilePath()`가 저장소 밖 절대 경로를 내부 상대 경로처럼 받아들이지 않도록 차단하고 테스트를 추가한다. [src/services/workflow/finalization-artifacts.js]
+- [x] [AI-Review][MEDIUM] Story 문서의 변경 이력과 실제 Git 변경 파일 목록이 일치하도록 정리한다. 특히 `sprint-status.yaml` 수정 여부 설명을 현재 상태와 맞춘다. [_bmad-output/implementation-artifacts/3-1-detect-finalizable-workflow-outputs.md]
 
- - [ ] [AI-Review][MEDIUM] `listChangedFiles()` fallback이 Git `status --short`의 C-quoted path, rename path, 공백 포함 path를 정확히 decode하도록 parser와 regression test를 보완한다. [src/index.js, src/services/workflow/evaluate-workflow-finalization.js, tests/regression.test.js]
+ - [x] [AI-Review][MEDIUM] `listChangedFiles()` fallback이 Git `status --short`의 C-quoted path, rename path, 공백 포함 path를 정확히 decode하도록 parser와 regression test를 보완한다. [src/index.js, src/services/workflow/evaluate-workflow-finalization.js, tests/regression.test.js]
+
+#### Round 2 (2026-05-10 code-review)
+
+- [x] [AI-Review][MEDIUM] Round 1 follow-up 변경분이 working tree에만 존재하고 Story 3.3 진행분과 섞여 있어 Story 3.2 Round 3 CRITICAL과 동일 패턴으로 Resolved 선언이 git 이력에 남지 않았다. R1 follow-up만 단독 commit으로 분리한다. [git status, _bmad-output/implementation-artifacts/3-1-detect-finalizable-workflow-outputs.md:Change Log]
+- [x] [AI-Review][LOW] File List Round 1 후속 분리 항목의 `src/index.js` 설명을 실제 diff(인라인 함수 제거 + import 추가)에 맞게 정확화한다. [_bmad-output/implementation-artifacts/3-1-detect-finalizable-workflow-outputs.md]
+- [x] [AI-Review][LOW] `decodeCQuotedPath`가 짝 없는 UTF-16 surrogate에 대해 invalid 3-byte UTF-8을 만들 수 있으므로 U+FFFD로 명시 치환한다. [src/services/workflow/parse-status-porcelain.js]
+- 관찰만(픽스 보류): 파서가 octal escape 1~2자리도 허용한다. git의 `quote.c`는 항상 3자리지만 spec 외 입력 수용 자체는 실용적 문제 없음. [src/services/workflow/parse-status-porcelain.js]
 
 ## Dev Notes
 
@@ -229,13 +236,20 @@ GPT-5 Codex
 
 - 2026-05-09: `bmad-create-story` 워크플로우 기준으로 Epic 3 / Story 3.1 컨텍스트 문서를 생성했다.
 - 2026-05-09: Epic 3 원문, PRD, architecture, 관련 소스/테스트, Epic 2 마지막 스토리, 최근 커밋 패턴을 반영해 구현 가드레일을 정리했다.
-- 2026-05-09: 사용자 지시에 따라 `sprint-status.yaml`을 포함한 다른 파일은 수정하지 않았고, 대상 스토리 파일만 작성했다.
+- 2026-05-09: 컨텍스트 생성 단계에서는 `sprint-status.yaml`을 수정하지 않고 본 스토리 파일만 새로 만들었다(이후 구현/리뷰 단계에서는 sprint-status.yaml의 본 스토리 상태가 ready-for-dev → in-progress → review → done 순으로 갱신된다).
 - 2026-05-09: 컨텍스트 생성 완료 - Status를 `ready-for-dev`로 설정하고 Dev Notes/Tasks/References를 구현 가능 수준으로 구체화했다.
 - 2026-05-09: `file.edited` 누적 추적, finish 단계 finalization evaluation, Git status 기반 fallback changed-files 수집 경로를 추가했다.
 - 2026-05-09: `detect-finalizable-outputs.js`와 `evaluate-workflow-finalization.js`를 추가해 정책 기반 최종화 판정을 workflow 서비스로 분리했다.
 - 2026-05-09: Story 3.1 회귀 테스트를 추가하고 `npm test` 전체 스위트를 통과시켰다.
+- 2026-05-10: ✅ Resolved review finding [HIGH]: `evaluate-workflow-finalization.js`의 audit sink 호출 3종을 try/catch로 감싸 finish 경로가 audit 실패로 중단되지 않게 보강하고 회귀 테스트(`verifyEvaluateWorkflowFinalizationSwallowsAuditFailures`)를 추가했다.
+- 2026-05-10: ✅ Resolved review finding [HIGH]: singleton artifact 정책(`identityStrategy === "artifact-singleton"`)일 때 `pluginContext.listChangedFiles()` fallback을 호출하지 않도록 가드를 추가해 저장소 전반 dirty state로 인한 `artifact-scope-mismatch` 오판을 차단했다. 회귀: `verifySingletonArtifactPolicyIgnoresRepoWideStatusFallback`.
+- 2026-05-10: ✅ Resolved review finding [MEDIUM]: `normalizeTrackedFilePath()`가 traversal 결과(`../...`, `..`)를 in-repo처럼 코어싱하지 않도록 명시적으로 null 반환. 회귀: `verifyNormalizeTrackedFilePathRejectsOutOfRepoAbsolutePath`.
+- 2026-05-10: ✅ Resolved review finding [MEDIUM]: 변경 이력과 실제 Git 파일 목록이 어긋나던 표현을 정리(컨텍스트 생성 단계 한정으로 sprint-status.yaml 미수정이라는 점, 이후 단계에서는 상태가 자연스럽게 갱신된다는 점을 명시)하고 File List에 sprint-status.yaml 갱신 사실을 추가했다.
+- 2026-05-10: ✅ Resolved review finding [MEDIUM]: `parseStatusPorcelainPaths`를 별도 모듈(`src/services/workflow/parse-status-porcelain.js`)로 분리하고 C-quoted decode(octal escape 포함), rename 양 끝점 보존, 공백 포함 경로 보존을 구현. 회귀: `verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace`.
 
 ### File List
+
+#### 본 구현
 
 - `src/hooks/command-execute-before.js`
 - `src/hooks/file-edited.js`
@@ -249,6 +263,18 @@ GPT-5 Codex
 - `src/services/workflow/workflow-state.js`
 - `tests/regression.test.js`
 
+#### Round 1 review 후속 분리
+
+- `_bmad-output/implementation-artifacts/3-1-detect-finalizable-workflow-outputs.md`
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `src/index.js` — 인라인 `parseStatusPorcelainPaths` 함수(13줄) 제거 + `src/services/workflow/parse-status-porcelain.js` import 추가
+- `src/services/workflow/evaluate-workflow-finalization.js` — audit best-effort, singleton fallback 가드
+- `src/services/workflow/finalization-artifacts.js` — out-of-repo 경로 차단
+- `src/services/workflow/parse-status-porcelain.js` — 신규 (분리된 견고한 parser)
+- `tests/regression.test.js` — Round 1 follow-up 회귀 4건
+
 ## Change Log
 
 - 2026-05-09: Story 3.1 구현 완료 - 세션별 touched file 추적, finish finalization assessment, fallback changed-files 수집, 정책 기반 최종화 판정, 감사 이벤트, 회귀 테스트를 추가했다.
+- 2026-05-10: Addressed code review round 1 findings — 5 items resolved (HIGH 2 + MEDIUM 3). audit best-effort, singleton fallback 가드, normalizeTrackedFilePath 경로 차단, parseStatusPorcelainPaths 분리/견고화(quoted/rename/whitespace/octal), 문서·File List 정리. 회귀 4건 추가, `npm test` 전체 통과(exit 0). Status in-progress → review.
+- 2026-05-10: Code review round 2 — 0 CRITICAL/HIGH, 1 MEDIUM, 2 LOW. MEDIUM은 R1 follow-up이 working tree에만 존재하고 Story 3.3 진행분과 섞여 있던 것(Story 3.2 R3 CRITICAL과 동일 패턴). R1 follow-up만 단독 commit으로 분리. LOW 2건 자동 수정(File List 설명 정확화, `decodeCQuotedPath` lone-surrogate U+FFFD 치환). `npm test` exit 0. Status review → done.

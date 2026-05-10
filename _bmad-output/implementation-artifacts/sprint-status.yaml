@@ -1,7 +1,7 @@
 ﻿# generated: 2026-05-08 00:03:13 +09:00
 # last_updated: 2026-05-10
-# last_review: 2026-05-10 (story 3-2 code-review round 4: 0 HIGH/CRITICAL/MEDIUM, 2 LOW auto-fixed (commit explanation prompt body + correlationId intent comment); preflight drift integration-path limitation noted as Epic 2 backlog; npm test exit 0; status review -> done)
-# last_dev: 2026-05-09 (story 3-2 round-3 follow-up isolated to single commit: commit pathspec, git add -A deletions, async runGitAction, randomUUID correlationId, finish-hook gate, Korean commit template, buildCommitAction warn, regression 5-case extension; story 3-3 working-tree changes preserved separately; npm test exit 0; status in-progress -> review)
+# last_review: 2026-05-10 (story 3-1 code-review round 2: 0 CRITICAL/HIGH, 1 MEDIUM (R1 follow-up uncommitted/mixed with story 3-3 — same pattern as story 3-2 round 3 CRITICAL), 2 LOW auto-fixed (File List entry accuracy + decodeCQuotedPath lone-surrogate U+FFFD); R1 follow-up isolated to single commit; npm test exit 0; status review -> done)
+# last_dev: 2026-05-10 (story 3-1 round-1 review follow-ups isolated: audit best-effort, singleton fallback gate, normalizeTrackedFilePath out-of-repo guard, parseStatusPorcelainPaths split into module with quoted/rename/whitespace/octal handling, doc/File List cleanup; +4 regression cases; npm test exit 0; status in-progress -> review)
 # last_retro: 2026-05-09 (epic-1 + epic-2 retrospectives executed in batch; epic-1-retro-2026-05-09.md + epic-2-retro-2026-05-09.md saved; epic-1 and epic-2 transitioned in-progress -> done; epic-1-retrospective and epic-2-retrospective transitioned optional -> done)
 # last_story: 2026-05-09 (stories 3-1, 3-2, 3-3, 3-4, 3-5 created in parallel via create-story workflow; statuses -> ready-for-dev)
 # project: opencode-aidd-plugin
@@ -40,8 +40,8 @@
 
 generated: 2026-05-08 00:03:13 +09:00
 last_updated: 2026-05-10
-last_dev: 2026-05-09 (story 3-2 round-3 follow-up isolated to single commit: commit pathspec, git add -A deletions, async runGitAction, randomUUID correlationId, finish-hook gate, Korean commit template, buildCommitAction warn, regression 5-case extension; story 3-3 working-tree changes preserved separately; npm test exit 0; status in-progress -> review)
-last_review: 2026-05-10 (story 3-2 code-review round 4: 0 HIGH/CRITICAL/MEDIUM, 2 LOW auto-fixed (commit explanation prompt body + correlationId intent comment); preflight drift integration-path limitation noted as Epic 2 backlog; npm test exit 0; status review -> done)
+last_dev: 2026-05-10 (story 3-1 round-1 review follow-ups isolated: audit best-effort, singleton fallback gate, normalizeTrackedFilePath out-of-repo guard, parseStatusPorcelainPaths split into module with quoted/rename/whitespace/octal handling, doc/File List cleanup; +4 regression cases; npm test exit 0; status in-progress -> review)
+last_review: 2026-05-10 (story 3-1 code-review round 2: 0 CRITICAL/HIGH, 1 MEDIUM (R1 follow-up uncommitted/mixed with story 3-3 — same pattern as story 3-2 round 3 CRITICAL), 2 LOW auto-fixed (File List entry accuracy + decodeCQuotedPath lone-surrogate U+FFFD); R1 follow-up isolated to single commit; npm test exit 0; status review -> done)
 last_retro: 2026-05-09 (epic-1 + epic-2 retrospectives executed in batch; epic-1-retro-2026-05-09.md + epic-2-retro-2026-05-09.md saved; epic-1 and epic-2 transitioned in-progress -> done; epic-1-retrospective and epic-2-retrospective transitioned optional -> done)
 last_story: 2026-05-09 (stories 3-1, 3-2, 3-3, 3-4, 3-5 created in parallel via create-story workflow; statuses -> ready-for-dev)
 project: opencode-aidd-plugin
@@ -67,7 +67,7 @@ development_status:
   epic-2-retrospective: done
 
   epic-3: in-progress
-  3-1-detect-finalizable-workflow-outputs: in-progress
+  3-1-detect-finalizable-workflow-outputs: done
   3-2-prepare-and-execute-workflow-completion-commits: done
   3-3-propose-push-only-when-a-remote-repository-is-available: in-progress
   3-4-record-approval-outcomes-and-execution-results-for-audit: ready-for-dev

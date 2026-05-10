@@ -37,6 +37,15 @@ const resolveWorkflowPolicyModuleUrl = pathToFileURL(
 const detectFinalizableOutputsModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "workflow", "detect-finalizable-outputs.js"),
 ).href;
+const evaluateWorkflowFinalizationModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "workflow", "evaluate-workflow-finalization.js"),
+).href;
+const finalizationArtifactsModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "workflow", "finalization-artifacts.js"),
+).href;
+const parseStatusPorcelainModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "workflow", "parse-status-porcelain.js"),
+).href;
 const branchServiceModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "git", "branch-service.js"),
 ).href;
@@ -8112,6 +8121,219 @@ async function verifyToolExecuteAfterFinishSkipsPublishWhenStaleBranchProposalLi
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Story 3.1 review round 1 follow-ups
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function verifyEvaluateWorkflowFinalizationSwallowsAuditFailures() {
+  const [
+    { createWorkflowStateStore },
+    { evaluateWorkflowFinalization },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?audit-throws=${Date.now()}`),
+    import(`${evaluateWorkflowFinalizationModuleUrl}?audit-throws=${Date.now()}`),
+  ]);
+
+  const store = createWorkflowStateStore();
+  store.set("s-audit-throws", {
+    sessionID: "s-audit-throws",
+    commandName: "bmad-bmm-quick-dev",
+    arguments: "",
+    detectedAt: "2026-05-10T00:00:00.000Z",
+    phase: "in-progress",
+    touchedFiles: [{ path: "src/index.js", kind: "code" }],
+  });
+
+  const failingAudit = {
+    async info() {
+      throw new Error("audit sink unavailable");
+    },
+  };
+
+  let assessment;
+  // The throwing audit sink must NOT propagate out of the finish path —
+  // assessment is already persisted to workflowState by this point and
+  // downstream stories depend on it being available regardless of audit.
+  await assert.doesNotReject(async () => {
+    assessment = await evaluateWorkflowFinalization({
+      workflowState: store,
+      sessionID: "s-audit-throws",
+      input: { tool: "finish", args: {} },
+      output: { changedFiles: ["src/index.js"] },
+      audit: failingAudit,
+      pluginContext: {
+        directory: projectRoot,
+        resolvePolicy() {
+          return {
+            outcome: "allow",
+            details: {
+              policy: {
+                category: "implementation",
+                identityStrategy: "story",
+                branchRequired: true,
+                finalization: "commit-and-push",
+              },
+            },
+          };
+        },
+      },
+    });
+  }, "audit sink failure must not surface from evaluateWorkflowFinalization");
+
+  assert.ok(assessment, "assessment must still be returned when audit throws");
+  const persisted = store.get("s-audit-throws");
+  assert.ok(persisted.finalizationAssessment, "finalizationAssessment must be persisted even when audit throws");
+  assert.ok(persisted.commitProposal, "commitProposal must still be generated when audit throws");
+}
+
+async function verifySingletonArtifactPolicyIgnoresRepoWideStatusFallback() {
+  const [
+    { createWorkflowStateStore },
+    { evaluateWorkflowFinalization },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?singleton-fallback=${Date.now()}`),
+    import(`${evaluateWorkflowFinalizationModuleUrl}?singleton-fallback=${Date.now()}`),
+  ]);
+
+  const store = createWorkflowStateStore();
+  // Singleton workflow with NO touched files; if the repo-wide fallback
+  // were consulted it would pull in unrelated dirty files and the policy
+  // would mis-classify the workflow as `artifact-scope-mismatch`.
+  store.set("s-singleton", {
+    sessionID: "s-singleton",
+    commandName: "bmad-bmm-create-prd",
+    arguments: "",
+    detectedAt: "2026-05-10T00:00:00.000Z",
+    phase: "in-progress",
+    touchedFiles: [],
+  });
+
+  let listChangedFilesCalls = 0;
+  await evaluateWorkflowFinalization({
+    workflowState: store,
+    sessionID: "s-singleton",
+    input: { tool: "finish", args: {} },
+    output: {},
+    audit: { async info() {} },
+    pluginContext: {
+      directory: projectRoot,
+      resolvePolicy() {
+        return {
+          outcome: "allow",
+          details: {
+            policy: {
+              category: "planning",
+              identityStrategy: "artifact-singleton",
+              artifactKey: "prd",
+              branchRequired: true,
+              finalization: "commit-optional-push",
+            },
+          },
+        };
+      },
+      listChangedFiles() {
+        listChangedFilesCalls += 1;
+        // What the repo-wide fallback would return — files entirely
+        // unrelated to the prd singleton scope.
+        return ["src/index.js", "tests/regression.test.js", "node_modules/.bin/x"];
+      },
+    },
+  });
+
+  assert.equal(
+    listChangedFilesCalls,
+    0,
+    "singleton artifact policy must NOT consult listChangedFiles fallback (would import unrelated dirty files)",
+  );
+}
+
+async function verifyNormalizeTrackedFilePathRejectsOutOfRepoAbsolutePath() {
+  const { normalizeTrackedFilePath } = await import(
+    `${finalizationArtifactsModuleUrl}?out-of-repo=${Date.now()}`
+  );
+
+  const repoRoot = path.join(os.tmpdir(), "fake-repo");
+  const outsideAbsolute = path.join(os.tmpdir(), "other-repo", "leak.js");
+
+  assert.equal(
+    normalizeTrackedFilePath(outsideAbsolute, repoRoot),
+    null,
+    "absolute path outside the repository root must NOT be coerced into an in-repo-looking relative",
+  );
+
+  // Sanity: a path inside the repo still normalizes correctly.
+  const insideAbsolute = path.join(repoRoot, "src", "index.js");
+  assert.equal(
+    normalizeTrackedFilePath(insideAbsolute, repoRoot),
+    "src/index.js",
+    "absolute path inside the repository root must still produce the expected relative",
+  );
+
+  // Direct `../...` traversal strings are also rejected.
+  assert.equal(
+    normalizeTrackedFilePath("../../etc/passwd", repoRoot),
+    null,
+    "explicit traversal-prefixed path must be rejected as out-of-repo",
+  );
+}
+
+async function verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace() {
+  const { parseStatusPorcelainPaths } = await import(
+    `${parseStatusPorcelainModuleUrl}?status-parse=${Date.now()}`
+  );
+
+  // A quoted path containing a backslash + double-quote escape decodes
+  // back to its literal byte sequence. Git emits this when
+  // `core.quotePath=true` (the default) and the path has special chars.
+  assert.deepEqual(
+    parseStatusPorcelainPaths('?? "weird \\"name\\".js"\n'),
+    ['weird "name".js'],
+    "C-quoted path with escaped double quotes must decode to its literal form",
+  );
+
+  // Rename lines yield BOTH endpoints so Story 3.2's pathspec can stage the
+  // deletion (old) and addition (new) atomically.
+  assert.deepEqual(
+    parseStatusPorcelainPaths("R  src/old.js -> src/new.js\n"),
+    ["src/old.js", "src/new.js"],
+    "rename line must expand to both old and new paths",
+  );
+
+  // Path with embedded whitespace — the previous parser stripped it via
+  // `.trim()` on the payload. The corrected parser preserves every byte
+  // after the 3-char status prefix verbatim.
+  assert.deepEqual(
+    parseStatusPorcelainPaths(" M spaced/ leading.js\n"),
+    ["spaced/ leading.js"],
+    "path with significant embedded whitespace must be preserved (no trim)",
+  );
+
+  // C-quoted UTF-8 octal sequence — git encodes non-ASCII bytes as octal
+  // when `core.quotePath=true`. The decoder must reassemble UTF-8.
+  // "한글" in UTF-8: e9 95 9c eb b6 84? Actually 한 = e6 95 9c (no, 한=ED 95 9C). Let's verify:
+  //   "한" is U+D55C; UTF-8 = ED 95 9C → octal: \355\225\234
+  //   "글" is U+AE00; UTF-8 = EA B8 80 → octal: \352\270\200
+  assert.deepEqual(
+    parseStatusPorcelainPaths('?? "\\355\\225\\234\\352\\270\\200.md"\n'),
+    ["한글.md"],
+    "octal-escaped UTF-8 path must decode back to its original characters",
+  );
+
+  // Multi-line, mixed-status output: untracked, staged, modified, rename.
+  const stdout = [
+    "?? new.js",
+    "M  src/index.js",
+    " M tests/regression.test.js",
+    "R  src/old.js -> src/new.js",
+    "",
+  ].join("\n");
+  assert.deepEqual(
+    parseStatusPorcelainPaths(stdout),
+    ["new.js", "src/index.js", "tests/regression.test.js", "src/old.js", "src/new.js"],
+    "multi-line porcelain output must yield every changed path including rename endpoints",
+  );
+}
+
 main()
   .then(() => verifyBootstrapFailureShape())
   .then(() => verifyMissingLegacyBootstrapDependencyFails())
@@ -8227,6 +8449,11 @@ main()
   .then(() => verifyDocsOnlyFinalizationSummarizesByDocumentKinds())
   .then(() => verifyOutOfScopeOnlyFinalizationDoesNotPublishCommit())
   .then(() => verifyToolExecuteAfterFinishSkipsPublishWhenStaleBranchProposalLingers())
+  // Story 3.1 review round 1 follow-ups
+  .then(() => verifyEvaluateWorkflowFinalizationSwallowsAuditFailures())
+  .then(() => verifySingletonArtifactPolicyIgnoresRepoWideStatusFallback())
+  .then(() => verifyNormalizeTrackedFilePathRejectsOutOfRepoAbsolutePath())
+  .then(() => verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;

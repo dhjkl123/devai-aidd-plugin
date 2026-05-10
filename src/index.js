@@ -18,6 +18,7 @@ import { createFileEditedHook } from "./hooks/file-edited.js";
 import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-policy.js";
 import { runGitAction, runGitCommand } from "./services/git/run-git-command.js";
 import { buildRecoveryPrompt } from "./services/approval/build-recovery-prompt.js";
+import { parseStatusPorcelainPaths } from "./services/workflow/parse-status-porcelain.js";
 
 const SUPPORTED_RUNTIME = "Node.js ESM plugin runtime (Node 22 target)";
 
@@ -29,21 +30,6 @@ function assertBootstrapEnvironment({ client, directory }) {
   if (!client || typeof client !== "object") {
     throw new Error("A valid runtime client is required.");
   }
-}
-
-function parseStatusPorcelainPaths(stdout) {
-  return String(stdout || "")
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter(Boolean)
-    .map((line) => {
-      const payload = line.slice(3).trim();
-      if (payload.includes(" -> ")) {
-        return payload.split(" -> ").at(-1)?.trim() || null;
-      }
-      return payload || null;
-    })
-    .filter(Boolean);
 }
 
 export async function DevaiAiddGuardPlugin({ client, directory }) {
