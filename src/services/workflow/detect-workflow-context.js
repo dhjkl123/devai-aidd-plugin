@@ -1,10 +1,12 @@
 /**
- * @typedef {'start'|'in-progress'|'finish'} WorkflowPhase
- * 'finish' is a reserved phase value; downstream stories (3.1+) set it.
+ * @typedef {'start'|'in-progress'|'mutating'|'finish'} WorkflowPhase
+ * 'mutating' is set by `tool.execute.after` when a mutating tool ran on a
+ * tracked workflow session. 'finish' is a reserved phase value; downstream
+ * stories (3.1+) set it.
  */
 
 /** Frozen list of valid workflow phases — single source of truth for runtime checks. */
-export const WORKFLOW_PHASES = Object.freeze(["start", "in-progress", "finish"]);
+export const WORKFLOW_PHASES = Object.freeze(["start", "in-progress", "mutating", "finish"]);
 
 /**
  * @typedef {{

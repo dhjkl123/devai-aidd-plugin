@@ -25,13 +25,6 @@ import path from "node:path";
  *     self-reference (its `files[]` array still enumerates the 7 published
  *     files only) — the manifest entry lives in `checksums.txt` exclusively
  *     to support the installer integrity check.
- *   - `templates/legacy-opencode-aidd-plugin.json` is INTENTIONALLY EXCLUDED
- *     from release artifacts. The legacy compatibility bridge (Story 4.2,
- *     `src/services/compat/legacy-bridge-service.js`) derives that file at
- *     runtime from the modern project config, so shipping it as a template
- *     would produce a stale baseline. Do not add it back without updating
- *     Story 4.2's bridge ownership semantics.
- *
  * Verify-first / mutate-release-tree-only-after-validation: pre-flight
  * validation runs BEFORE any directory creation or file copy so that a
  * missing source file fails fast with a maintainer-friendly message

@@ -7,9 +7,6 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const projectRoot = process.cwd();
-const legacyModuleUrl = pathToFileURL(
-  path.join(projectRoot, "src", "policies", "legacy", "devai-git-workflo.js"),
-).href;
 const wrapperModuleUrl = pathToFileURL(path.join(projectRoot, "src", "index.js")).href;
 const workflowStateModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "workflow", "workflow-state.js"),
@@ -83,18 +80,8 @@ const buildRecoveryOptionsModuleUrl = pathToFileURL(
 const recoveryOrchestratorModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "approval", "recovery-orchestrator.js"),
 ).href;
-const legacyBridgeServiceModuleUrl = pathToFileURL(
-  path.join(projectRoot, "src", "services", "compat", "legacy-bridge-service.js"),
-).href;
 const builtModulePath = path.join(projectRoot, "dist", "devai-aidd-plugin.js");
 const builtModuleUrl = pathToFileURL(builtModulePath).href;
-const legacyModulePath = path.join(
-  projectRoot,
-  "src",
-  "policies",
-  "legacy",
-  "devai-git-workflo.js",
-);
 
 // Story 4.5 R2 (H-1 mitigation): accept injected dependencies so the
 // regression-gate meta-guard (`verifyStory45RegressionGateAbortsWithoutBuiltArtifact`)
@@ -162,56 +149,6 @@ function createGitWorkspace({ initialize = false, withRemote = false } = {}) {
   return tempRoot;
 }
 
-function verifyLegacyBootstrapDependencyPath() {
-  assert.equal(
-    fs.existsSync(legacyModulePath),
-    true,
-    "restored legacy bootstrap entry is missing at src/policies/legacy/devai-git-workflo.js",
-  );
-}
-
-function verifyMissingLegacyBootstrapDependencyFails() {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-missing-legacy-"));
-  const fixtureRoot = path.join(tempRoot, "fixture");
-  const fixtureSrc = path.join(fixtureRoot, "src");
-  const fixtureLegacyModulePath = path.join(
-    fixtureSrc,
-    "policies",
-    "legacy",
-    "devai-git-workflo.js",
-  );
-
-  fs.mkdirSync(fixtureRoot, { recursive: true });
-  fs.cpSync(path.join(projectRoot, "src"), fixtureSrc, { recursive: true });
-  fs.rmSync(fixtureLegacyModulePath);
-
-  try {
-    execFileSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "--eval",
-        `await import(${JSON.stringify(pathToFileURL(path.join(fixtureSrc, "index.js")).href)});`,
-      ],
-      {
-        cwd: fixtureRoot,
-        stdio: "pipe",
-      },
-    );
-    assert.fail("bootstrap import should fail when the restored legacy dependency is missing");
-  } catch (error) {
-    assert.notEqual(error?.status, 0, "missing legacy dependency should cause node import failure");
-    const stderr = error?.stderr?.toString?.() || "";
-    assert.match(stderr, /ERR_MODULE_NOT_FOUND/, "missing legacy dependency should fail as an import error");
-    assert.match(
-      stderr,
-      /devai-git-workflo\.js/,
-      "missing legacy dependency should identify the restored legacy bootstrap path",
-    );
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-}
 
 async function instantiate(pluginFactory, directory) {
   const mock = createMockClient();
@@ -311,64 +248,49 @@ function normalizeOutputParts(parts) {
 }
 
 async function main() {
-  verifyLegacyBootstrapDependencyPath();
   verifyBuiltArtifactExists();
 
-  const legacyModule = await import(legacyModuleUrl);
   const wrapperModule = await import(wrapperModuleUrl);
   const builtModule = await import(`${builtModuleUrl}?t=${Date.now()}`);
 
-  const legacyWorkspace = createTempWorkspace();
   const wrapperWorkspace = createTempWorkspace();
   const builtWorkspace = createTempWorkspace();
   try {
-    const legacy = await instantiate(legacyModule.DevaiGitWorkflowPlugin, legacyWorkspace);
     const wrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
     const built = await instantiate(
-      builtModule.DevaiAiddGuardPlugin || builtModule.DevaiGitWorkflowPlugin || builtModule.default,
+      builtModule.DevaiAiddGuardPlugin || builtModule.default,
       builtWorkspace,
     );
 
-    for (const instance of [legacy, wrapper, built]) {
+    for (const instance of [wrapper, built]) {
       assert.equal(typeof instance.handlers["command.execute.before"], "function");
       assert.equal(typeof instance.handlers["tool.execute.before"], "function");
       assert.equal(typeof instance.handlers["tool.execute.after"], "function");
       assert.equal(typeof instance.handlers.event, "function");
-    }
-    for (const instance of [wrapper, built]) {
       assert.equal(typeof instance.handlers["permission.asked"], "function");
       assert.equal(typeof instance.handlers["file.edited"], "function");
     }
 
-    const legacyCommand = await runCommandExecuteBefore(legacy.handlers);
     const wrapperCommand = await runCommandExecuteBefore(wrapper.handlers);
     const builtCommand = await runCommandExecuteBefore(built.handlers);
 
     assert.deepEqual(
-      normalizeOutputParts(wrapperCommand.output.parts),
-      normalizeOutputParts(legacyCommand.output.parts),
-      "wrapper command.execute.before output differs from legacy",
-    );
-    assert.deepEqual(
       normalizeOutputParts(builtCommand.output.parts),
-      normalizeOutputParts(legacyCommand.output.parts),
-      "built command.execute.before output differs from legacy",
+      normalizeOutputParts(wrapperCommand.output.parts),
+      "built command.execute.before output differs from wrapper",
     );
 
-    // Story 2.1: wrapper and built now emit approval prompts (legacy does not).
-    // Parity is asserted between wrapper and built — not against legacy which
-    // has no approval layer.
+    // Story 2.1: wrapper and built emit approval prompts. Parity asserted
+    // between wrapper and built.
     assert.deepEqual(
       built.mock.prompts.map(summarizePrompt),
       wrapper.mock.prompts.map(summarizePrompt),
       "built prompts differ from wrapper (approval prompt parity)",
     );
 
-    await runToolReadBefore(legacy.handlers);
     await runToolReadBefore(wrapper.handlers);
     await runToolReadBefore(built.handlers);
 
-    const legacyError = await runToolMutatingBefore(legacy.handlers);
     const wrapperError = await runToolMutatingBefore(wrapper.handlers);
     const builtError = await runToolMutatingBefore(built.handlers);
 
@@ -378,8 +300,7 @@ async function main() {
     await runFileEdited(wrapper.handlers);
     await runFileEdited(built.handlers);
 
-    assert.equal(wrapperError?.message, legacyError?.message, "wrapper mutating-tool error differs");
-    assert.equal(builtError?.message, legacyError?.message, "built mutating-tool error differs");
+    assert.equal(builtError?.message, wrapperError?.message, "built mutating-tool error differs from wrapper");
 
     // ── Non-workflow command path ───────────────────────────────────────────
     const freshWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
@@ -569,7 +490,7 @@ async function main() {
       detectedAt: "2026-05-08T00:00:00.000Z",
       phase: "start",
     });
-    const afterDirectHook = createToolExecuteAfterHook({}, { workflowState: afterDirectStore });
+    const afterDirectHook = createToolExecuteAfterHook({ workflowState: afterDirectStore });
     await afterDirectHook(
       { sessionID: "s-after-direct", tool: "read", args: {} },
       { args: {} },
@@ -677,33 +598,20 @@ async function main() {
     assert.equal(
       postDeleteError,
       null,
-      "session.deleted: state must be cleared so later mutating-tool calls do not trigger the legacy guard",
-    );
-
-    // ── Legacy parity still holds after refactor ───────────────────────────
-    const legacyNonWorkflowOutput = { parts: [] };
-    await legacy.handlers["command.execute.before"](
-      { command: "/non-workflow-command", arguments: "", sessionID: "session-nwf-legacy" },
-      legacyNonWorkflowOutput,
-    );
-    assert.equal(
-      legacyNonWorkflowOutput.parts.length,
-      0,
-      "legacy non-workflow command must also produce zero output parts",
+      "session.deleted: state must be cleared so later mutating-tool calls do not trigger the workflow guard",
     );
 
     const result = {
       status: "passed",
-      compared: ["legacy-vs-wrapper", "legacy-vs-built"],
-      prompts: legacy.mock.prompts.map(summarizePrompt),
-      mutatingToolError: legacyError?.message || "",
+      compared: ["wrapper-vs-built"],
+      prompts: wrapper.mock.prompts.map(summarizePrompt),
+      mutatingToolError: wrapperError?.message || "",
       wrapperLogs: wrapper.mock.logs.length,
       builtLogs: built.mock.logs.length,
     };
 
     console.log(JSON.stringify(result, null, 2));
   } finally {
-    fs.rmSync(legacyWorkspace, { recursive: true, force: true });
     fs.rmSync(wrapperWorkspace, { recursive: true, force: true });
     fs.rmSync(builtWorkspace, { recursive: true, force: true });
   }
@@ -712,7 +620,6 @@ async function main() {
 /**
  * Story 1.3: Verify config merge precedence.
  * - Project config values override global config values.
- * - Legacy files are read when no modern project file exists.
  */
 async function verifyConfigMergePrecedence() {
   const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?v=${Date.now()}`);
@@ -721,27 +628,22 @@ async function verifyConfigMergePrecedence() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-merge-"));
   const globalConfigDir = path.join(tempRoot, "global-home", ".config", "opencode");
   const projectConfigDir = path.join(tempRoot, "project", ".opencode");
-  const legacyProjectDir = path.join(tempRoot, "legacy", ".opencode");
   fs.mkdirSync(globalConfigDir, { recursive: true });
   fs.mkdirSync(projectConfigDir, { recursive: true });
-  fs.mkdirSync(legacyProjectDir, { recursive: true });
 
   try {
-    // Write global config with a known defaultType
     fs.writeFileSync(
       path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
       JSON.stringify({ branch: { defaultType: "docs" } }),
       "utf8",
     );
 
-    // Write project config that overrides defaultType
     fs.writeFileSync(
       path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }),
       "utf8",
     );
 
-    // Test 1: project overrides global
     const fakeHomedir = path.join(tempRoot, "global-home");
     const fsAdapter = {
       existsSync: fs.existsSync.bind(fs),
@@ -769,25 +671,6 @@ async function verifyConfigMergePrecedence() {
       result1.sources.hasGlobalConfig,
       true,
       "verifyConfigMergePrecedence: hasGlobalConfig must be true",
-    );
-
-    // Test 2: legacy files are read when no modern project config
-    const legacyDir = path.join(tempRoot, "legacy");
-    fs.writeFileSync(
-      path.join(legacyProjectDir, "opencode-aidd-plugin.json"),
-      JSON.stringify({ branch: { defaultType: "refactor" } }),
-      "utf8",
-    );
-    const result2 = loadRuntimeConfig(legacyDir, fsAdapter);
-    assert.equal(
-      result2.config.branch.defaultType,
-      "refactor",
-      "verifyConfigMergePrecedence: legacy project config must be read when no modern project file",
-    );
-    assert.equal(
-      result2.sources.hasLegacyProjectConfig,
-      true,
-      "verifyConfigMergePrecedence: hasLegacyProjectConfig must be true when legacy file present",
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -1252,10 +1135,9 @@ function assertBranchShapeNormalized(branch, label) {
  * Story 4.1 (Task 5): single-normalization contract.
  *
  * For every shipping config source (DEFAULT_PLUGIN_CONFIG, both jsonc
- * templates, and the legacy json template), running them through the
- * canonical normalization entry point must produce an effective
- * `branch` block whose seven required keys are all present and have
- * consistent types.
+ * templates), running them through the canonical normalization entry point
+ * must produce an effective `branch` block whose seven required keys are
+ * all present and have consistent types.
  */
 async function verifyEffectiveConfigNormalizationContract() {
   const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s41a=${Date.now()}`);
@@ -1273,11 +1155,9 @@ async function verifyEffectiveConfigNormalizationContract() {
   const globalConfigDir = path.join(tempRoot, "home", ".config", "opencode");
   const projectADir = path.join(tempRoot, "projA", ".opencode");
   const projectBDir = path.join(tempRoot, "projB", ".opencode");
-  const projectCDir = path.join(tempRoot, "projC", ".opencode");
   fs.mkdirSync(globalConfigDir, { recursive: true });
   fs.mkdirSync(projectADir, { recursive: true });
   fs.mkdirSync(projectBDir, { recursive: true });
-  fs.mkdirSync(projectCDir, { recursive: true });
 
   try {
     const globalTemplate = fs.readFileSync(
@@ -1286,10 +1166,6 @@ async function verifyEffectiveConfigNormalizationContract() {
     );
     const projectTemplate = fs.readFileSync(
       path.join(projectRoot, "templates", "devai-aidd-plugin.project.jsonc"),
-      "utf8",
-    );
-    const legacyTemplate = fs.readFileSync(
-      path.join(projectRoot, "templates", "legacy-opencode-aidd-plugin.json"),
       "utf8",
     );
 
@@ -1319,23 +1195,7 @@ async function verifyEffectiveConfigNormalizationContract() {
       "verifyEffectiveConfigNormalizationContract.projectTemplate",
     );
 
-    // Source C: legacy template only (project C — no modern jsonc)
-    fs.writeFileSync(
-      path.join(projectCDir, "opencode-aidd-plugin.json"),
-      legacyTemplate,
-      "utf8",
-    );
-    // Remove the global template effect by pointing homedir at an empty dir.
-    const fsAdapterIsolated = buildStory41FsAdapter(path.join(tempRoot, "no-home"));
-    const resultLegacy = loadRuntimeConfig(path.join(tempRoot, "projC"), fsAdapterIsolated);
-    assertBranchShapeNormalized(
-      resultLegacy.config.branch,
-      "verifyEffectiveConfigNormalizationContract.legacyTemplate",
-    );
-
-    // Cross-source consistency: the keys produced by all three paths are
-    // a strict superset of REQUIRED_BRANCH_KEYS, and types match across
-    // all three results.
+    // Cross-source consistency: types match across both results.
     for (const key of REQUIRED_BRANCH_KEYS) {
       const t = typeof resultGlobalOnly.config.branch[key];
       assert.equal(
@@ -1343,21 +1203,10 @@ async function verifyEffectiveConfigNormalizationContract() {
         t,
         `verifyEffectiveConfigNormalizationContract: branch.${key} type must agree across global vs project sources`,
       );
-      assert.equal(
-        typeof resultLegacy.config.branch[key],
-        t,
-        `verifyEffectiveConfigNormalizationContract: branch.${key} type must agree across global vs legacy sources`,
-      );
     }
 
-    // Round 2 follow-up (AI-4): Task 1.4 also requires that the templates
-    // produce the SAME effective values for the canonical branch fields
-    // when no overrides are intentionally introduced. Type-only checks
-    // would silently allow a future drift like "legacy template ships a
-    // different defaultType". Lock value equivalence on the global ↔
-    // legacy ↔ defaults axis (project template ships intentional overrides
-    // — defaultMergeTarget="main" + extra commandTypeMap entries — so we
-    // exclude project from this assertion and document the carve-out).
+    // Lock value equivalence on the global ↔ defaults axis (project template
+    // ships intentional overrides so we exclude it from this assertion).
     const VALUE_EQUIVALENT_KEYS = [
       "pattern",
       "defaultType",
@@ -1373,25 +1222,12 @@ async function verifyEffectiveConfigNormalizationContract() {
         DEFAULT_PLUGIN_CONFIG.branch[key],
         `verifyEffectiveConfigNormalizationContract: branch.${key} value must equal DEFAULT_PLUGIN_CONFIG.branch.${key} when only global template is installed`,
       );
-      assert.deepEqual(
-        resultLegacy.config.branch[key],
-        DEFAULT_PLUGIN_CONFIG.branch[key],
-        `verifyEffectiveConfigNormalizationContract: branch.${key} value must equal DEFAULT_PLUGIN_CONFIG.branch.${key} when only legacy template is installed`,
-      );
     }
 
-    // workflowPolicy must also be the canonical defaults in the global-only
-    // and legacy-only paths (neither template introduces overrides for it,
-    // and both should normalize to the same effective workflowPolicy).
     assert.deepEqual(
       resultGlobalOnly.config.workflowPolicy,
       DEFAULT_PLUGIN_CONFIG.workflowPolicy,
       "verifyEffectiveConfigNormalizationContract: global-only template must inherit DEFAULT_PLUGIN_CONFIG.workflowPolicy",
-    );
-    assert.deepEqual(
-      resultLegacy.config.workflowPolicy,
-      DEFAULT_PLUGIN_CONFIG.workflowPolicy,
-      "verifyEffectiveConfigNormalizationContract: legacy-only template must inherit DEFAULT_PLUGIN_CONFIG.workflowPolicy",
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -1975,9 +1811,6 @@ async function verifyBranchProposalIntegration() {
   const logs = [];
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
     {
-      "command.execute.before": async () => {},
-    },
-    {
       workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
       workflowState,
       branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
@@ -2122,9 +1955,6 @@ async function verifyBranchProposalIntegration() {
     const noGitLogs = [];
     const noGitWorkflowState = createWorkflowStateStore();
     const noGitHook = commandBeforeModule.createCommandExecuteBeforeHook(
-      {
-        "command.execute.before": async () => {},
-      },
       {
         workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
         workflowState: noGitWorkflowState,
@@ -2918,7 +2748,6 @@ async function verifyApprovalRequestFromBranchProposal() {
   const gitWorkspace = createGitWorkspace({ initialize: true });
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
       workflowState,
@@ -3029,7 +2858,6 @@ async function verifyApprovalRequestFromInitProposal() {
   const logs = [];
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -3120,7 +2948,6 @@ async function verifyApprovalIdempotency() {
   const logs = [];
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -3205,7 +3032,6 @@ async function verifyNoApprovalForNonWorkflowAndPlanning() {
   const logs = [];
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
       workflowState,
@@ -3281,7 +3107,6 @@ async function verifyApprovalRequestPayloadShape() {
   const workflowState = createWorkflowStateStore();
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -3340,7 +3165,7 @@ async function verifyApprovalBuiltArtifactParity() {
       directory: noGitForWrapper,
     });
 
-    const builtFactory = builtMod.DevaiAiddGuardPlugin || builtMod.DevaiGitWorkflowPlugin || builtMod.default;
+    const builtFactory = builtMod.DevaiAiddGuardPlugin || builtMod.default;
     const builtMock = createMockClient();
     const builtHandlers = await builtFactory({
       client: builtMock.client,
@@ -3419,14 +3244,8 @@ async function verifyApprovalPromptDeliveryFailureAudit() {
   const gitWorkspace = createGitWorkspace({ initialize: true });
   const workflowState = createWorkflowStateStore();
   const logs = [];
-  let legacyHandlerCalled = false;
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    {
-      "command.execute.before": async () => {
-        legacyHandlerCalled = true;
-      },
-    },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -3465,11 +3284,6 @@ async function verifyApprovalPromptDeliveryFailureAudit() {
       surfacedError,
       null,
       "verifyApprovalPromptDeliveryFailureAudit: prompt failure must NOT surface to caller (FR22)",
-    );
-    assert.equal(
-      legacyHandlerCalled,
-      true,
-      "verifyApprovalPromptDeliveryFailureAudit: legacy handler must still be invoked after prompt failure",
     );
 
     const failureLogs = logs.filter((l) => l.message === "approval.prompt.delivery.failed");
@@ -3532,7 +3346,6 @@ async function verifyPriorStateCarryOver() {
   const workflowState = createWorkflowStateStore();
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -3709,7 +3522,6 @@ async function verifyFileEditedTracksTouchedFilesAndSessionCleanup() {
   });
 
   const hook = createFileEditedHook(
-    { "file.edited": async () => {} },
     { workflowState: store, pluginContext: { directory: projectRoot } },
   );
 
@@ -3835,7 +3647,6 @@ async function verifyToolExecuteAfterFinishEvaluatesFinalization() {
 
   const events = [];
   const hook = createToolExecuteAfterHook(
-    { "tool.execute.after": async () => {} },
     {
       workflowState: store,
       audit: {
@@ -3902,7 +3713,6 @@ async function verifyToolExecuteAfterFinishPublishesCommitApproval() {
   });
 
   const hook = createToolExecuteAfterHook(
-    { "tool.execute.after": async () => {} },
     {
       workflowState: store,
       audit: {
@@ -4007,7 +3817,6 @@ async function verifyPermissionAskedAcceptExecutesCommitProposal() {
   });
 
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       audit: {
@@ -4100,7 +3909,6 @@ async function verifyPermissionAskedCommitFailureOpensRecovery() {
   });
 
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       audit: {
@@ -4198,7 +4006,6 @@ async function verifyPermissionAskedAcceptCommitPublishesPushApproval() {
   });
 
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       audit: {
@@ -4323,7 +4130,6 @@ async function verifyPermissionAskedAcceptCommitSuppressesPushWithoutRemote() {
   });
 
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       pluginContext: {
@@ -4434,7 +4240,6 @@ async function verifyPermissionAskedAcceptExecutesPushProposal() {
   });
 
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       audit: {
@@ -4573,7 +4378,6 @@ async function verifyPermissionAskedPushFailureOpensRecovery() {
   });
 
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       pluginContext: {
@@ -4642,7 +4446,6 @@ async function verifyStaleGitFieldsInvalidatedOnReentry() {
   const workflowState = createWorkflowStateStore();
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -5138,7 +4941,6 @@ async function verifyApprovalExplanationHookIntegration() {
   const prompts = [];
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -5818,7 +5620,6 @@ async function verifyCommandExecuteBeforePromotesQueueHead() {
   });
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -5917,13 +5718,7 @@ async function verifyPermissionAskedHookFlow() {
   });
 
   const logs = [];
-  let legacyCalls = 0;
   const hook = createPermissionAskedHook(
-    {
-      "permission.asked": async () => {
-        legacyCalls += 1;
-      },
-    },
     {
       workflowState: store,
       audit: {
@@ -5942,7 +5737,6 @@ async function verifyPermissionAskedHookFlow() {
     request.id,
     "unrelated permission event must not resolve approval",
   );
-  assert.equal(legacyCalls, 1, "legacy delegate must be invoked");
   assert.equal(
     logs.some((l) => l.message === "approval.resolved"),
     false,
@@ -5969,7 +5763,6 @@ async function verifyPermissionAskedHookFlow() {
   assert.equal(resolvedLogs[0].extra.outcome, "deny");
   assert.equal(skippedLogs.length, 1);
   assert.equal(skippedLogs[0].extra.details.reason, "approval-denied");
-  assert.equal(legacyCalls, 2, "legacy delegate must be invoked again");
 
   // (3) Replay same payload — already-resolved branch is idempotent (no new
   // audit events).
@@ -6090,7 +5883,6 @@ async function verifyApprovalRequestedAuditIncludesActionId() {
   const logs = [];
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -6153,7 +5945,6 @@ async function verifyApprovalRequestedAuditDetailsShape() {
   const logs = [];
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -6284,7 +6075,6 @@ async function verifyPermissionAskedHookEmitsResolutionFailedOnUnknownOutcome() 
 
   const logs = [];
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       audit: {
@@ -6360,7 +6150,6 @@ async function verifyPermissionAskedHookInjectsReasonCode() {
     });
 
     const hook = createPermissionAskedHook(
-      { "permission.asked": async () => {} },
       { workflowState: store, audit: { async info() {} } },
     );
 
@@ -6404,7 +6193,6 @@ async function verifyPermissionAskedHookInjectsReasonCode() {
     lastContinuationDecision: null,
   });
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     { workflowState: store, audit: { async info() {} } },
   );
   await hook({
@@ -6464,7 +6252,6 @@ async function verifyPermissionAskedHookIgnoresGenericActionField() {
 
   const logs = [];
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       audit: {
@@ -7947,7 +7734,7 @@ async function verifyDeniedApprovalDoesNotHardFailWorkflow() {
     const builtWorkspace = createTempWorkspace();
     try {
       const built = await instantiate(
-        builtModule.DevaiAiddGuardPlugin || builtModule.DevaiGitWorkflowPlugin || builtModule.default,
+        builtModule.DevaiAiddGuardPlugin || builtModule.default,
         builtWorkspace,
       );
       await runCommandExecuteBefore(built.handlers);
@@ -8943,7 +8730,6 @@ async function verifyToolExecuteAfterCommitFailureClassifiesAsCommitFailure() {
   });
 
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       audit: { async info() {} },
@@ -9059,7 +8845,6 @@ async function verifyDocsOnlyFinalizationSummarizesByDocumentKinds() {
   });
 
   const hook = createToolExecuteAfterHook(
-    { "tool.execute.after": async () => {} },
     {
       workflowState: store,
       audit: { async info() {} },
@@ -9138,7 +8923,6 @@ async function verifyOutOfScopeOnlyFinalizationDoesNotPublishCommit() {
   });
 
   const hook = createToolExecuteAfterHook(
-    { "tool.execute.after": async () => {} },
     {
       workflowState: store,
       audit: {
@@ -9221,7 +9005,6 @@ async function verifyToolExecuteAfterFinishSkipsPublishWhenStaleBranchProposalLi
   });
 
   const hook = createToolExecuteAfterHook(
-    { "tool.execute.after": async () => {} },
     {
       workflowState: store,
       audit: {
@@ -9507,7 +9290,6 @@ async function verifyStory34ApprovalRequestedCarriesCorrelationAxes() {
   const logs = [];
 
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
-    { "command.execute.before": async () => {} },
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
@@ -9804,7 +9586,6 @@ async function verifyStory34CommitSuccessThenPushDenyPreservesAuditChain() {
   });
 
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       audit,
@@ -10348,7 +10129,6 @@ async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability(
 
   let runnerCall = 0;
   const hook = createPermissionAskedHook(
-    { "permission.asked": async () => {} },
     {
       workflowState: store,
       audit,
@@ -10586,896 +10366,6 @@ async function verifyStory35PlanningArtifactPathRemainsInScope() {
   );
 }
 
-/**
- * Story 4.2 helper — build a sandboxed plugin workspace with a homedir-aware
- * fs adapter. Mirrors the Story 1.3 `verifyConfigMergePrecedence` pattern so
- * each Story 4.2 test creates an isolated tmp tree that maps the plugin's
- * `~/.config/opencode/...` lookups onto a captured fake home directory.
- *
- * Returns:
- *   { tempRoot, projectDir, projectConfigDir, globalConfigDir, fsAdapter }
- *
- * Caller is responsible for `fs.rmSync(tempRoot, { recursive, force })` in
- * a finally block.
- */
-function createStory42Sandbox(prefix) {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), `devai-aidd-${prefix}-`));
-  const projectDir = path.join(tempRoot, "project");
-  const projectConfigDir = path.join(projectDir, ".opencode");
-  const globalConfigDir = path.join(tempRoot, "global-home", ".config", "opencode");
-  fs.mkdirSync(projectConfigDir, { recursive: true });
-  fs.mkdirSync(globalConfigDir, { recursive: true });
-
-  const fakeHomedir = path.join(tempRoot, "global-home");
-  const fsAdapter = {
-    existsSync: fs.existsSync.bind(fs),
-    readFileSync: fs.readFileSync.bind(fs),
-    readdirSync: fs.readdirSync.bind(fs),
-    mkdirSync: fs.mkdirSync.bind(fs),
-    writeFileSync: fs.writeFileSync.bind(fs),
-    dirname: path.dirname.bind(path),
-    homedir: () => fakeHomedir,
-  };
-
-  return { tempRoot, projectDir, projectConfigDir, globalConfigDir, fsAdapter };
-}
-
-/**
- * Story 4.2 (Case A): empty workspace must produce a noop envelope and must
- * NOT create any mirror or marker files.
- */
-async function verifyStory42BridgeNoOpOnEmptyWorkspace() {
-  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-a=${Date.now()}`);
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-a=${Date.now()}`
-  );
-
-  const sandbox = createStory42Sandbox("s42-empty");
-  try {
-    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
-    const result = ensureLegacyProjectConfigCompatibility(
-      sandbox.projectDir,
-      sandbox.fsAdapter,
-      runtimeConfig,
-    );
-
-    assert.equal(
-      result.written,
-      false,
-      "verifyStory42BridgeNoOpOnEmptyWorkspace: empty workspace must not write mirrors",
-    );
-    assert.equal(
-      result.reason,
-      "no-config-sources",
-      "verifyStory42BridgeNoOpOnEmptyWorkspace: reason must be no-config-sources",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyCompatMarkerPath),
-      false,
-      "verifyStory42BridgeNoOpOnEmptyWorkspace: marker must not be created",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyProjectConfigPath),
-      false,
-      "verifyStory42BridgeNoOpOnEmptyWorkspace: legacy project mirror must not be created",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyWorkflowProjectConfigPath),
-      false,
-      "verifyStory42BridgeNoOpOnEmptyWorkspace: legacy workflow mirror must not be created",
-    );
-  } finally {
-    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * Story 4.2 (Cases B + F): user-authored legacy file (no marker) must be
- * preserved verbatim regardless of whether a modern project config also
- * exists. Locks in AC2 — compatibility support does not silently override
- * newer project-intended settings.
- */
-async function verifyStory42BridgePreservesUserLegacyWithoutMarker() {
-  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-bf=${Date.now()}`);
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-bf=${Date.now()}`
-  );
-
-  // --- Case B: legacy only, no marker -----------------------------------
-  const sandboxB = createStory42Sandbox("s42-case-b");
-  try {
-    const userLegacyContent = JSON.stringify(
-      { branch: { defaultType: "refactor" } },
-      null,
-      2,
-    );
-    const userLegacyPath = path.join(sandboxB.projectConfigDir, "opencode-aidd-plugin.json");
-    fs.writeFileSync(userLegacyPath, userLegacyContent, "utf8");
-
-    const runtimeConfig = loadRuntimeConfig(sandboxB.projectDir, sandboxB.fsAdapter);
-    const result = ensureLegacyProjectConfigCompatibility(
-      sandboxB.projectDir,
-      sandboxB.fsAdapter,
-      runtimeConfig,
-    );
-
-    assert.equal(
-      result.written,
-      false,
-      "verifyStory42BridgePreservesUserLegacyWithoutMarker[B]: must not write when marker absent",
-    );
-    assert.equal(
-      result.reason,
-      "preserve-existing-legacy",
-      "verifyStory42BridgePreservesUserLegacyWithoutMarker[B]: reason must be preserve-existing-legacy",
-    );
-    assert.equal(
-      fs.readFileSync(userLegacyPath, "utf8"),
-      userLegacyContent,
-      "verifyStory42BridgePreservesUserLegacyWithoutMarker[B]: user legacy file must be preserved byte-for-byte",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyCompatMarkerPath),
-      false,
-      "verifyStory42BridgePreservesUserLegacyWithoutMarker[B]: marker must not appear",
-    );
-  } finally {
-    fs.rmSync(sandboxB.tempRoot, { recursive: true, force: true });
-  }
-
-  // --- Case F: modern + user legacy, no marker --------------------------
-  const sandboxF = createStory42Sandbox("s42-case-f");
-  try {
-    const projectConfigContent = JSON.stringify({ branch: { defaultType: "feat" } }, null, 2);
-    fs.writeFileSync(
-      path.join(sandboxF.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
-      projectConfigContent,
-      "utf8",
-    );
-    const userLegacyContent = JSON.stringify(
-      { branch: { defaultType: "refactor" } },
-      null,
-      2,
-    );
-    const userLegacyPath = path.join(sandboxF.projectConfigDir, "opencode-aidd-plugin.json");
-    fs.writeFileSync(userLegacyPath, userLegacyContent, "utf8");
-
-    const runtimeConfig = loadRuntimeConfig(sandboxF.projectDir, sandboxF.fsAdapter);
-    const result = ensureLegacyProjectConfigCompatibility(
-      sandboxF.projectDir,
-      sandboxF.fsAdapter,
-      runtimeConfig,
-    );
-
-    assert.equal(
-      result.written,
-      false,
-      "verifyStory42BridgePreservesUserLegacyWithoutMarker[F]: must NOT silently overwrite user legacy",
-    );
-    assert.equal(
-      result.reason,
-      "preserve-user-legacy",
-      "verifyStory42BridgePreservesUserLegacyWithoutMarker[F]: reason must be preserve-user-legacy",
-    );
-    assert.equal(
-      fs.readFileSync(userLegacyPath, "utf8"),
-      userLegacyContent,
-      "verifyStory42BridgePreservesUserLegacyWithoutMarker[F]: user legacy file must remain untouched",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyCompatMarkerPath),
-      false,
-      "verifyStory42BridgePreservesUserLegacyWithoutMarker[F]: marker must not be created without ownership",
-    );
-  } finally {
-    fs.rmSync(sandboxF.tempRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * Story 4.2 (Cases C + E): once we own the bridge (marker present), the
- * mirror MUST be refreshed from the current effective config — both when
- * only a legacy file exists and when the modern + legacy pair coexist.
- */
-async function verifyStory42BridgeRefreshWhenMarkerPresent() {
-  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-ce=${Date.now()}`);
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-ce=${Date.now()}`
-  );
-
-  // --- Case C: legacy only, marker present (we own it) ------------------
-  const sandboxC = createStory42Sandbox("s42-case-c");
-  try {
-    const legacyPath = path.join(sandboxC.projectConfigDir, "opencode-aidd-plugin.json");
-    const markerPath = path.join(sandboxC.projectConfigDir, ".devai-aidd-plugin.compat.generated");
-    // Pre-existing legacy mirror (from a previous run) + marker — content
-    // intentionally stale so refresh has something to do.
-    fs.writeFileSync(
-      legacyPath,
-      JSON.stringify({ branch: { defaultType: "stale-old-value" } }, null, 2),
-      "utf8",
-    );
-    fs.writeFileSync(markerPath, "legacy marker", "utf8");
-
-    const runtimeConfig = loadRuntimeConfig(sandboxC.projectDir, sandboxC.fsAdapter);
-    const result = ensureLegacyProjectConfigCompatibility(
-      sandboxC.projectDir,
-      sandboxC.fsAdapter,
-      runtimeConfig,
-    );
-
-    assert.equal(
-      result.written,
-      true,
-      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: must refresh when we own the marker",
-    );
-    assert.equal(
-      result.reason,
-      "refresh-bridge",
-      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: reason must be refresh-bridge",
-    );
-    const refreshed = JSON.parse(fs.readFileSync(legacyPath, "utf8"));
-    // Refresh must canonicalize the mirror to the legacy reader shape:
-    // branch + workflowPolicy, derived from the resolved effective config.
-    // Even though `branch.defaultType` keeps the value the user authored
-    // ("stale-old-value" — the only signal in this test), the refresh fills
-    // in the canonical neighbours (longLivedBranches/pattern/...) and adds
-    // the workflowPolicy section the legacy reader expects.
-    assert.ok(
-      refreshed.branch && refreshed.workflowPolicy,
-      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: mirror must contain branch + workflowPolicy",
-    );
-    assert.ok(
-      Array.isArray(refreshed.branch.longLivedBranches),
-      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: mirror branch must include canonical longLivedBranches",
-    );
-    assert.equal(
-      typeof refreshed.branch.pattern,
-      "string",
-      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: mirror branch must include canonical pattern",
-    );
-    // Verify the marker file remains intact (we own it; do not delete it).
-    assert.equal(
-      fs.existsSync(markerPath),
-      true,
-      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: marker must remain after refresh",
-    );
-  } finally {
-    fs.rmSync(sandboxC.tempRoot, { recursive: true, force: true });
-  }
-
-  // --- Case E: modern + legacy + marker (refresh from modern) ------------
-  const sandboxE = createStory42Sandbox("s42-case-e");
-  try {
-    fs.writeFileSync(
-      path.join(sandboxE.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
-      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
-      "utf8",
-    );
-    const legacyPath = path.join(sandboxE.projectConfigDir, "opencode-aidd-plugin.json");
-    fs.writeFileSync(
-      legacyPath,
-      JSON.stringify({ branch: { defaultType: "stale" } }, null, 2),
-      "utf8",
-    );
-    fs.writeFileSync(
-      path.join(sandboxE.projectConfigDir, ".devai-aidd-plugin.compat.generated"),
-      "legacy marker",
-      "utf8",
-    );
-
-    const runtimeConfig = loadRuntimeConfig(sandboxE.projectDir, sandboxE.fsAdapter);
-    const result = ensureLegacyProjectConfigCompatibility(
-      sandboxE.projectDir,
-      sandboxE.fsAdapter,
-      runtimeConfig,
-    );
-
-    assert.equal(
-      result.written,
-      true,
-      "verifyStory42BridgeRefreshWhenMarkerPresent[E]: must refresh when modern + marker present",
-    );
-    assert.equal(
-      result.reason,
-      "refresh-bridge",
-      "verifyStory42BridgeRefreshWhenMarkerPresent[E]: reason must be refresh-bridge",
-    );
-    const refreshed = JSON.parse(fs.readFileSync(legacyPath, "utf8"));
-    assert.equal(
-      refreshed.branch.defaultType,
-      "feat",
-      "verifyStory42BridgeRefreshWhenMarkerPresent[E]: mirror must reflect modern projectConfig (feat)",
-    );
-  } finally {
-    fs.rmSync(sandboxE.tempRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * Story 4.2 (Case D): modern-only workspace must bootstrap both mirror
- * files plus the ownership marker on the first run.
- */
-async function verifyStory42BridgeCreatesMirrorForModernOnly() {
-  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-d=${Date.now()}`);
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-d=${Date.now()}`
-  );
-
-  const sandbox = createStory42Sandbox("s42-case-d");
-  try {
-    fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
-      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
-      "utf8",
-    );
-
-    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
-    const result = ensureLegacyProjectConfigCompatibility(
-      sandbox.projectDir,
-      sandbox.fsAdapter,
-      runtimeConfig,
-    );
-
-    assert.equal(
-      result.written,
-      true,
-      "verifyStory42BridgeCreatesMirrorForModernOnly: must bootstrap mirror on first run",
-    );
-    assert.equal(
-      result.reason,
-      "create-bridge",
-      "verifyStory42BridgeCreatesMirrorForModernOnly: reason must be create-bridge",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyProjectConfigPath),
-      true,
-      "verifyStory42BridgeCreatesMirrorForModernOnly: legacy project mirror must be created",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyWorkflowProjectConfigPath),
-      true,
-      "verifyStory42BridgeCreatesMirrorForModernOnly: legacy workflow mirror must be created",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyCompatMarkerPath),
-      true,
-      "verifyStory42BridgeCreatesMirrorForModernOnly: marker must be created",
-    );
-  } finally {
-    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * Story 4.2: a second invocation with identical effective config must skip
- * the actual `writeFileSync` calls. Envelope reports
- * `written: false, reason: "no-content-change"` so audit can distinguish a
- * "nothing to do" cycle from a true write.
- */
-async function verifyStory42BridgeWriteIsIdempotent() {
-  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-idem=${Date.now()}`);
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-idem=${Date.now()}`
-  );
-
-  const sandbox = createStory42Sandbox("s42-idem");
-  try {
-    fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
-      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
-      "utf8",
-    );
-
-    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
-
-    // First call — must create.
-    const first = ensureLegacyProjectConfigCompatibility(
-      sandbox.projectDir,
-      sandbox.fsAdapter,
-      runtimeConfig,
-    );
-    assert.equal(
-      first.written,
-      true,
-      "verifyStory42BridgeWriteIsIdempotent: first call must write",
-    );
-    assert.equal(
-      first.reason,
-      "create-bridge",
-      "verifyStory42BridgeWriteIsIdempotent: first call reason must be create-bridge",
-    );
-
-    // Capture mtime to assert idempotent skip preserves it on the second run.
-    const mirrorPath = runtimeConfig.paths.legacyProjectConfigPath;
-    const mtimeAfterFirst = fs.statSync(mirrorPath).mtimeMs;
-
-    // Second call with no change — must report no-content-change and not
-    // bump mtime. Re-read runtimeConfig to mirror the bootstrap reality
-    // where the marker was created in the first call.
-    const runtimeConfig2 = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
-    const second = ensureLegacyProjectConfigCompatibility(
-      sandbox.projectDir,
-      sandbox.fsAdapter,
-      runtimeConfig2,
-    );
-    assert.equal(
-      second.written,
-      false,
-      "verifyStory42BridgeWriteIsIdempotent: second call must skip identical content",
-    );
-    assert.equal(
-      second.reason,
-      "no-content-change",
-      "verifyStory42BridgeWriteIsIdempotent: second call reason must be no-content-change",
-    );
-    const mtimeAfterSecond = fs.statSync(mirrorPath).mtimeMs;
-    assert.equal(
-      mtimeAfterSecond,
-      mtimeAfterFirst,
-      "verifyStory42BridgeWriteIsIdempotent: mtime must be unchanged when content identical",
-    );
-  } finally {
-    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * Story 4.2 (AC2): the modern projectConfig's value MUST survive a mirror
- * refresh. Re-running `loadRuntimeConfig` after the bridge fires must yield
- * the same effective config. This is the core "no silent override" gate.
- */
-async function verifyStory42BridgePrecedenceProjectOverridesLegacy() {
-  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-prec=${Date.now()}`);
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-prec=${Date.now()}`
-  );
-
-  const sandbox = createStory42Sandbox("s42-prec");
-  try {
-    fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
-      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
-      "utf8",
-    );
-
-    // First load + bridge create — modern projectConfig wins.
-    const first = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
-    assert.equal(
-      first.config.branch.defaultType,
-      "feat",
-      "verifyStory42BridgePrecedenceProjectOverridesLegacy: modern wins on first load",
-    );
-    ensureLegacyProjectConfigCompatibility(
-      sandbox.projectDir,
-      sandbox.fsAdapter,
-      first,
-    );
-
-    // After the bridge runs, both legacy mirror files now exist with the
-    // value derived from `feat`. Re-load: the merge precedence
-    //   default → global → legacyProject → legacyWorkflow → projectConfig
-    // means projectConfig (still `feat`) MUST again win.
-    const second = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
-    assert.equal(
-      second.config.branch.defaultType,
-      "feat",
-      "verifyStory42BridgePrecedenceProjectOverridesLegacy: modern projectConfig MUST still override legacy mirrors after bridge refresh",
-    );
-
-    // Stronger guarantee: mirror values are derived FROM modern, so they are
-    // identical — but even if a hypothetical mirror were stale or mutated,
-    // projectConfig sits at the highest priority and would still win.
-    assert.equal(
-      JSON.stringify(first.config.branch),
-      JSON.stringify(second.config.branch),
-      "verifyStory42BridgePrecedenceProjectOverridesLegacy: branch config MUST be byte-identical across reloads",
-    );
-  } finally {
-    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * Story 4.2: the bridge service exposes the data the bootstrap needs to
- * build a `compat.bridge.evaluated` audit payload — `event`, `timestamp`,
- * `details.written`, `details.reason`, `details.sources`. The audit shape
- * is constructed in `src/index.js`; this test asserts the envelope from the
- * service contains everything the audit caller needs (so bootstrap is the
- * only place that owns the event name + timestamp).
- */
-async function verifyStory42BridgeAuditEventShape() {
-  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-audit=${Date.now()}`);
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-audit=${Date.now()}`
-  );
-
-  const sandbox = createStory42Sandbox("s42-audit");
-  try {
-    fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
-      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
-      "utf8",
-    );
-
-    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
-    const envelope = ensureLegacyProjectConfigCompatibility(
-      sandbox.projectDir,
-      sandbox.fsAdapter,
-      runtimeConfig,
-    );
-
-    // Build the audit payload exactly as `src/index.js` would.
-    const auditPayload = {
-      event: "compat.bridge.evaluated",
-      timestamp: new Date().toISOString(),
-      workflow: null,
-      command: null,
-      details: {
-        written: envelope.written,
-        reason: envelope.reason,
-        sources: envelope.sources,
-        markerPresent: envelope.markerPresent,
-        ...(envelope.paths ? { bridgePaths: envelope.paths } : {}),
-      },
-    };
-
-    assert.equal(
-      auditPayload.event,
-      "compat.bridge.evaluated",
-      "verifyStory42BridgeAuditEventShape: event name must be compat.bridge.evaluated",
-    );
-    assert.ok(
-      typeof auditPayload.timestamp === "string" && auditPayload.timestamp.length > 0,
-      "verifyStory42BridgeAuditEventShape: timestamp must be non-empty ISO string",
-    );
-    assert.equal(
-      typeof auditPayload.details.written,
-      "boolean",
-      "verifyStory42BridgeAuditEventShape: details.written must be boolean",
-    );
-    assert.equal(
-      typeof auditPayload.details.reason,
-      "string",
-      "verifyStory42BridgeAuditEventShape: details.reason must be string",
-    );
-    assert.ok(
-      auditPayload.details.sources &&
-        typeof auditPayload.details.sources.hasGlobalConfig === "boolean" &&
-        typeof auditPayload.details.sources.hasProjectConfig === "boolean" &&
-        typeof auditPayload.details.sources.hasLegacyProjectConfig === "boolean" &&
-        typeof auditPayload.details.sources.hasLegacyWorkflowProjectConfig === "boolean",
-      "verifyStory42BridgeAuditEventShape: details.sources must carry all four boolean flags",
-    );
-    assert.equal(
-      typeof auditPayload.details.markerPresent,
-      "boolean",
-      "verifyStory42BridgeAuditEventShape: details.markerPresent must be boolean",
-    );
-    // For the create-bridge case, paths must be in the envelope.
-    assert.ok(
-      auditPayload.details.bridgePaths &&
-        typeof auditPayload.details.bridgePaths.legacyCompatMarkerPath === "string",
-      "verifyStory42BridgeAuditEventShape: details.bridgePaths must be present on writes",
-    );
-  } finally {
-    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * Story 4.2: mirror file content MUST omit modern-only sections such as
- * `audit` so legacy readers never see configuration shapes they do not
- * understand. Reference shape: `templates/legacy-opencode-aidd-plugin.json`
- * (branch + workflowPolicy only).
- */
-async function verifyStory42BridgeMirrorOmitsAuditSection() {
-  const { loadRuntimeConfig } = await import(
-    `${loadConfigModuleUrl}?s42-shape=${Date.now()}`
-  );
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-shape=${Date.now()}`
-  );
-
-  const sandbox = createStory42Sandbox("s42-shape");
-  try {
-    fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
-      JSON.stringify(
-        {
-          branch: { defaultType: "feat" },
-          audit: { logToFile: true, logFilePath: ".opencode/audit.log" },
-        },
-        null,
-        2,
-      ),
-      "utf8",
-    );
-
-    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
-    ensureLegacyProjectConfigCompatibility(
-      sandbox.projectDir,
-      sandbox.fsAdapter,
-      runtimeConfig,
-    );
-
-    const mirror = JSON.parse(
-      fs.readFileSync(runtimeConfig.paths.legacyProjectConfigPath, "utf8"),
-    );
-    assert.equal(
-      Object.prototype.hasOwnProperty.call(mirror, "audit"),
-      false,
-      "verifyStory42BridgeMirrorOmitsAuditSection: mirror must NOT contain `audit` key",
-    );
-    assert.ok(
-      Object.prototype.hasOwnProperty.call(mirror, "branch"),
-      "verifyStory42BridgeMirrorOmitsAuditSection: mirror must contain `branch`",
-    );
-    assert.ok(
-      Object.prototype.hasOwnProperty.call(mirror, "workflowPolicy"),
-      "verifyStory42BridgeMirrorOmitsAuditSection: mirror must contain `workflowPolicy`",
-    );
-    // Symmetrically validate the workflow mirror.
-    const workflowMirror = JSON.parse(
-      fs.readFileSync(runtimeConfig.paths.legacyWorkflowProjectConfigPath, "utf8"),
-    );
-    assert.equal(
-      Object.prototype.hasOwnProperty.call(workflowMirror, "audit"),
-      false,
-      "verifyStory42BridgeMirrorOmitsAuditSection: workflow mirror must NOT contain `audit`",
-    );
-  } finally {
-    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * Story 4.2 R2 (M-1): the AC2 user-asset preservation guard MUST cover BOTH
- * legacy file variants symmetrically. The original 7-case decision table only
- * named `hasLegacyProject`; the workflow-only legacy file (devai-git-workflow.json)
- * fell into the defensive default and (a) was preserved by accident, (b) was
- * mis-labeled as `no-config-sources` in audit. This verifier locks in the
- * R2 fix for both no-modern and modern coexistence variants.
- */
-async function verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker() {
-  const { loadRuntimeConfig } = await import(
-    `${loadConfigModuleUrl}?s42-r2m1=${Date.now()}`
-  );
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-r2m1=${Date.now()}`
-  );
-
-  // Variant 1: workflow-only legacy file, NO modern, NO marker.
-  const sandbox1 = createStory42Sandbox("s42-r2m1-only");
-  try {
-    const userWorkflowContent = JSON.stringify(
-      { workflowPolicy: { "user-cmd": { category: "implementation" } } },
-      null,
-      2,
-    );
-    const userWorkflowPath = path.join(
-      sandbox1.projectConfigDir,
-      "devai-git-workflow.json",
-    );
-    fs.writeFileSync(userWorkflowPath, userWorkflowContent, "utf8");
-
-    const runtimeConfig = loadRuntimeConfig(sandbox1.projectDir, sandbox1.fsAdapter);
-    const result = ensureLegacyProjectConfigCompatibility(
-      sandbox1.projectDir,
-      sandbox1.fsAdapter,
-      runtimeConfig,
-    );
-
-    assert.equal(
-      result.written,
-      false,
-      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[only]: must not write",
-    );
-    assert.equal(
-      result.reason,
-      "preserve-existing-legacy",
-      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[only]: workflow-only legacy must be classified preserve-existing-legacy (R2 M-1: not no-config-sources)",
-    );
-    assert.equal(
-      fs.readFileSync(userWorkflowPath, "utf8"),
-      userWorkflowContent,
-      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[only]: user workflow legacy must be byte-for-byte preserved",
-    );
-  } finally {
-    fs.rmSync(sandbox1.tempRoot, { recursive: true, force: true });
-  }
-
-  // Variant 2: workflow-only legacy file + modern, NO marker.
-  const sandbox2 = createStory42Sandbox("s42-r2m1-coexist");
-  try {
-    fs.writeFileSync(
-      path.join(sandbox2.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
-      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
-      "utf8",
-    );
-    const userWorkflowContent = JSON.stringify(
-      { workflowPolicy: { "user-cmd": { category: "implementation" } } },
-      null,
-      2,
-    );
-    const userWorkflowPath = path.join(
-      sandbox2.projectConfigDir,
-      "devai-git-workflow.json",
-    );
-    fs.writeFileSync(userWorkflowPath, userWorkflowContent, "utf8");
-
-    const runtimeConfig = loadRuntimeConfig(sandbox2.projectDir, sandbox2.fsAdapter);
-    const result = ensureLegacyProjectConfigCompatibility(
-      sandbox2.projectDir,
-      sandbox2.fsAdapter,
-      runtimeConfig,
-    );
-
-    assert.equal(
-      result.written,
-      false,
-      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[coexist]: must NOT silently overwrite user workflow legacy",
-    );
-    assert.equal(
-      result.reason,
-      "preserve-user-legacy",
-      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[coexist]: workflow-only legacy + modern must be classified preserve-user-legacy (R2 M-1)",
-    );
-    assert.equal(
-      fs.readFileSync(userWorkflowPath, "utf8"),
-      userWorkflowContent,
-      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[coexist]: user workflow legacy must be untouched",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyCompatMarkerPath),
-      false,
-      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[coexist]: marker must not appear",
-    );
-  } finally {
-    fs.rmSync(sandbox2.tempRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * Story 4.2 R2 (M-3): when the marker survives but BOTH legacy mirror files
- * have been deleted, the bridge must still produce them — but the audit
- * reason MUST be `rebuild-bridge`, not `refresh-bridge`. Audit consumers
- * use this label to distinguish "in-place refresh" from "marker leftover,
- * files missing" during operational debugging.
- */
-async function verifyStory42BridgeRebuildLabelOnMarkerLeftover() {
-  const { loadRuntimeConfig } = await import(
-    `${loadConfigModuleUrl}?s42-r2m3=${Date.now()}`
-  );
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-r2m3=${Date.now()}`
-  );
-
-  const sandbox = createStory42Sandbox("s42-r2m3");
-  try {
-    fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
-      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
-      "utf8",
-    );
-    // Marker exists but the two mirror files do NOT (user `rm`'d them).
-    fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, ".devai-aidd-plugin.compat.generated"),
-      "leftover marker\n",
-      "utf8",
-    );
-
-    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
-    const result = ensureLegacyProjectConfigCompatibility(
-      sandbox.projectDir,
-      sandbox.fsAdapter,
-      runtimeConfig,
-    );
-
-    assert.equal(
-      result.written,
-      true,
-      "verifyStory42BridgeRebuildLabelOnMarkerLeftover: must rebuild the missing mirror files",
-    );
-    assert.equal(
-      result.reason,
-      "rebuild-bridge",
-      "verifyStory42BridgeRebuildLabelOnMarkerLeftover: reason must be rebuild-bridge (R2 M-3 label fix), not refresh-bridge",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyProjectConfigPath),
-      true,
-      "verifyStory42BridgeRebuildLabelOnMarkerLeftover: legacy project mirror must be re-created",
-    );
-    assert.equal(
-      fs.existsSync(runtimeConfig.paths.legacyWorkflowProjectConfigPath),
-      true,
-      "verifyStory42BridgeRebuildLabelOnMarkerLeftover: legacy workflow mirror must be re-created",
-    );
-  } finally {
-    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
-  }
-}
-
-/**
- * Story 4.2 R2 (M-2): a disk-write failure inside the bridge MUST NOT throw
- * — it must be surfaced as `{ written: false, reason: "write-failed",
- * error: <message> }` so bootstrap can continue and audit can record the
- * failure. Simulates the failure by injecting an `fsAdapter.writeFileSync`
- * that throws.
- */
-async function verifyStory42BridgeWriteFailureIsBestEffort() {
-  const { loadRuntimeConfig } = await import(
-    `${loadConfigModuleUrl}?s42-r2m2=${Date.now()}`
-  );
-  const { ensureLegacyProjectConfigCompatibility } = await import(
-    `${legacyBridgeServiceModuleUrl}?s42-r2m2=${Date.now()}`
-  );
-
-  const sandbox = createStory42Sandbox("s42-r2m2");
-  try {
-    fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
-      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
-      "utf8",
-    );
-
-    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
-
-    // Inject a failing writeFileSync to simulate EACCES / ENOSPC / EROFS.
-    const failingFsAdapter = {
-      ...sandbox.fsAdapter,
-      writeFileSync: () => {
-        const err = new Error("simulated EACCES");
-        err.code = "EACCES";
-        throw err;
-      },
-    };
-
-    let envelope;
-    let threw = null;
-    try {
-      envelope = ensureLegacyProjectConfigCompatibility(
-        sandbox.projectDir,
-        failingFsAdapter,
-        runtimeConfig,
-      );
-    } catch (e) {
-      threw = e;
-    }
-
-    assert.equal(
-      threw,
-      null,
-      "verifyStory42BridgeWriteFailureIsBestEffort: bridge MUST NOT throw on write failure (R2 M-2)",
-    );
-    assert.equal(
-      envelope.written,
-      false,
-      "verifyStory42BridgeWriteFailureIsBestEffort: envelope.written must be false on failure",
-    );
-    assert.equal(
-      envelope.reason,
-      "write-failed",
-      "verifyStory42BridgeWriteFailureIsBestEffort: envelope.reason must be write-failed",
-    );
-    assert.equal(
-      typeof envelope.error,
-      "string",
-      "verifyStory42BridgeWriteFailureIsBestEffort: envelope.error must carry the failure message",
-    );
-    assert.ok(
-      envelope.error.includes("EACCES") || envelope.error.includes("simulated"),
-      "verifyStory42BridgeWriteFailureIsBestEffort: envelope.error must be the simulated message",
-    );
-    assert.ok(
-      envelope.paths && envelope.paths.legacyCompatMarkerPath,
-      "verifyStory42BridgeWriteFailureIsBestEffort: envelope.paths must still be present so audit can record context",
-    );
-  } finally {
-    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
-  }
-}
 
 // =============================================================================
 // Story 4.4 — Build and package release artifacts reliably
@@ -12074,44 +10964,22 @@ async function verifyStory44ReleaseMissingBundleEmitsBuildHint() {
 // Naming convention: `verifyStory45<Behavior>()`. Each new invariant must
 // register one verifier function and one `main().then(() => ...)` line at the
 // chain tail, mirroring the Story 1.x → Story 4.4 cumulative pattern.
-//
-// Legacy comparison rule: hooks present in `WRAPPER_ONLY_HOOK_KEYS`
-// (`permission.asked`, `file.edited`) are validated only by wrapper↔built
-// parity; legacy does not expose them by design (see Story 4.3 frozen
-// baseline header in `src/policies/legacy/devai-git-workflo.js`). Future hooks
-// added to wrapper but absent in legacy must follow the same rule and be
-// excluded from legacy comparisons explicitly.
 
-const STORY_45_LEGACY_HOOK_KEYS = Object.freeze([
-  "command.execute.before",
-  "tool.execute.before",
-  "tool.execute.after",
-  "event",
-]);
-
-async function story45InstantiateAllThree() {
-  const legacyModule = await import(legacyModuleUrl);
+async function story45InstantiatePair() {
   const wrapperModule = await import(wrapperModuleUrl);
   const builtModule = await import(`${builtModuleUrl}?t=${Date.now()}`);
-  const builtFactory =
-    builtModule.DevaiAiddGuardPlugin ||
-    builtModule.DevaiGitWorkflowPlugin ||
-    builtModule.default;
+  const builtFactory = builtModule.DevaiAiddGuardPlugin || builtModule.default;
 
-  const legacyWorkspace = createTempWorkspace();
   const wrapperWorkspace = createTempWorkspace();
   const builtWorkspace = createTempWorkspace();
-  const legacy = await instantiate(legacyModule.DevaiGitWorkflowPlugin, legacyWorkspace);
   const wrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
   const built = await instantiate(builtFactory, builtWorkspace);
 
   return {
-    legacy,
     wrapper,
     built,
     builtModule,
     cleanup() {
-      fs.rmSync(legacyWorkspace, { recursive: true, force: true });
       fs.rmSync(wrapperWorkspace, { recursive: true, force: true });
       fs.rmSync(builtWorkspace, { recursive: true, force: true });
     },
@@ -12119,148 +10987,56 @@ async function story45InstantiateAllThree() {
 }
 
 /**
- * Story 4.5 (M-1 carried over from Story 4.3 review): assert that the hook
- * map keys returned by the wrapper and the built artifact are set-equal to
- * `SUPPORTED_HOOK_KEYS` (single-source-of-truth) and that the legacy core
- * exposes exactly the 4-key subset (`SUPPORTED_HOOK_KEYS \ WRAPPER_ONLY_HOOK_KEYS`).
- * Also asserts every key has a function-typed handler. Renaming, dropping, or
- * adding a hook key without updating the SOT constant — or vice versa — fires
- * here.
+ * Story 4.5: assert that the hook map keys returned by the wrapper and the
+ * built artifact are set-equal to `SUPPORTED_HOOK_KEYS` (single source of
+ * truth). Renaming, dropping, or adding a hook key without updating the SOT
+ * constant fires here.
  */
-async function verifyStory45LegacyWrapperBuiltHandlerShapesMatch() {
+async function verifyStory45WrapperBuiltHandlerShapesMatch() {
   const constantsModuleUrl = pathToFileURL(
     path.join(projectRoot, "src", "utils", "constants.js"),
   ).href;
-  const { SUPPORTED_HOOK_KEYS, WRAPPER_ONLY_HOOK_KEYS } = await import(constantsModuleUrl);
+  const { SUPPORTED_HOOK_KEYS } = await import(constantsModuleUrl);
 
   const sot = new Set(SUPPORTED_HOOK_KEYS);
-  const wrapperOnly = new Set(WRAPPER_ONLY_HOOK_KEYS);
-  const legacyExpected = new Set(STORY_45_LEGACY_HOOK_KEYS);
 
-  // Story 4.5 R2 (L-4 mitigation): cross-check that the local
-  // STORY_45_LEGACY_HOOK_KEYS constant equals SUPPORTED_HOOK_KEYS \ WRAPPER_ONLY_HOOK_KEYS
-  // so a future maintainer cannot extend SUPPORTED_HOOK_KEYS without also
-  // updating this verifier's legacy-expected baseline.
-  const derivedLegacyExpected = new Set(
-    SUPPORTED_HOOK_KEYS.filter((key) => !WRAPPER_ONLY_HOOK_KEYS.includes(key)),
-  );
-  assert.equal(
-    legacyExpected.size,
-    derivedLegacyExpected.size,
-    `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: STORY_45_LEGACY_HOOK_KEYS size (${legacyExpected.size}) drifted from SUPPORTED_HOOK_KEYS \\ WRAPPER_ONLY_HOOK_KEYS size (${derivedLegacyExpected.size}); update STORY_45_LEGACY_HOOK_KEYS to track the SOT`,
-  );
-  for (const key of derivedLegacyExpected) {
-    assert.equal(
-      legacyExpected.has(key),
-      true,
-      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: STORY_45_LEGACY_HOOK_KEYS is missing key "${key}" derived from SUPPORTED_HOOK_KEYS \\ WRAPPER_ONLY_HOOK_KEYS — update the local constant or the SOT`,
-    );
-  }
-  for (const key of legacyExpected) {
-    assert.equal(
-      derivedLegacyExpected.has(key),
-      true,
-      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: STORY_45_LEGACY_HOOK_KEYS contains stale key "${key}" not derivable from SUPPORTED_HOOK_KEYS \\ WRAPPER_ONLY_HOOK_KEYS`,
-    );
-  }
-
-  // M-1 helper: WRAPPER_ONLY_HOOK_KEYS ⊆ SUPPORTED_HOOK_KEYS
-  for (const key of wrapperOnly) {
-    assert.equal(
-      sot.has(key),
-      true,
-      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: WRAPPER_ONLY_HOOK_KEYS contains ${key} which is not in SUPPORTED_HOOK_KEYS — SOT drift`,
-    );
-  }
-  // legacy expectation ⊆ SUPPORTED_HOOK_KEYS, and disjoint from wrapper-only
-  for (const key of legacyExpected) {
-    assert.equal(
-      sot.has(key),
-      true,
-      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy-expected key ${key} missing from SUPPORTED_HOOK_KEYS`,
-    );
-    assert.equal(
-      wrapperOnly.has(key),
-      false,
-      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy-expected key ${key} must not appear in WRAPPER_ONLY_HOOK_KEYS`,
-    );
-  }
-  // Every SUPPORTED_HOOK_KEYS entry is either wrapper-only or legacy-expected.
-  for (const key of sot) {
-    const inWrapperOnly = wrapperOnly.has(key);
-    const inLegacy = legacyExpected.has(key);
-    assert.equal(
-      inWrapperOnly !== inLegacy,
-      true,
-      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: SOT key ${key} must be exactly one of {wrapper-only, legacy-expected}; got wrapperOnly=${inWrapperOnly}, legacy=${inLegacy}`,
-    );
-  }
-
-  const trio = await story45InstantiateAllThree();
+  const trio = await story45InstantiatePair();
   try {
-    const { legacy, wrapper, built } = trio;
+    const { wrapper, built } = trio;
 
     const wrapperKeys = new Set(Object.keys(wrapper.handlers));
     const builtKeys = new Set(Object.keys(built.handlers));
-    const legacyKeys = new Set(Object.keys(legacy.handlers));
 
-    // wrapper keys ≡ built keys ≡ SUPPORTED_HOOK_KEYS (set equality)
     assert.equal(
       wrapperKeys.size,
       sot.size,
-      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: wrapper hook count ${wrapperKeys.size} differs from SUPPORTED_HOOK_KEYS count ${sot.size}`,
+      `verifyStory45WrapperBuiltHandlerShapesMatch: wrapper hook count ${wrapperKeys.size} differs from SUPPORTED_HOOK_KEYS count ${sot.size}`,
     );
     assert.equal(
       builtKeys.size,
       sot.size,
-      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: built hook count ${builtKeys.size} differs from SUPPORTED_HOOK_KEYS count ${sot.size}`,
+      `verifyStory45WrapperBuiltHandlerShapesMatch: built hook count ${builtKeys.size} differs from SUPPORTED_HOOK_KEYS count ${sot.size}`,
     );
     for (const key of sot) {
       assert.equal(
         wrapperKeys.has(key),
         true,
-        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: wrapper missing SOT key ${key}`,
+        `verifyStory45WrapperBuiltHandlerShapesMatch: wrapper missing SOT key ${key}`,
       );
       assert.equal(
         builtKeys.has(key),
         true,
-        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: built missing SOT key ${key}`,
+        `verifyStory45WrapperBuiltHandlerShapesMatch: built missing SOT key ${key}`,
       );
       assert.equal(
         typeof wrapper.handlers[key],
         "function",
-        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: wrapper handler ${key} must be function`,
+        `verifyStory45WrapperBuiltHandlerShapesMatch: wrapper handler ${key} must be function`,
       );
       assert.equal(
         typeof built.handlers[key],
         "function",
-        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: built handler ${key} must be function`,
-      );
-    }
-
-    // legacy keys ≡ legacyExpected (4 keys, no wrapper-only)
-    assert.equal(
-      legacyKeys.size,
-      legacyExpected.size,
-      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy hook count ${legacyKeys.size} differs from expected ${legacyExpected.size}`,
-    );
-    for (const key of legacyExpected) {
-      assert.equal(
-        legacyKeys.has(key),
-        true,
-        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy missing expected key ${key}`,
-      );
-      assert.equal(
-        typeof legacy.handlers[key],
-        "function",
-        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy handler ${key} must be function`,
-      );
-    }
-    for (const key of wrapperOnly) {
-      assert.equal(
-        legacyKeys.has(key),
-        false,
-        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy must NOT expose wrapper-only key ${key} (Story 4.3 frozen baseline asymmetry)`,
+        `verifyStory45WrapperBuiltHandlerShapesMatch: built handler ${key} must be function`,
       );
     }
   } finally {
@@ -12269,34 +11045,22 @@ async function verifyStory45LegacyWrapperBuiltHandlerShapesMatch() {
 }
 
 /**
- * Story 4.5: bundle the `command.execute.before` parts-normalization parity
- * comparison into a single verifier so future drift surfaces in one place.
- * Both axes (wrapper↔legacy, built↔legacy) are exercised here. The legacy
- * comparison is the canonical baseline; built↔wrapper parity is checked
- * separately via the prompt summary verifier (legacy emits no prompt).
+ * Story 4.5: assert wrapper↔built parity for `command.execute.before` parts
+ * normalization so future bundle drift surfaces in one place.
  */
-async function verifyStory45LegacyWrapperBuiltCommandPromptParity() {
-  const trio = await story45InstantiateAllThree();
+async function verifyStory45WrapperBuiltCommandPromptParity() {
+  const trio = await story45InstantiatePair();
   try {
-    const { legacy, wrapper, built } = trio;
+    const { wrapper, built } = trio;
 
-    // Story 4.5 R2 (M-3 mitigation): unique sessionID per verifier so
-    // hypothetical shared state across trios cannot cross-contaminate.
     const sessionID = "verifyStory45-prompt-parity-cmd";
-    const legacyOut = await runCommandExecuteBefore(legacy.handlers, { sessionID });
     const wrapperOut = await runCommandExecuteBefore(wrapper.handlers, { sessionID });
     const builtOut = await runCommandExecuteBefore(built.handlers, { sessionID });
 
-    const baseline = normalizeOutputParts(legacyOut.output.parts);
-    assert.deepEqual(
-      normalizeOutputParts(wrapperOut.output.parts),
-      baseline,
-      "verifyStory45LegacyWrapperBuiltCommandPromptParity: wrapper command.execute.before parts diverged from legacy",
-    );
     assert.deepEqual(
       normalizeOutputParts(builtOut.output.parts),
-      baseline,
-      "verifyStory45LegacyWrapperBuiltCommandPromptParity: built command.execute.before parts diverged from legacy",
+      normalizeOutputParts(wrapperOut.output.parts),
+      "verifyStory45WrapperBuiltCommandPromptParity: built command.execute.before parts diverged from wrapper",
     );
   } finally {
     trio.cleanup();
@@ -12321,64 +11085,46 @@ async function verifyStory45LegacyWrapperBuiltCommandPromptParity() {
  * creations now happen inside the try{} so a partial-failure leak is
  * impossible.
  */
-async function verifyStory45LegacyWrapperBuiltMutatingToolGuardParity() {
-  const trio = await story45InstantiateAllThree();
+async function verifyStory45WrapperBuiltMutatingToolGuardParity() {
+  const trio = await story45InstantiatePair();
   try {
-    const { legacy, wrapper, built } = trio;
+    const { wrapper, built } = trio;
 
-    // Activate the workflow session for all three variants under a
-    // unique sessionID so the positive trio cannot leak state into the
-    // negative trio below.
     const positiveSessionID = "verifyStory45-mutating-positive";
-    await runCommandExecuteBefore(legacy.handlers, { sessionID: positiveSessionID });
     await runCommandExecuteBefore(wrapper.handlers, { sessionID: positiveSessionID });
     await runCommandExecuteBefore(built.handlers, { sessionID: positiveSessionID });
 
-    const legacyError = await runToolMutatingBefore(legacy.handlers, { sessionID: positiveSessionID });
     const wrapperError = await runToolMutatingBefore(wrapper.handlers, { sessionID: positiveSessionID });
     const builtError = await runToolMutatingBefore(built.handlers, { sessionID: positiveSessionID });
 
     assert.ok(
-      legacyError && legacyError.message,
-      "verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: legacy must throw mutating-tool guard error on workflow session",
-    );
-    assert.equal(
-      wrapperError?.message,
-      legacyError.message,
-      "verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: wrapper mutating-tool error message diverged from legacy",
+      wrapperError && wrapperError.message,
+      "verifyStory45WrapperBuiltMutatingToolGuardParity: wrapper must throw mutating-tool guard error on workflow session",
     );
     assert.equal(
       builtError?.message,
-      legacyError.message,
-      "verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: built mutating-tool error message diverged from legacy (esbuild minify/transform must not mutate user-visible strings)",
+      wrapperError.message,
+      "verifyStory45WrapperBuiltMutatingToolGuardParity: built mutating-tool error message diverged from wrapper (esbuild minify/transform must not mutate user-visible strings)",
     );
 
-    // ── Negative trio: must remain silent across all three variants ──
-    const legacyMod = await import(legacyModuleUrl);
+    // ── Negative cases: must remain silent on both wrapper and built ──
     const wrapperMod = await import(wrapperModuleUrl);
     const builtMod = await import(`${builtModuleUrl}?t=${Date.now()}`);
-    // L-2 mitigation: track every workspace we create and clean each in
-    // finally regardless of which creation step threw.
     const createdWorkspaces = [];
     try {
-      const negLegacyWs = createTempWorkspace();
-      createdWorkspaces.push(negLegacyWs);
       const negWrapperWs = createTempWorkspace();
       createdWorkspaces.push(negWrapperWs);
       const negBuiltWs = createTempWorkspace();
       createdWorkspaces.push(negBuiltWs);
 
-      const negLegacy = await instantiate(legacyMod.DevaiGitWorkflowPlugin, negLegacyWs);
       const negWrapper = await instantiate(wrapperMod.DevaiAiddGuardPlugin, negWrapperWs);
       const negBuilt = await instantiate(
-        builtMod.DevaiAiddGuardPlugin || builtMod.DevaiGitWorkflowPlugin || builtMod.default,
+        builtMod.DevaiAiddGuardPlugin || builtMod.default,
         negBuiltWs,
       );
 
-      // (a) "No command issued" — sessionID has zero state entries.
       const noCommandSessionID = "verifyStory45-mutating-neg-no-command";
       for (const [label, instance] of [
-        ["legacy", negLegacy],
         ["wrapper", negWrapper],
         ["built", negBuilt],
       ]) {
@@ -12388,21 +11134,13 @@ async function verifyStory45LegacyWrapperBuiltMutatingToolGuardParity() {
         assert.equal(
           err,
           null,
-          `verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: ${label} mutating-tool guard must NOT fire when no command was issued (no state entry); got error: ${err?.message}`,
+          `verifyStory45WrapperBuiltMutatingToolGuardParity: ${label} mutating-tool guard must NOT fire when no command was issued; got error: ${err?.message}`,
         );
       }
 
-      // (b) "Non-workflow command issued" — command.execute.before fired
-      //     but the command name is not in `workflowCommands`. State is
-      //     either absent (legacy) or present without workflow context
-      //     (wrapper/built); guard MUST stay silent.
-      // M-2 mitigation: this sub-case was missing in the original
-      // implementation. It is the canonical "user runs a non-bmad command"
-      // scenario and must not throw on any variant.
       const nonWorkflowSessionID = "verifyStory45-mutating-neg-nonwf-command";
       const nonWorkflowCommand = "/non-workflow-command-not-registered";
       for (const [label, instance] of [
-        ["legacy", negLegacy],
         ["wrapper", negWrapper],
         ["built", negBuilt],
       ]) {
@@ -12411,12 +11149,10 @@ async function verifyStory45LegacyWrapperBuiltMutatingToolGuardParity() {
           sessionID: nonWorkflowSessionID,
           argumentsText: "",
         });
-        // Wrapper/built: command must produce zero output parts on a
-        // non-workflow command (legacy implements the same contract).
         assert.equal(
           (nonWorkflowOutput.parts || []).length,
           0,
-          `verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: ${label} non-workflow command must produce zero output parts; got ${(nonWorkflowOutput.parts || []).length}`,
+          `verifyStory45WrapperBuiltMutatingToolGuardParity: ${label} non-workflow command must produce zero output parts; got ${(nonWorkflowOutput.parts || []).length}`,
         );
         const err = await runToolMutatingBefore(instance.handlers, {
           sessionID: nonWorkflowSessionID,
@@ -12424,7 +11160,7 @@ async function verifyStory45LegacyWrapperBuiltMutatingToolGuardParity() {
         assert.equal(
           err,
           null,
-          `verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: ${label} mutating-tool guard must NOT fire after a non-workflow command (no workflow state registered); got error: ${err?.message}`,
+          `verifyStory45WrapperBuiltMutatingToolGuardParity: ${label} mutating-tool guard must NOT fire after a non-workflow command; got error: ${err?.message}`,
         );
       }
     } finally {
@@ -12447,16 +11183,13 @@ async function verifyStory45LegacyWrapperBuiltMutatingToolGuardParity() {
  */
 async function verifyStory45BuiltArtifactExportContract() {
   const builtModule = await import(`${builtModuleUrl}?t=${Date.now()}`);
-  const candidates = ["DevaiAiddGuardPlugin", "DevaiGitWorkflowPlugin", "default"];
+  const candidates = ["DevaiAiddGuardPlugin", "default"];
   const present = candidates.filter((name) => typeof builtModule[name] === "function");
   assert.ok(
     present.length > 0,
     `verifyStory45BuiltArtifactExportContract: built artifact must export at least one of ${JSON.stringify(candidates)} as a function; got keys: ${Object.keys(builtModule).join(", ")}`,
   );
-  const factory =
-    builtModule.DevaiAiddGuardPlugin ||
-    builtModule.DevaiGitWorkflowPlugin ||
-    builtModule.default;
+  const factory = builtModule.DevaiAiddGuardPlugin || builtModule.default;
   assert.equal(
     typeof factory,
     "function",
@@ -12468,7 +11201,6 @@ async function verifyStory45BuiltArtifactExportContract() {
     `verifyStory45BuiltArtifactExportContract: resolved factory must accept exactly 1 destructured argument; got arity ${factory.length}`,
   );
 
-  // Wrapper signature parity: same arity expected.
   const wrapperModule = await import(wrapperModuleUrl);
   assert.equal(
     typeof wrapperModule.DevaiAiddGuardPlugin,
@@ -12480,21 +11212,6 @@ async function verifyStory45BuiltArtifactExportContract() {
     factory.length,
     `verifyStory45BuiltArtifactExportContract: wrapper factory arity (${wrapperModule.DevaiAiddGuardPlugin.length}) must match built factory arity (${factory.length})`,
   );
-
-  // Legacy alias preservation (FR29): if `DevaiGitWorkflowPlugin` exists in
-  // wrapper (it does — re-exported), it must also exist (or default-fall) in
-  // built. This catches accidental drop of the legacy alias from packaging.
-  if (typeof wrapperModule.DevaiGitWorkflowPlugin === "function") {
-    const legacyAliasResolvable =
-      typeof builtModule.DevaiGitWorkflowPlugin === "function" ||
-      typeof builtModule.default === "function" ||
-      typeof builtModule.DevaiAiddGuardPlugin === "function";
-    assert.equal(
-      legacyAliasResolvable,
-      true,
-      "verifyStory45BuiltArtifactExportContract: legacy alias DevaiGitWorkflowPlugin compatibility must remain resolvable in built artifact",
-    );
-  }
 }
 
 /**
@@ -12511,7 +11228,7 @@ async function verifyStory45BuiltArtifactExportContract() {
  * vacuously — the very drift this verifier exists to catch.
  */
 async function verifyStory45BuiltArtifactPromptParityWithWrapper() {
-  const trio = await story45InstantiateAllThree();
+  const trio = await story45InstantiatePair();
   try {
     const { wrapper, built } = trio;
     const promptSessionID = "verifyStory45-prompt-parity";
@@ -12729,9 +11446,469 @@ async function verifyStory45SrcIndexAuditEventListMatchesEmissions() {
   }
 }
 
+// =============================================================================
+// BREAKING CHANGE — legacy compatibility removal verifiers (AC1~AC8, AC13~AC15)
+// =============================================================================
+
+function buildLegacyRemovalFsAdapter(homedirPath) {
+  return {
+    existsSync: fs.existsSync.bind(fs),
+    readFileSync: fs.readFileSync.bind(fs),
+    readdirSync: fs.readdirSync.bind(fs),
+    mkdirSync: fs.mkdirSync.bind(fs),
+    writeFileSync: fs.writeFileSync.bind(fs),
+    dirname: path.dirname.bind(path),
+    homedir: () => homedirPath,
+  };
+}
+
+/**
+ * AC1: `Object.keys(loadRuntimeConfig(...).sources).sort()` is exactly
+ * `["hasGlobalConfig", "hasProjectConfig"]` and both values are boolean.
+ */
+async function verifySourcesShapeIsExactlyTwoBooleans() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?ac1=${Date.now()}`);
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-ac1-"));
+  try {
+    const projectDir = path.join(tempRoot, "project");
+    const projectConfigDir = path.join(projectDir, ".opencode");
+    const globalConfigDir = path.join(tempRoot, "home", ".config", "opencode");
+    fs.mkdirSync(projectConfigDir, { recursive: true });
+    fs.mkdirSync(globalConfigDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
+      JSON.stringify({ branch: { defaultType: "docs" } }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }),
+      "utf8",
+    );
+
+    const fsAdapter = buildLegacyRemovalFsAdapter(path.join(tempRoot, "home"));
+    const result = loadRuntimeConfig(projectDir, fsAdapter);
+
+    const keys = Object.keys(result.sources).sort();
+    assert.deepEqual(
+      keys,
+      ["hasGlobalConfig", "hasProjectConfig"],
+      `verifySourcesShapeIsExactlyTwoBooleans: sources keys must be exactly ["hasGlobalConfig", "hasProjectConfig"]; got ${JSON.stringify(keys)}`,
+    );
+    assert.equal(
+      typeof result.sources.hasGlobalConfig,
+      "boolean",
+      "verifySourcesShapeIsExactlyTwoBooleans: hasGlobalConfig must be boolean",
+    );
+    assert.equal(
+      typeof result.sources.hasProjectConfig,
+      "boolean",
+      "verifySourcesShapeIsExactlyTwoBooleans: hasProjectConfig must be boolean",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * AC2: legacy files are completely ignored. Control fixture (modern only) and
+ * experiment fixture (modern + 3 legacy files) must produce deepEqual config.
+ */
+async function verifyLegacyFilesIgnored() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?ac2=${Date.now()}`);
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-ac2-"));
+  try {
+    const controlDir = path.join(tempRoot, "control");
+    const experimentDir = path.join(tempRoot, "experiment");
+    const controlConfigDir = path.join(controlDir, ".opencode");
+    const experimentConfigDir = path.join(experimentDir, ".opencode");
+    const globalConfigDir = path.join(tempRoot, "home", ".config", "opencode");
+    fs.mkdirSync(controlConfigDir, { recursive: true });
+    fs.mkdirSync(experimentConfigDir, { recursive: true });
+    fs.mkdirSync(globalConfigDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
+      JSON.stringify({ branch: { defaultType: "docs" } }),
+      "utf8",
+    );
+    const modernProject = JSON.stringify({ branch: { defaultType: "feat" } });
+    fs.writeFileSync(
+      path.join(controlConfigDir, "devai-aidd-plugin.project.jsonc"),
+      modernProject,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(experimentConfigDir, "devai-aidd-plugin.project.jsonc"),
+      modernProject,
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(experimentConfigDir, "opencode-aidd-plugin.json"),
+      JSON.stringify({ branch: { defaultType: "refactor" } }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(experimentConfigDir, "devai-git-workflow.json"),
+      JSON.stringify({ workflowPolicy: { default: { strict: true } } }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(experimentConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "fix" } }),
+      "utf8",
+    );
+
+    const fsAdapter = buildLegacyRemovalFsAdapter(path.join(tempRoot, "home"));
+    const controlResult = loadRuntimeConfig(controlDir, fsAdapter);
+    const experimentResult = loadRuntimeConfig(experimentDir, fsAdapter);
+
+    assert.deepEqual(
+      experimentResult.config,
+      controlResult.config,
+      "verifyLegacyFilesIgnored: experiment config (with legacy files) must deepEqual control config (modern only) — legacy files must be ignored",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * AC3: bootstrap must NOT create any bridge files (marker, opencode-aidd-plugin.json,
+ * devai-git-workflow.json) in `.opencode/`.
+ */
+async function verifyBridgeFilesNeverCreated() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?ac3=${Date.now()}`);
+  const tempRoot = createTempWorkspace();
+  try {
+    const mock = createMockClient();
+    await wrapperMod.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: tempRoot,
+    });
+
+    const opencodeDir = path.join(tempRoot, ".opencode");
+    const forbiddenPaths = [
+      path.join(opencodeDir, ".devai-aidd-plugin.compat.generated"),
+      path.join(opencodeDir, "opencode-aidd-plugin.json"),
+      path.join(opencodeDir, "devai-git-workflow.json"),
+    ];
+    for (const forbiddenPath of forbiddenPaths) {
+      assert.equal(
+        fs.existsSync(forbiddenPath),
+        false,
+        `verifyBridgeFilesNeverCreated: bootstrap must not create ${path.basename(forbiddenPath)}`,
+      );
+    }
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * AC4: `compat.bridge.evaluated` and `plugin bootstrap registered no-op hooks`
+ * audit events must be 0-count, and `plugin bootstrap` payload must NOT carry
+ * a `hasLegacyProjectConfig` key.
+ */
+async function verifyDeprecatedAuditEventsNotEmitted() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?ac4=${Date.now()}`);
+  const tempRoot = createTempWorkspace();
+  try {
+    const mock = createMockClient();
+    await wrapperMod.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: tempRoot,
+    });
+
+    const messages = mock.logs.map((l) => l.body?.message);
+    const compatBridgeCount = messages.filter((m) => m === "compat.bridge.evaluated").length;
+    const noOpHooksCount = messages.filter(
+      (m) => m === "plugin bootstrap registered no-op hooks",
+    ).length;
+    assert.equal(
+      compatBridgeCount,
+      0,
+      `verifyDeprecatedAuditEventsNotEmitted: compat.bridge.evaluated must be 0; got ${compatBridgeCount}`,
+    );
+    assert.equal(
+      noOpHooksCount,
+      0,
+      `verifyDeprecatedAuditEventsNotEmitted: plugin bootstrap registered no-op hooks must be 0; got ${noOpHooksCount}`,
+    );
+
+    const bootstrapEntry = mock.logs.find((l) => l.body?.message === "plugin bootstrap");
+    assert.ok(
+      bootstrapEntry,
+      "verifyDeprecatedAuditEventsNotEmitted: plugin bootstrap audit event must still be emitted",
+    );
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(bootstrapEntry.body.extra, "hasLegacyProjectConfig"),
+      false,
+      "verifyDeprecatedAuditEventsNotEmitted: plugin bootstrap payload must NOT contain hasLegacyProjectConfig key",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * AC5: every `client.app.log` payload must have `body.service === "devai-aidd-plugin"`,
+ * and no record may carry a `legacyService` field.
+ */
+async function verifyAuditWireFormatModernService() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?ac5=${Date.now()}`);
+  const tempRoot = createTempWorkspace();
+  try {
+    const mock = createMockClient();
+    await wrapperMod.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: tempRoot,
+    });
+
+    assert.ok(
+      mock.logs.length > 0,
+      "verifyAuditWireFormatModernService: bootstrap must emit at least one audit log",
+    );
+    for (const entry of mock.logs) {
+      assert.equal(
+        entry.body?.service,
+        "devai-aidd-plugin",
+        `verifyAuditWireFormatModernService: body.service must be "devai-aidd-plugin"; got ${entry.body?.service}`,
+      );
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(entry.body || {}, "legacyService"),
+        false,
+        "verifyAuditWireFormatModernService: body must NOT carry a legacyService field",
+      );
+    }
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * AC6: built artifact must NOT export `DevaiGitWorkflowPlugin`. Must export
+ * `DevaiAiddGuardPlugin` and default. SUPPORTED_HOOK_KEYS.length === 6.
+ */
+async function verifyAliasExportRemoved() {
+  const builtModule = await import(`${builtModuleUrl}?ac6=${Date.now()}`);
+  const wrapperModule = await import(`${wrapperModuleUrl}?ac6w=${Date.now()}`);
+  const constantsModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "utils", "constants.js"),
+  ).href;
+  const { SUPPORTED_HOOK_KEYS } = await import(`${constantsModuleUrl}?ac6c=${Date.now()}`);
+
+  assert.equal(
+    typeof builtModule.DevaiGitWorkflowPlugin,
+    "undefined",
+    "verifyAliasExportRemoved: built artifact must NOT export DevaiGitWorkflowPlugin",
+  );
+  assert.equal(
+    typeof wrapperModule.DevaiGitWorkflowPlugin,
+    "undefined",
+    "verifyAliasExportRemoved: wrapper module must NOT export DevaiGitWorkflowPlugin",
+  );
+  assert.equal(
+    typeof builtModule.DevaiAiddGuardPlugin,
+    "function",
+    "verifyAliasExportRemoved: built artifact must export DevaiAiddGuardPlugin",
+  );
+  assert.equal(
+    typeof builtModule.default,
+    "function",
+    "verifyAliasExportRemoved: built artifact must export default",
+  );
+  assert.equal(
+    SUPPORTED_HOOK_KEYS.length,
+    6,
+    `verifyAliasExportRemoved: SUPPORTED_HOOK_KEYS.length must be 6; got ${SUPPORTED_HOOK_KEYS.length}`,
+  );
+}
+
+/**
+ * AC7: start instruction text simplified to Option B. Exactly one synthetic
+ * part with `text === "Git workflow guard is active for /<cmd>."` and
+ * `metadata.source === "devai-git-workflow"`, `metadata.phase === "start"`.
+ * The legacy "Bootstrap compatibility mode" substring must not appear.
+ */
+async function verifyStartInstructionTextSimplified() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?ac7=${Date.now()}`);
+  const tempRoot = createTempWorkspace();
+  try {
+    const mock = createMockClient();
+    const handlers = await wrapperMod.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: tempRoot,
+    });
+    const output = { parts: [] };
+    await handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "", sessionID: "ac7-session" },
+      output,
+    );
+
+    const guardParts = output.parts.filter(
+      (p) => p?.text === "Git workflow guard is active for /bmad-bmm-quick-dev.",
+    );
+    assert.equal(
+      guardParts.length,
+      1,
+      `verifyStartInstructionTextSimplified: must push exactly one Option B start instruction part; got ${guardParts.length}`,
+    );
+    const part = guardParts[0];
+    assert.equal(
+      part.synthetic,
+      true,
+      "verifyStartInstructionTextSimplified: start part must have synthetic: true",
+    );
+    assert.equal(
+      part.metadata?.source,
+      "devai-git-workflow",
+      "verifyStartInstructionTextSimplified: start part metadata.source must be 'devai-git-workflow'",
+    );
+    assert.equal(
+      part.metadata?.phase,
+      "start",
+      "verifyStartInstructionTextSimplified: start part metadata.phase must be 'start'",
+    );
+    for (const otherPart of output.parts) {
+      const text = otherPart?.text || "";
+      assert.equal(
+        text.includes("Bootstrap compatibility mode"),
+        false,
+        "verifyStartInstructionTextSimplified: no part may contain 'Bootstrap compatibility mode'",
+      );
+      assert.equal(
+        text.includes("legacy BMAD hook contract"),
+        false,
+        "verifyStartInstructionTextSimplified: no part may contain 'legacy BMAD hook contract'",
+      );
+    }
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * AC8: mutating-tool guard throw message must match byte-for-byte.
+ */
+async function verifyMutatingToolThrowMessagePreserved() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?ac8=${Date.now()}`);
+  const tempRoot = createTempWorkspace();
+  try {
+    const mock = createMockClient();
+    const handlers = await wrapperMod.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: tempRoot,
+    });
+    await handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "", sessionID: "ac8-session" },
+      { parts: [] },
+    );
+
+    let thrown = null;
+    try {
+      await handlers["tool.execute.before"](
+        { sessionID: "ac8-session", tool: "write", args: {} },
+        { args: {} },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    assert.ok(thrown, "verifyMutatingToolThrowMessagePreserved: mutating tool must throw");
+    assert.equal(
+      thrown.message,
+      "Git workflow guard: create or switch to branch `workflow` before editing files for /bmad-bmm-quick-dev.",
+      `verifyMutatingToolThrowMessagePreserved: throw message must match byte-for-byte; got ${JSON.stringify(thrown.message)}`,
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * AC13: mutating tool input must advance `phase` to "mutating" and the state
+ * must NOT contain a `lifecycle` key.
+ */
+async function verifyMutatingToolAdvancesPhase() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?ac13=${Date.now()}`);
+  const { createWorkflowStateStore } = await import(workflowStateModuleUrl);
+  const { createToolExecuteAfterHook } = await import(
+    pathToFileURL(path.join(projectRoot, "src", "hooks", "tool-execute-after.js")).href,
+  );
+
+  const sessionID = "ac13-session";
+  const store = createWorkflowStateStore();
+  store.set(sessionID, {
+    commandName: "bmad-bmm-quick-dev",
+    arguments: "",
+    sessionID,
+    detectedAt: "2026-05-11T00:00:00.000Z",
+    phase: "in-progress",
+  });
+
+  const hook = createToolExecuteAfterHook({ workflowState: store });
+  await hook({ sessionID, tool: "write", args: {} }, { args: {} });
+
+  const state = store.get(sessionID);
+  assert.equal(
+    state?.phase,
+    "mutating",
+    `verifyMutatingToolAdvancesPhase: phase must be "mutating" after mutating tool; got ${state?.phase}`,
+  );
+  assert.equal(
+    Object.keys(state || {}).includes("lifecycle"),
+    false,
+    "verifyMutatingToolAdvancesPhase: state must NOT contain a 'lifecycle' key",
+  );
+
+  // Quiet unused-import warning.
+  void wrapperMod;
+}
+
+/**
+ * AC14: `event` hook with `session.deleted` must clear workflow state for the
+ * given sessionID.
+ */
+async function verifySessionDeletedClearsState() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?ac14=${Date.now()}`);
+  const tempRoot = createTempWorkspace();
+  try {
+    const mock = createMockClient();
+    const handlers = await wrapperMod.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: tempRoot,
+    });
+    const sessionID = "ac14-session";
+    await handlers["command.execute.before"](
+      { command: "/bmad-bmm-quick-dev", arguments: "", sessionID },
+      { parts: [] },
+    );
+    await handlers.event({
+      event: { type: "session.deleted", properties: { sessionID } },
+    });
+
+    let postDeleteError = null;
+    try {
+      await handlers["tool.execute.before"](
+        { sessionID, tool: "write", args: {} },
+        { args: {} },
+      );
+    } catch (error) {
+      postDeleteError = error;
+    }
+    assert.equal(
+      postDeleteError,
+      null,
+      "verifySessionDeletedClearsState: after session.deleted, mutating tool must not throw (state cleared)",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 main()
   .then(() => verifyBootstrapFailureShape())
-  .then(() => verifyMissingLegacyBootstrapDependencyFails())
   .then(() => verifyConfigMergePrecedence())
   .then(() => verifyValidationFallback())
   .then(() => verifyValidationFallbackLowerLayer())
@@ -12874,19 +12051,6 @@ main()
   .then(() => verifyWorkflowPolicyVocabularySchema())
   .then(() => verifyEffectivePolicyDeterminism())
   .then(() => verifyLatestPolicyChangesReflectedAcrossRuns())
-  // Story 4.2 — preserve legacy configuration compatibility and bridge files
-  .then(() => verifyStory42BridgeNoOpOnEmptyWorkspace())
-  .then(() => verifyStory42BridgePreservesUserLegacyWithoutMarker())
-  .then(() => verifyStory42BridgeRefreshWhenMarkerPresent())
-  .then(() => verifyStory42BridgeCreatesMirrorForModernOnly())
-  .then(() => verifyStory42BridgeWriteIsIdempotent())
-  .then(() => verifyStory42BridgePrecedenceProjectOverridesLegacy())
-  .then(() => verifyStory42BridgeAuditEventShape())
-  .then(() => verifyStory42BridgeMirrorOmitsAuditSection())
-  // Story 4.2 R2 review follow-ups (M-1, M-2, M-3)
-  .then(() => verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker())
-  .then(() => verifyStory42BridgeRebuildLabelOnMarkerLeftover())
-  .then(() => verifyStory42BridgeWriteFailureIsBestEffort())
   // Story 4.4 — build and package release artifacts reliably
   .then(() => verifyStory44ReleaseManifestCompleteness())
   .then(() => verifyStory44ReleaseChecksumLinesMatchInstallerParsers())
@@ -12895,13 +12059,24 @@ main()
   // Story 4.4 R2 LOW-1: multi-missing + bundle hint
   .then(() => verifyStory44ReleaseMissingBundleEmitsBuildHint())
   // Story 4.5 — wrapper/built regression gate
-  .then(() => verifyStory45LegacyWrapperBuiltHandlerShapesMatch())
-  .then(() => verifyStory45LegacyWrapperBuiltCommandPromptParity())
-  .then(() => verifyStory45LegacyWrapperBuiltMutatingToolGuardParity())
+  .then(() => verifyStory45WrapperBuiltHandlerShapesMatch())
+  .then(() => verifyStory45WrapperBuiltCommandPromptParity())
+  .then(() => verifyStory45WrapperBuiltMutatingToolGuardParity())
   .then(() => verifyStory45BuiltArtifactExportContract())
   .then(() => verifyStory45BuiltArtifactPromptParityWithWrapper())
   .then(() => verifyStory45RegressionGateAbortsWithoutBuiltArtifact())
   .then(() => verifyStory45SrcIndexAuditEventListMatchesEmissions())
+  // BREAKING CHANGE — legacy compatibility removal (AC1~AC8, AC13~AC15)
+  .then(() => verifySourcesShapeIsExactlyTwoBooleans())
+  .then(() => verifyLegacyFilesIgnored())
+  .then(() => verifyBridgeFilesNeverCreated())
+  .then(() => verifyDeprecatedAuditEventsNotEmitted())
+  .then(() => verifyAuditWireFormatModernService())
+  .then(() => verifyAliasExportRemoved())
+  .then(() => verifyStartInstructionTextSimplified())
+  .then(() => verifyMutatingToolThrowMessagePreserved())
+  .then(() => verifyMutatingToolAdvancesPhase())
+  .then(() => verifySessionDeletedClearsState())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;

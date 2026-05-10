@@ -1,32 +1,16 @@
 /**
  * src/index.js — DevAI AIDD Plugin bootstrap.
  *
- * Story 4.3 — BMAD command compatibility contract entry point.
+ * Entry point for the BMAD command compatibility wrapper. The function
+ * `DevaiAiddGuardPlugin` returns the 6 hook keys listed in
+ * `SUPPORTED_HOOK_KEYS` (see `src/utils/constants.js`). All hook handlers
+ * are wrapper-side (the legacy frozen baseline has been removed).
  *
- * The function `DevaiAiddGuardPlugin` returns the 6 hook keys listed in
- * `SUPPORTED_HOOK_KEYS` (see `src/utils/constants.js`). Two of those keys —
- * `WRAPPER_ONLY_HOOK_KEYS` — have NO matching legacy core handler and stay
- * deterministic no-ops at the boundary. The remaining 4 keys are implemented
- * by the frozen legacy core (`src/policies/legacy/devai-git-workflo.js`) and
- * the wrapper hook factories ALWAYS delegate to those legacy handlers as the
- * last step — preserving start-instruction text, mutating-tool guard message
- * strings, and `session.deleted` cleanup byte-for-byte.
- *
- * Two export symbols MUST stay alive: `DevaiAiddGuardPlugin` (current name)
- * and the legacy alias `DevaiGitWorkflowPlugin`. Existing manifests/installers
- * may still reference either symbol; dropping one is a contract break under
- * FR29.
- *
- * This module also performs best-effort bootstrap audit emissions
- * (`config.validation.failed`, `compat.bridge.evaluated`, `plugin bootstrap`,
- * `plugin bootstrap registered no-op hooks`) — none of these may abort
+ * This module performs best-effort bootstrap audit emissions
+ * (`config.validation.failed`, `plugin bootstrap`) — none of these may abort
  * bootstrap on a throwing audit sink (NFR7/NFR8).
- *
- * Story 4.3 freezes the above as the "compatibility contract body". Story 4.5
- * supplies the regression coverage that validates it.
  */
 
-import { DevaiGitWorkflowPlugin } from "./policies/legacy/devai-git-workflo.js";
 import { createFileSystemAdapter } from "./adapters/fs.js";
 import { createConsoleAdapter } from "./adapters/console.js";
 import { createHttpAdapter } from "./adapters/http.js";
@@ -34,7 +18,6 @@ import {
   loadRuntimeConfig,
   loadWorkflowCommands,
 } from "./config/load-config.js";
-import { ensureLegacyProjectConfigCompatibility } from "./services/compat/legacy-bridge-service.js";
 import { createAuditLogger } from "./audit/logger.js";
 import { createWorkflowStateStore } from "./services/workflow/workflow-state.js";
 import { createCommandExecuteBeforeHook } from "./hooks/command-execute-before.js";
@@ -47,25 +30,11 @@ import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-poli
 import { runGitAction, runGitCommand } from "./services/git/run-git-command.js";
 import { buildRecoveryPrompt } from "./services/approval/build-recovery-prompt.js";
 import { parseStatusPorcelainPaths } from "./services/workflow/parse-status-porcelain.js";
-// Story 4.3: `SUPPORTED_HOOK_KEYS` is imported here for documentation /
-// SOT traceability — the symbol itself is the canonical 6-key contract list
-// referenced by the JSDoc header above and by Story 4.5's regression suite
-// (`legacy vs wrapper vs built` hook-key existence assertions will import
-// the SAME symbol). Do NOT drop this import as "unused"; removing it would
-// silently delete the SOT anchor that the contract comments point at.
-// `WRAPPER_ONLY_HOOK_KEYS` is consumed below to derive the actual no-op set
-// against `legacyHandlers`.
-import {
-  // eslint-disable-next-line no-unused-vars -- SOT anchor; see comment above
-  SUPPORTED_HOOK_KEYS,
-  WRAPPER_ONLY_HOOK_KEYS,
-} from "./utils/constants.js";
+// `SUPPORTED_HOOK_KEYS` is the canonical 6-key contract list referenced by
+// the regression suite. Keep the import live so the SOT anchor cannot be
+// silently tree-shaken away.
+import { SUPPORTED_HOOK_KEYS } from "./utils/constants.js";
 
-// Story 4.3: keep SUPPORTED_HOOK_KEYS reachable at module scope so a future
-// linter or bundler tree-shaker treats it as a live binding. The runtime
-// effect is zero (truthy frozen array) but the reference prevents accidental
-// dead-code removal of the SOT anchor before Story 4.5 wires it into a
-// regression assertion.
 void SUPPORTED_HOOK_KEYS;
 
 const SUPPORTED_RUNTIME = "Node.js ESM plugin runtime (Node 22 target)";
@@ -137,105 +106,15 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       }
     }
 
-    // Story 4.2: emit the bridge lifecycle decision via best-effort audit so
-    // operators can see exactly which decision-table branch fired (e.g.
-    // `preserve-user-legacy` proves AC2 is enforced; `no-content-change`
-    // confirms idempotent skip). Mirrors the Story 1.3 pattern for
-    // `config.validation.failed` — a throwing audit sink must not crash
-    // bootstrap (NFR7/NFR8).
-    //
-    // R2 (M-2): `ensureLegacyProjectConfigCompatibility` itself is now
-    // best-effort and converts disk-write failures into
-    // `{ written: false, reason: "write-failed", error }`. We additionally
-    // wrap the call in try/catch as belt-and-suspenders so any future
-    // contract change (e.g. an unexpected throw before the internal try)
-    // still cannot crash bootstrap.
-    let bridgeOutcome;
-    try {
-      bridgeOutcome = ensureLegacyProjectConfigCompatibility(
-        directory,
-        fsAdapter,
-        runtimeConfig,
-      );
-    } catch (bridgeError) {
-      const message =
-        bridgeError && typeof bridgeError.message === "string"
-          ? bridgeError.message
-          : String(bridgeError);
-      bridgeOutcome = {
-        written: false,
-        reason: "bridge-threw",
-        error: message,
-        sources: {
-          hasGlobalConfig: Boolean(runtimeConfig.sources?.hasGlobalConfig),
-          hasProjectConfig: Boolean(runtimeConfig.sources?.hasProjectConfig),
-          hasLegacyProjectConfig: Boolean(runtimeConfig.sources?.hasLegacyProjectConfig),
-          hasLegacyWorkflowProjectConfig: Boolean(
-            runtimeConfig.sources?.hasLegacyWorkflowProjectConfig,
-          ),
-        },
-        markerPresent: false,
-      };
-    }
-    try {
-      const bridgeAuditPayload = {
-        event: "compat.bridge.evaluated",
-        timestamp: new Date().toISOString(),
-        workflow: null,
-        command: null,
-        details: {
-          written: bridgeOutcome.written,
-          reason: bridgeOutcome.reason,
-          sources: bridgeOutcome.sources,
-          markerPresent: bridgeOutcome.markerPresent,
-          ...(bridgeOutcome.paths ? { bridgePaths: bridgeOutcome.paths } : {}),
-          ...(bridgeOutcome.error ? { error: bridgeOutcome.error } : {}),
-        },
-      };
-      await audit.info("compat.bridge.evaluated", bridgeAuditPayload);
-    } catch {
-      // best-effort
-    }
-
     try {
       await audit.info("plugin bootstrap", {
         workflowCommandCount: workflowCommands.size,
         hasGlobalConfig: runtimeConfig.sources.hasGlobalConfig,
         hasProjectConfig: runtimeConfig.sources.hasProjectConfig,
-        hasLegacyProjectConfig: runtimeConfig.sources.hasLegacyProjectConfig,
         supportedRuntime: SUPPORTED_RUNTIME,
       });
     } catch {
       // best-effort
-    }
-
-    const legacyHandlers = await DevaiGitWorkflowPlugin({
-      client,
-      directory,
-      workflowCommands,
-    });
-    if (!legacyHandlers || typeof legacyHandlers !== "object") {
-      throw new Error("Legacy hook registration did not return a handler map.");
-    }
-
-    // Story 4.3: WRAPPER_ONLY_HOOK_KEYS (`permission.asked`, `file.edited`)
-    // are the keys with NO legacy core counterpart. We re-derive the actual
-    // no-op set against `legacyHandlers` to keep the audit faithful to what
-    // the legacy bootstrap returned, but the canonical contract list itself
-    // lives in `src/utils/constants.js` so Story 4.5's regression suite can
-    // assert the contract from a single source.
-    const wrapperOnlyHooks = WRAPPER_ONLY_HOOK_KEYS.filter(
-      (hookName) => typeof legacyHandlers[hookName] !== "function",
-    );
-    if (wrapperOnlyHooks.length > 0) {
-      try {
-        await audit.info("plugin bootstrap registered no-op hooks", {
-          hooks: wrapperOnlyHooks,
-          reason: "no legacy handler present; wrapper returns undefined for these hook names",
-        });
-      } catch {
-        // best-effort
-      }
     }
 
     const workflowState = createWorkflowStateStore();
@@ -354,19 +233,11 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       },
     };
 
-    // Story 4.3: the hook map below is the external plugin contract surface.
-    // Its keys MUST stay byte-for-byte equal to `SUPPORTED_HOOK_KEYS`; renaming,
-    // dropping, or adding a key is a compatibility break under FR29 and would
-    // also break Story 4.5 regression assertions (`legacy vs wrapper vs built`
-    // hook key existence). Each wrapper handler is a "thin wrapper": after the
-    // wrapper-side responsibility runs (workflow detection, approval/recovery
-    // ingress, phase advance, finalization gating, sessionState cleanup), it
-    // ALWAYS delegates to the matching `legacyHandlers[...]` as the last step.
-    // The two wrapper-only keys (`permission.asked`, `file.edited`) honor that
-    // shape too — they fall through to a no-op return when no legacy handler
-    // is present, instead of throwing.
+    // The hook map below is the external plugin contract surface. Its keys
+    // MUST stay byte-for-byte equal to `SUPPORTED_HOOK_KEYS`; renaming,
+    // dropping, or adding a key is a compatibility break.
     return {
-      "command.execute.before": createCommandExecuteBeforeHook(legacyHandlers, {
+      "command.execute.before": createCommandExecuteBeforeHook({
         workflowCommands,
         workflowState,
         audit,
@@ -376,24 +247,24 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       // Story 2.3 (LOW): tool.execute.before / tool.execute.after only consume
       // workflowState today (phase advancement). pluginContext is unused by
       // these factories — keep the injection surface minimal so the contract
-      // matches the consumer (mirrors the LOW-3 cleanup on permission.asked).
-      "tool.execute.before": createToolExecuteBeforeHook(legacyHandlers, { workflowState }),
-      "tool.execute.after": createToolExecuteAfterHook(legacyHandlers, {
+      // matches the consumer.
+      "tool.execute.before": createToolExecuteBeforeHook({ workflowState }),
+      "tool.execute.after": createToolExecuteAfterHook({
         workflowState,
         audit,
         pluginContext,
       }),
-      "permission.asked": createPermissionAskedHook(legacyHandlers, {
+      "permission.asked": createPermissionAskedHook({
         // Story 2.5 (MEDIUM review): pluginContext is now consumed so the
         // hook can deliver recovery prompts via `requestRecoveryDecision`
         // and route the user's response back into `selectRecoveryChoice` /
-        // `confirmManualResolution`. Approval ingress remains unchanged.
+        // `confirmManualResolution`.
         workflowState,
         audit,
         pluginContext,
       }),
-      "file.edited": createFileEditedHook(legacyHandlers, { workflowState, pluginContext }),
-      event: createSessionHook(legacyHandlers, { workflowState, pluginContext }),
+      "file.edited": createFileEditedHook({ workflowState, pluginContext }),
+      event: createSessionHook({ workflowState }),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -414,11 +285,4 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
   }
 }
 
-// Story 4.3: BOTH symbols below are part of the FR29 compatibility contract.
-// `DevaiAiddGuardPlugin` is the canonical name used by current packaging and
-// installer manifests; `DevaiGitWorkflowPlugin` is the legacy alias preserved
-// for installs whose manifest still points at the old name. Removing either
-// export — or making them point at different functions — is a contract break
-// and will be regression-asserted from Story 4.5.
-export { DevaiAiddGuardPlugin as DevaiGitWorkflowPlugin };
 export default DevaiAiddGuardPlugin;

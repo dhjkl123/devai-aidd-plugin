@@ -1,15 +1,11 @@
 /**
  * command-execute-before.js
  *
- * Story 4.3 — THIN WRAPPER over the legacy `command.execute.before` handler.
- * The wrapper performs workflow detection, repository readiness check, branch
- * strategy planning, and approval publication, then ALWAYS delegates to
- * `legacyHandlers["command.execute.before"]` as the LAST step. The legacy
- * handler is responsible for pushing the start-instruction text via
- * `buildStartInstruction` (`src/policies/legacy/devai-git-workflo.js`); the
- * wrapper MUST NOT modify, rewrite, or duplicate that push. Story 4.5
- * regression compares `normalizeOutputParts(wrapper) === normalizeOutputParts(legacy)`
- * to enforce that invariant.
+ * Wrapper hook for `command.execute.before`. Performs workflow detection,
+ * repository readiness check, branch strategy planning, approval publication,
+ * and finally pushes the start-instruction text into `output.parts` for
+ * detected BMAD workflow commands. The start-instruction string is the
+ * single source of truth for the active-guard signal in `output.parts`.
  */
 
 import { detectWorkflowContext } from "../services/workflow/detect-workflow-context.js";
@@ -45,7 +41,6 @@ function shouldSkipBranchPlanning(readiness) {
 }
 
 export function createCommandExecuteBeforeHook(
-  legacyHandlers,
   { workflowCommands, workflowState, audit, pluginContext, branchConfig } = {},
 ) {
   return async (input, output) => {
@@ -214,14 +209,20 @@ export function createCommandExecuteBeforeHook(
           audit,
           pluginContext,
         });
+
+        if (!Array.isArray(output.parts)) {
+          output.parts = [];
+        }
+        output.parts.push({
+          type: "text",
+          text: `Git workflow guard is active for /${context.commandName}.`,
+          synthetic: true,
+          metadata: {
+            source: "devai-git-workflow",
+            phase: "start",
+          },
+        });
       }
     }
-
-    const handler = legacyHandlers["command.execute.before"];
-    if (!handler) {
-      return;
-    }
-
-    return handler(input, output);
   };
 }

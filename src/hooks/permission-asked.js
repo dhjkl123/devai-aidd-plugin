@@ -1,23 +1,12 @@
 /**
  * permission-asked.js
  *
- * Story 4.3 — WRAPPER-ONLY hook. There is NO matching legacy core handler in
- * `src/policies/legacy/devai-git-workflo.js` for `permission.asked`; this is
- * by design (`WRAPPER_ONLY_HOOK_KEYS` in `src/utils/constants.js`). The
- * approval ingress + recovery routing implemented below are wrapper-only
- * forward-looking responsibilities, not "legacy-equivalent" behavior — the
- * compatibility contract (FR29) does NOT promise that the legacy plugin had
- * an analogous handler. The bootstrap audit `plugin bootstrap registered
- * no-op hooks` documents that asymmetry once per session.
+ * Wrapper hook for the `permission.asked` runtime channel. Routes runtime
+ * permission events to the approval resolver or the recovery orchestrator.
  *
- * Determinism guarantee: when wrapper-side resolution paths fail or no
- * `legacyHandlers["permission.asked"]` exists (always the case under the
- * current frozen baseline — the legacy core does not implement this key;
- * the fall-through branch is purely defensive against a future legacy core
- * that would re-introduce the key without going through a contract change),
- * this hook returns `undefined` without throwing. A throw here would be
- * misread by the runtime as a permission failure and break unrelated
- * workflows.
+ * Determinism guarantee: when wrapper-side resolution paths fail, this hook
+ * returns `undefined` without throwing. A throw here would be misread by
+ * the runtime as a permission failure and break unrelated workflows.
  *
  * Story 2.3: this hook is the primary ingress for approval outcomes
  * (accept / deny / ignore-and-continue) selected by the runtime user.
@@ -44,8 +33,6 @@
  *   5. Emit any returned audit events.
  *   6. After deny / ignore-and-continue, open a recovery gate and deliver the
  *      recovery prompt via `pluginContext.requestRecoveryDecision`.
- *   7. Always invoke the legacy handler last so existing wrapper behavior
- *      (Story 1.x) remains intact.
  *
  * Failure isolation: an exception while parsing or resolving must NEVER
  * surface to the caller. The runtime would otherwise misinterpret it as a
@@ -279,7 +266,7 @@ async function deliverRecoveryPrompt({ pluginContext, gate, audit, sessionID, wo
   }
 }
 
-export function createPermissionAskedHook(legacyHandlers, injections = {}) {
+export function createPermissionAskedHook(injections = {}) {
   const { workflowState, audit, pluginContext } = injections;
 
   return async (input) => {
@@ -500,11 +487,5 @@ export function createPermissionAskedHook(legacyHandlers, injections = {}) {
       }
     }
 
-    const handler = legacyHandlers["permission.asked"];
-    if (typeof handler !== "function") {
-      return;
-    }
-
-    return handler(input);
   };
 }

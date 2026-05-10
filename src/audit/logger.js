@@ -1,13 +1,9 @@
 import path from "node:path";
-import {
-  LEGACY_PLUGIN_SERVICE_NAME,
-  PLUGIN_SERVICE_NAME,
-} from "../utils/constants.js";
+import { PLUGIN_SERVICE_NAME } from "../utils/constants.js";
 
 function formatRecord(level, message, extra = {}) {
   return {
     service: PLUGIN_SERVICE_NAME,
-    legacyService: LEGACY_PLUGIN_SERVICE_NAME,
     level,
     message,
     extra,
@@ -28,7 +24,7 @@ export function createAuditLogger({
       try {
         await client.app.log({
           body: {
-            service: record.legacyService,
+            service: record.service,
             level: record.level,
             message: record.message,
             extra: record.extra,

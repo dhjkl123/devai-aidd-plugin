@@ -1,15 +1,8 @@
 import path from "node:path";
-import {
-  DEFAULT_PLUGIN_CONFIG,
-} from "./defaults.js";
+import { DEFAULT_PLUGIN_CONFIG } from "./defaults.js";
 import {
   GLOBAL_CONFIG_DIR,
   GLOBAL_CONFIG_FILE_NAME,
-  GUARD_LEGACY_GLOBAL_CONFIG_FILE_NAME,
-  GUARD_LEGACY_PROJECT_CONFIG_FILE_NAME,
-  LEGACY_COMPAT_MARKER_FILE_NAME,
-  LEGACY_PROJECT_CONFIG_FILE_NAME,
-  LEGACY_WORKFLOW_PROJECT_CONFIG_FILE_NAME,
   PROJECT_CONFIG_DIR,
   PROJECT_CONFIG_FILE_NAME,
 } from "../utils/constants.js";
@@ -97,16 +90,6 @@ export function mergeConfigs(layers) {
 // `src/services/workflow/resolve-workflow-policy.js` need to repeat per-field
 // `|| <default>` fallbacks. After Story 4.1, those services receive an
 // already-normalized effective config and act as thin pass-throughs.
-//
-// Design notes:
-//   - This function runs AFTER `validateAndRecover` has rejected invalid
-//     layers (per Story 1.3), so the inputs here are typed-correct OR fully
-//     missing. We therefore only need to pad missing/empty fields with the
-//     same safe defaults DEFAULT_PLUGIN_CONFIG already exposes.
-//   - We mirror DEFAULT_PLUGIN_CONFIG via `cloneDefaultConfig()` first, so
-//     any field the user did not touch starts from the canonical default.
-//   - We do NOT mutate `config`; the result is a new object suitable for
-//     `runtimeConfig.config` (which downstream treats as immutable).
 const SAFE_BRANCH_DEFAULTS = {
   pattern: "{type}/{ticket}-{slug}",
   defaultType: "chore",
@@ -138,8 +121,6 @@ function normalizeConfig(config) {
   merged.branch.defaultMergeTarget = String(merged.branch.defaultMergeTarget || "").trim();
 
   // pattern / defaultType / fallbackTicket: safe-default fallback.
-  // Story 1.3 invalid-value cases never reach here (they're dropped during
-  // validateAndRecover), so we only need to handle "missing optional" cases.
   for (const key of ["pattern", "defaultType", "fallbackTicket"]) {
     const value = merged.branch[key];
     if (typeof value !== "string" || value.length === 0) {
@@ -192,53 +173,6 @@ function readConfigFile(fsAdapter, filePath, layerName, parseErrors) {
 }
 
 /**
- * Named helper: read global config layer. Missing files become `{}` so the
- * empty layer participates as a no-op merge, matching prior semantics.
- */
-function readGlobalConfig(fsAdapter, paths, parseErrors) {
-  return readConfigFile(fsAdapter, paths.globalConfigPath, "globalConfig", parseErrors) || {};
-}
-
-/**
- * Named helper: read project config layer.
- */
-function readProjectConfig(fsAdapter, paths, parseErrors) {
-  return readConfigFile(fsAdapter, paths.projectConfigPath, "projectConfig", parseErrors);
-}
-
-/**
- * Named helper: read legacy config layers.
- */
-function readLegacyConfigs(fsAdapter, paths, parseErrors) {
-  return {
-    legacyProjectConfig: readConfigFile(
-      fsAdapter,
-      paths.legacyProjectConfigPath,
-      "legacyProjectConfig",
-      parseErrors,
-    ),
-    legacyWorkflowProjectConfig: readConfigFile(
-      fsAdapter,
-      paths.legacyWorkflowProjectConfigPath,
-      "legacyWorkflowProjectConfig",
-      parseErrors,
-    ),
-    guardLegacyGlobalConfig: readConfigFile(
-      fsAdapter,
-      paths.guardLegacyGlobalConfigPath,
-      "guardLegacyGlobalConfig",
-      parseErrors,
-    ),
-    guardLegacyProjectConfig: readConfigFile(
-      fsAdapter,
-      paths.guardLegacyProjectConfigPath,
-      "guardLegacyProjectConfig",
-      parseErrors,
-    ),
-  };
-}
-
-/**
  * Tag each layer error with its source so audit consumers can attribute
  * the failure to a specific config layer.
  */
@@ -253,7 +187,7 @@ function tagErrorsWithLayer(errors, layerName) {
 }
 
 /**
- * Validate-and-recover merge pipeline (v2 — incremental, per-layer).
+ * Validate-and-recover merge pipeline.
  *
  * Walks the layers from lowest to highest priority. For each layer, builds
  * a candidate config by merging it on top of the running accumulator and
@@ -263,47 +197,21 @@ function tagErrorsWithLayer(errors, layerName) {
  * last-known-good state.
  *
  * Validation is performed BEFORE normalization so that invalid raw values
- * (for example `branch.longLivedBranches: 42`) are caught by the schema
- * rather than silently corrected by `normalizeConfig`.
+ * are caught by the schema rather than silently corrected by `normalizeConfig`.
  *
  * Properties guaranteed by this algorithm:
  *   - A valid upper layer is never dropped because of an invalid lower layer.
- *     (Rejecting AI-1: prior algorithm dropped from highest down on every
- *     failure, which destroyed valid `projectConfig` when `globalConfig` was
- *     malformed.)
- *   - Each layer is validated at most once, so audit `details.errors` does
- *     not contain duplicate entries for the same layer (AI-7).
+ *   - Each layer is validated at most once.
  *   - When every layer fails, the result is the normalized DEFAULT_PLUGIN_CONFIG.
  *
  * Precedence order (lowest to highest priority):
- *   DEFAULT_PLUGIN_CONFIG → guardLegacyGlobalConfig → globalConfig
- *   → legacyProjectConfig → legacyWorkflowProjectConfig
- *   → guardLegacyProjectConfig → projectConfig
- *
- * Guard-tier layers (`guardLegacyGlobalConfig`, `guardLegacyProjectConfig`)
- * read the previous "modern" file names (`devai-aidd-guard.{global,project}.jsonc`)
- * so existing user installs keep working after the rename to
- * `devai-aidd-plugin`. Each guard layer sits immediately below the new
- * file at the same scope, so a freshly-written `devai-aidd-plugin.*` file
- * always wins on a per-key basis while untouched keys continue to come from
- * the previously-named file.
+ *   DEFAULT_PLUGIN_CONFIG → globalConfig → projectConfig
  *
  * @returns {{ mergedConfig: object, droppedLayers: string[], errors: import("ajv").ErrorObject[] }}
  */
-function validateAndRecover(
-  guardLegacyGlobalConfig,
-  globalConfig,
-  legacyProjectConfig,
-  legacyWorkflowProjectConfig,
-  guardLegacyProjectConfig,
-  projectConfig,
-) {
+function validateAndRecover(globalConfig, projectConfig) {
   const orderedLayers = [
-    { name: "guardLegacyGlobalConfig", value: guardLegacyGlobalConfig },
     { name: "globalConfig", value: globalConfig },
-    { name: "legacyProjectConfig", value: legacyProjectConfig },
-    { name: "legacyWorkflowProjectConfig", value: legacyWorkflowProjectConfig },
-    { name: "guardLegacyProjectConfig", value: guardLegacyProjectConfig },
     { name: "projectConfig", value: projectConfig },
   ];
 
@@ -313,7 +221,6 @@ function validateAndRecover(
 
   for (const layer of orderedLayers) {
     if (!layer.value || typeof layer.value !== "object" || Array.isArray(layer.value)) {
-      // Absent layers (null) and non-object layers are no-ops — skip without recording.
       continue;
     }
 
@@ -341,69 +248,29 @@ export function resolveConfigPaths(directory, fsAdapter) {
     GLOBAL_CONFIG_DIR,
     GLOBAL_CONFIG_FILE_NAME,
   );
-  const guardLegacyGlobalConfigPath = path.join(
-    fsAdapter.homedir(),
-    GLOBAL_CONFIG_DIR,
-    GUARD_LEGACY_GLOBAL_CONFIG_FILE_NAME,
-  );
   const projectConfigPath = path.join(directory, PROJECT_CONFIG_DIR, PROJECT_CONFIG_FILE_NAME);
-  const guardLegacyProjectConfigPath = path.join(
-    directory,
-    PROJECT_CONFIG_DIR,
-    GUARD_LEGACY_PROJECT_CONFIG_FILE_NAME,
-  );
-  const legacyProjectConfigPath = path.join(
-    directory,
-    PROJECT_CONFIG_DIR,
-    LEGACY_PROJECT_CONFIG_FILE_NAME,
-  );
-  const legacyWorkflowProjectConfigPath = path.join(
-    directory,
-    PROJECT_CONFIG_DIR,
-    LEGACY_WORKFLOW_PROJECT_CONFIG_FILE_NAME,
-  );
-  const legacyCompatMarkerPath = path.join(
-    directory,
-    PROJECT_CONFIG_DIR,
-    LEGACY_COMPAT_MARKER_FILE_NAME,
-  );
 
   return {
     globalConfigPath,
-    guardLegacyGlobalConfigPath,
     projectConfigPath,
-    guardLegacyProjectConfigPath,
-    legacyProjectConfigPath,
-    legacyWorkflowProjectConfigPath,
-    legacyCompatMarkerPath,
   };
 }
 
 /**
  * Load and merge runtime configuration from all sources using a deterministic
  * precedence pipeline (lowest to highest priority):
- *   DEFAULT_PLUGIN_CONFIG → globalConfig → legacyProjectConfig
- *   → legacyWorkflowProjectConfig → projectConfig
+ *   DEFAULT_PLUGIN_CONFIG → globalConfig → projectConfig
  *
  * Returns an object with:
  *   - `config`: the normalized effective configuration
  *   - `paths`: resolved file paths
- *   - `sources`: boolean flags for which sources were found
+ *   - `sources`: boolean flags `{ hasGlobalConfig, hasProjectConfig }`
  *   - `validation`:
  *       - `valid`: final mergedConfig passes schema/parse checks (vocabulary
- *         warnings do NOT flip this to false — see Story 4.1 forward-compat
- *         decision)
+ *         warnings do NOT flip this to false)
  *       - `recovered`: at least one layer was dropped (recovered from failure)
  *       - `droppedLayers`: layer names dropped during validation
- *       - `errors`: MIXED list of normalized entries — parse failures
- *         + schema failures + Story 4.1 vocabulary warnings. Each entry
- *         carries `params.source` so callers can discriminate:
- *           * `params.source === "parseJsonc"`  → hard parse failure
- *           * (no `params.source`)              → hard schema failure
- *           * `params.source === "vocabulary"`  → advisory warning
- *             (`params.kind === "warning"`)
- *         To check for "hard errors only", filter:
- *           `errors.filter(e => e?.params?.source !== "vocabulary")`
+ *       - `errors`: parse failures + schema failures + vocabulary warnings
  *
  * Does NOT throw. Validation failures and vocabulary warnings are surfaced
  * in `validation` and the caller is responsible for emitting
@@ -412,8 +279,6 @@ export function resolveConfigPaths(directory, fsAdapter) {
 export function loadRuntimeConfig(directory, fsAdapter) {
   const paths = resolveConfigPaths(directory, fsAdapter);
 
-  // parseErrors collects JSONC parse failures so they are surfaced through
-  // the validation pipeline instead of being silently swallowed (AI-2).
   const parseErrors = [];
 
   const globalConfigRaw = readConfigFile(
@@ -423,38 +288,22 @@ export function loadRuntimeConfig(directory, fsAdapter) {
     parseErrors,
   );
   const globalConfig = globalConfigRaw || {};
-  const projectConfig = readProjectConfig(fsAdapter, paths, parseErrors);
-  const {
-    legacyProjectConfig,
-    legacyWorkflowProjectConfig,
-    guardLegacyGlobalConfig,
-    guardLegacyProjectConfig,
-  } = readLegacyConfigs(fsAdapter, paths, parseErrors);
+  const projectConfig = readConfigFile(
+    fsAdapter,
+    paths.projectConfigPath,
+    "projectConfig",
+    parseErrors,
+  );
 
   const { mergedConfig, droppedLayers, errors: schemaErrors } = validateAndRecover(
-    guardLegacyGlobalConfig || {},
     globalConfig,
-    legacyProjectConfig,
-    legacyWorkflowProjectConfig,
-    guardLegacyProjectConfig,
     projectConfig,
   );
 
-  // Story 4.1: vocabulary warnings are collected on the FINAL effective config,
-  // AFTER `validateAndRecover` has chosen which layers to accept. They surface
-  // through `validation.errors` (so the existing `config.validation.failed`
-  // audit channel picks them up) but are tagged `params.source === "vocabulary"`
-  // and `params.kind === "warning"` so they are NEVER mistaken for hard
-  // schema/parse errors. Crucially, they do NOT cause layer drops — Story 1.3's
-  // forward-compat invariant (`additionalProperties: true` on workflowPolicy[*])
-  // is preserved.
   const vocabularyWarnings = collectWorkflowPolicyVocabularyWarnings(mergedConfig);
 
   const errors = [...parseErrors, ...schemaErrors, ...vocabularyWarnings];
   const recovered = droppedLayers.length > 0 || parseErrors.length > 0;
-  // `valid` reflects whether the effective config passed schema/parse checks.
-  // Vocabulary warnings do not flip `valid` to false because they are advisory
-  // (forward-compat decision recorded in Story 4.1 Dev Notes).
   const hardErrorCount = parseErrors.length + schemaErrors.length;
 
   return {
@@ -462,11 +311,7 @@ export function loadRuntimeConfig(directory, fsAdapter) {
     paths,
     sources: {
       hasGlobalConfig: globalConfigRaw !== null,
-      hasGuardLegacyGlobalConfig: Boolean(guardLegacyGlobalConfig),
-      hasProjectConfig: Boolean(projectConfig),
-      hasGuardLegacyProjectConfig: Boolean(guardLegacyProjectConfig),
-      hasLegacyWorkflowProjectConfig: Boolean(legacyWorkflowProjectConfig),
-      hasLegacyProjectConfig: Boolean(legacyProjectConfig),
+      hasProjectConfig: projectConfig !== null,
     },
     validation: {
       valid: hardErrorCount === 0,
@@ -491,10 +336,3 @@ export function loadWorkflowCommands(directory, fsAdapter) {
       .map((entry) => entry.replace(/\.md$/i, "")),
   );
 }
-
-// Story 4.2: legacy compatibility bridge ownership moved to
-// `src/services/compat/legacy-bridge-service.js`.
-// This config module is now strictly a read-only resolver
-// (architecture Component Boundaries: config/ = merge + validate + migrate).
-// Callers should import `ensureLegacyProjectConfigCompatibility` from the
-// service module directly.
