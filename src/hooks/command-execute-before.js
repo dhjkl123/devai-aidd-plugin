@@ -1,3 +1,17 @@
+/**
+ * command-execute-before.js
+ *
+ * Story 4.3 — THIN WRAPPER over the legacy `command.execute.before` handler.
+ * The wrapper performs workflow detection, repository readiness check, branch
+ * strategy planning, and approval publication, then ALWAYS delegates to
+ * `legacyHandlers["command.execute.before"]` as the LAST step. The legacy
+ * handler is responsible for pushing the start-instruction text via
+ * `buildStartInstruction` (`src/policies/legacy/devai-git-workflo.js`); the
+ * wrapper MUST NOT modify, rewrite, or duplicate that push. Story 4.5
+ * regression compares `normalizeOutputParts(wrapper) === normalizeOutputParts(legacy)`
+ * to enforce that invariant.
+ */
+
 import { detectWorkflowContext } from "../services/workflow/detect-workflow-context.js";
 import {
   buildBranchProposal,

@@ -1,3 +1,44 @@
+/**
+ * src/policies/legacy/devai-git-workflo.js
+ *
+ * Story 4.3 — FROZEN BASELINE for the BMAD command compatibility contract.
+ *
+ * This module is the "previous plugin contract baseline" restored in Story 1.1
+ * and intentionally KEPT MINIMAL. It implements 4 of the 6 hook keys from
+ * `SUPPORTED_HOOK_KEYS` (`src/utils/constants.js`):
+ *
+ *   - `command.execute.before` — pushes the start-instruction text built by
+ *     `buildStartInstruction`. Wrapper MUST forward this push verbatim
+ *     (Story 4.5 normalises `output.parts` and asserts wrapper === legacy).
+ *   - `tool.execute.before`    — throws the mutating-tool guard message
+ *     `"Git workflow guard: create or switch to branch \`workflow\` before
+ *     editing files for /<command>."`. Wrapper MUST propagate the same
+ *     message string; renaming or rewording it is a contract break.
+ *   - `tool.execute.after`     — flips lifecycle to `mutating` for tracked
+ *     sessions. Wrapper-side phase advancement runs first; this hook stays
+ *     the last delegate so legacy state mirrors wrapper state.
+ *   - `event`                  — clears `states.delete(sessionID)` on
+ *     `session.deleted`. Wrapper-side `workflowState.clear(sessionID)` runs
+ *     first; legacy then independently cleans the SAME sessionID.
+ *
+ * This module deliberately does NOT implement `permission.asked` or
+ * `file.edited` — those are wrapper-only hooks (`WRAPPER_ONLY_HOOK_KEYS`).
+ * The 4-vs-6 asymmetry is part of the compatibility definition, not a gap.
+ *
+ * Story 4.3 GUARDRAILS (do not change in this story or any future story
+ * without a sprint-change-proposal):
+ *   1. Do NOT add a 5th/6th hook to this file (drift from the frozen baseline).
+ *   2. Do NOT change the strings produced by `buildStartInstruction` or the
+ *      mutating-tool throw message — Story 4.5 regression compares them
+ *      byte-for-byte against the wrapper outputs.
+ *   3. Do NOT add new behavior, side effects, or smarter logic here. Any
+ *      "smarter" workflow behavior belongs in `src/services/*` and is glued
+ *      in by the wrapper hook factories, not by this baseline.
+ *   4. Do NOT delete, rename, or move this file. `package.json`'s `test`
+ *      script enforces `node --check src/policies/legacy/devai-git-workflo.js`
+ *      as an import-ability invariant on every CI run.
+ */
+
 import fs from "node:fs";
 import path from "node:path";
 import { normalizeCommandName } from "../../services/workflow/detect-workflow-context.js";

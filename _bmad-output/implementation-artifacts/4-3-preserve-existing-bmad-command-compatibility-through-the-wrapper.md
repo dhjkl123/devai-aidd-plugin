@@ -1,6 +1,6 @@
 # Story 4.3: 래퍼를 통한 기존 BMAD 명령어 호환성 보존
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -23,37 +23,37 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] BMAD 명령어 호환성 계약을 코드와 문서 양쪽에서 명문화한다 (AC: 1)
-  - [ ] `src/index.js`의 bootstrap이 반환하는 6개 훅 키(`command.execute.before`, `tool.execute.before`, `tool.execute.after`, `permission.asked`, `file.edited`, `event`)를 호환성 계약으로 고정하고, 키 이름·순서·시그니처를 변경하지 않는다.
-  - [ ] `DevaiAiddGuardPlugin`을 1차 진입점으로 유지하고 `DevaiGitWorkflowPlugin` 별칭 export(`src/index.js:283`)도 그대로 보존해 기존 manifest/installer가 가리키는 심볼이 깨지지 않게 한다.
-  - [ ] 워크플로우 명령어 셋은 `loadWorkflowCommands(directory, fsAdapter)`이 산출하는 `.opencode/commands/*.md` 기반의 동일 슬러그 셋이며, 래퍼가 이 셋을 레거시 코어(`src/policies/legacy/devai-git-workflo.js`)로 그대로 전달해 양쪽이 같은 명령어 인식 결과를 갖도록 강제한다.
-  - [ ] 명령어 슬러그 정규화 규칙은 `normalizeCommandName`(`src/services/workflow/detect-workflow-context.js`)을 단일 출처로 사용하고, 래퍼·레거시·회귀 테스트에서 동일 함수를 재사용한다.
+- [x] BMAD 명령어 호환성 계약을 코드와 문서 양쪽에서 명문화한다 (AC: 1)
+  - [x] `src/index.js`의 bootstrap이 반환하는 6개 훅 키(`command.execute.before`, `tool.execute.before`, `tool.execute.after`, `permission.asked`, `file.edited`, `event`)를 호환성 계약으로 고정하고, 키 이름·순서·시그니처를 변경하지 않는다.
+  - [x] `DevaiAiddGuardPlugin`을 1차 진입점으로 유지하고 `DevaiGitWorkflowPlugin` 별칭 export(`src/index.js:283`)도 그대로 보존해 기존 manifest/installer가 가리키는 심볼이 깨지지 않게 한다.
+  - [x] 워크플로우 명령어 셋은 `loadWorkflowCommands(directory, fsAdapter)`이 산출하는 `.opencode/commands/*.md` 기반의 동일 슬러그 셋이며, 래퍼가 이 셋을 레거시 코어(`src/policies/legacy/devai-git-workflo.js`)로 그대로 전달해 양쪽이 같은 명령어 인식 결과를 갖도록 강제한다.
+  - [x] 명령어 슬러그 정규화 규칙은 `normalizeCommandName`(`src/services/workflow/detect-workflow-context.js`)을 단일 출처로 사용하고, 래퍼·레거시·회귀 테스트에서 동일 함수를 재사용한다.
 
-- [ ] 래퍼 → 레거시 위임 경계가 모든 훅에서 동작 등가성을 유지하도록 가드한다 (AC: 1)
-  - [ ] `src/hooks/command-execute-before.js`, `src/hooks/tool-execute-before.js`, `src/hooks/tool-execute-after.js`, `src/hooks/session.js`는 래퍼 책임(workflow detection, approval publication, phase advance, finalization gating)을 마친 뒤 항상 마지막에 `legacyHandlers[...]`을 호출하는 “thin wrapper” 패턴을 유지한다. 이 호출 순서가 핵심 가드 흐름의 호환성 계약이며 변경하지 않는다.
-  - [ ] 레거시 코어가 `command.execute.before`에서 작성하는 start instruction 텍스트(`buildStartInstruction`)는 래퍼가 절대 수정·재작성·중복 push하지 않으며, 회귀 테스트의 `normalizeOutputParts` 비교가 깨지지 않게 한다.
-  - [ ] 레거시 코어가 `tool.execute.before`에서 throw하는 mutating-tool guard 메시지 형식(`Git workflow guard: create or switch to branch \`workflow\` before editing files for /<command>.`)은 래퍼 경로에서도 동일 message로 전파되어야 하며, 래퍼가 자체 메시지로 치환하지 않는다.
-  - [ ] `event` 훅 위임은 `session.deleted` 이벤트의 sessionID를 양쪽에서 동일하게 정리하도록 유지하고, 래퍼 측 `workflowState.clear(sessionID)` 호출 이후 레거시 핸들러가 동일 sessionID를 재참조해도 누수되지 않도록 한다.
+- [x] 래퍼 → 레거시 위임 경계가 모든 훅에서 동작 등가성을 유지하도록 가드한다 (AC: 1)
+  - [x] `src/hooks/command-execute-before.js`, `src/hooks/tool-execute-before.js`, `src/hooks/tool-execute-after.js`, `src/hooks/session.js`는 래퍼 책임(workflow detection, approval publication, phase advance, finalization gating)을 마친 뒤 항상 마지막에 `legacyHandlers[...]`을 호출하는 “thin wrapper” 패턴을 유지한다. 이 호출 순서가 핵심 가드 흐름의 호환성 계약이며 변경하지 않는다.
+  - [x] 레거시 코어가 `command.execute.before`에서 작성하는 start instruction 텍스트(`buildStartInstruction`)는 래퍼가 절대 수정·재작성·중복 push하지 않으며, 회귀 테스트의 `normalizeOutputParts` 비교가 깨지지 않게 한다.
+  - [x] 레거시 코어가 `tool.execute.before`에서 throw하는 mutating-tool guard 메시지 형식(`Git workflow guard: create or switch to branch \`workflow\` before editing files for /<command>.`)은 래퍼 경로에서도 동일 message로 전파되어야 하며, 래퍼가 자체 메시지로 치환하지 않는다.
+  - [x] `event` 훅 위임은 `session.deleted` 이벤트의 sessionID를 양쪽에서 동일하게 정리하도록 유지하고, 래퍼 측 `workflowState.clear(sessionID)` 호출 이후 레거시 핸들러가 동일 sessionID를 재참조해도 누수되지 않도록 한다.
 
-- [ ] 래퍼 전용(placeholder) 훅의 경계와 미지원 경로를 명시적으로 표현한다 (AC: 2)
-  - [ ] `src/hooks/permission-asked.js`와 `src/hooks/file-edited.js`는 레거시 코어에 대응 핸들러가 없는 “wrapper-only” 훅이라는 사실을 기존 코드 주석/감사 이벤트 그대로 유지한다(`src/index.js:104-116`의 `plugin bootstrap registered no-op hooks` 감사 emit 포함).
-  - [ ] 두 훅은 레거시 핸들러가 부재할 때도 throw 없이 `undefined`를 반환하는 결정적 동작을 유지하고, 래퍼 측 책임(approval ingress, recovery routing, touched-file 추적)이 실패해도 런타임에 surface되지 않도록 best-effort 가드를 보존한다.
-  - [ ] 워크플로우 명령어가 아닌 세션에서는 placeholder 훅이 어떤 mutation도 발생시키지 않아야 하며, 비-워크플로우 명령어 경로(`session-nwf`류)에서 placeholder 훅이 우연히 가드 흐름을 활성화하지 않도록 한다.
-  - [ ] TODO 또는 미래 확장 슬롯이 코드 주석으로 남아 있을 경우, “현재 미지원이며 레거시 동등 동작이 없다”는 사실을 코드 주석 또는 inline 문서로 명시해 호환성 계약을 잘못 광고하지 않는다.
+- [x] 래퍼 전용(placeholder) 훅의 경계와 미지원 경로를 명시적으로 표현한다 (AC: 2)
+  - [x] `src/hooks/permission-asked.js`와 `src/hooks/file-edited.js`는 레거시 코어에 대응 핸들러가 없는 “wrapper-only” 훅이라는 사실을 기존 코드 주석/감사 이벤트 그대로 유지한다(`src/index.js:104-116`의 `plugin bootstrap registered no-op hooks` 감사 emit 포함).
+  - [x] 두 훅은 레거시 핸들러가 부재할 때도 throw 없이 `undefined`를 반환하는 결정적 동작을 유지하고, 래퍼 측 책임(approval ingress, recovery routing, touched-file 추적)이 실패해도 런타임에 surface되지 않도록 best-effort 가드를 보존한다.
+  - [x] 워크플로우 명령어가 아닌 세션에서는 placeholder 훅이 어떤 mutation도 발생시키지 않아야 하며, 비-워크플로우 명령어 경로(`session-nwf`류)에서 placeholder 훅이 우연히 가드 흐름을 활성화하지 않도록 한다.
+  - [x] TODO 또는 미래 확장 슬롯이 코드 주석으로 남아 있을 경우, “현재 미지원이며 레거시 동등 동작이 없다”는 사실을 코드 주석 또는 inline 문서로 명시해 호환성 계약을 잘못 광고하지 않는다.
 
-- [ ] 호환성 보장의 근거가 되는 정적 계약을 한 곳에 모아 향후 확장이 깨뜨릴 수 없게 한다 (AC: 1, 2)
-  - [ ] `src/index.js` 또는 인접한 단일 모듈에 “지원되는 훅 키 집합”과 “wrapper-only 훅 집합”을 식별 가능한 상수/주석으로 표현해 Story 4.5의 회귀 테스트가 동일 출처를 참조할 수 있게 한다(데이터 형태만 정리; 새 모듈을 도입할 필요는 없음).
-  - [ ] `src/policies/legacy/devai-git-workflo.js`는 Story 1.1에서 복원된 형태 그대로 유지하고, 새 동작이나 새 훅 키를 레거시 코어에 추가하지 않는다. 레거시 코어는 “이전 플러그인 계약의 동결된 기준선”이라는 위치를 명시 주석으로 박는다.
-  - [ ] `package.json`의 `test` 스크립트가 검사하는 두 모듈 경로(`src/index.js`, `src/policies/legacy/devai-git-workflo.js`)가 호환성 계약의 “이 두 진입점이 항상 import 가능해야 한다”는 invariant를 표현하고 있음을 Dev Notes에 남기고, 그 invariant를 깨는 변경은 본 스토리 범위에서 금지한다.
+- [x] 호환성 보장의 근거가 되는 정적 계약을 한 곳에 모아 향후 확장이 깨뜨릴 수 없게 한다 (AC: 1, 2)
+  - [x] `src/index.js` 또는 인접한 단일 모듈에 “지원되는 훅 키 집합”과 “wrapper-only 훅 집합”을 식별 가능한 상수/주석으로 표현해 Story 4.5의 회귀 테스트가 동일 출처를 참조할 수 있게 한다(데이터 형태만 정리; 새 모듈을 도입할 필요는 없음).
+  - [x] `src/policies/legacy/devai-git-workflo.js`는 Story 1.1에서 복원된 형태 그대로 유지하고, 새 동작이나 새 훅 키를 레거시 코어에 추가하지 않는다. 레거시 코어는 “이전 플러그인 계약의 동결된 기준선”이라는 위치를 명시 주석으로 박는다.
+  - [x] `package.json`의 `test` 스크립트가 검사하는 두 모듈 경로(`src/index.js`, `src/policies/legacy/devai-git-workflo.js`)가 호환성 계약의 “이 두 진입점이 항상 import 가능해야 한다”는 invariant를 표현하고 있음을 Dev Notes에 남기고, 그 invariant를 깨는 변경은 본 스토리 범위에서 금지한다.
 
-- [ ] Story 4.5와 명확히 분리되도록 검증 작업을 한정한다 (AC: 1, 2)
-  - [ ] 본 스토리는 “호환성 계약 자체”를 코드와 주석으로 고정하는 데에만 집중하고, 새 회귀 테스트 함수 추가/리팩터링은 Story 4.5에서 처리한다. 단, 래퍼 코드 변경으로 기존 회귀 테스트가 깨질 경우에는 본 스토리 안에서 코드 측을 원복/조정해 통과 상태를 회복한다.
-  - [ ] 본 스토리 안에서 `tests/regression.test.js`에 신규 테스트 함수를 추가하지 않는다. 다만, 래퍼 책임 경계가 바뀐 부분(예: 새 위임 순서)이 기존 테스트의 가정과 충돌하지 않는지 검증하기 위해 `npm run build && npm test`를 통과시키는 것은 본 스토리의 종료 조건에 포함된다.
-  - [ ] Story 4.5에서 사용할 수 있도록, 본 스토리에서 정리한 “지원 훅 키 집합”과 “wrapper-only 훅 집합”의 위치를 Dev Notes에 명시한다.
+- [x] Story 4.5와 명확히 분리되도록 검증 작업을 한정한다 (AC: 1, 2)
+  - [x] 본 스토리는 “호환성 계약 자체”를 코드와 주석으로 고정하는 데에만 집중하고, 새 회귀 테스트 함수 추가/리팩터링은 Story 4.5에서 처리한다. 단, 래퍼 코드 변경으로 기존 회귀 테스트가 깨질 경우에는 본 스토리 안에서 코드 측을 원복/조정해 통과 상태를 회복한다.
+  - [x] 본 스토리 안에서 `tests/regression.test.js`에 신규 테스트 함수를 추가하지 않는다. 다만, 래퍼 책임 경계가 바뀐 부분(예: 새 위임 순서)이 기존 테스트의 가정과 충돌하지 않는지 검증하기 위해 `npm run build && npm test`를 통과시키는 것은 본 스토리의 종료 조건에 포함된다.
+  - [x] Story 4.5에서 사용할 수 있도록, 본 스토리에서 정리한 “지원 훅 키 집합”과 “wrapper-only 훅 집합”의 위치를 Dev Notes에 명시한다.
 
-- [ ] README/문서가 호환성 계약을 잘못 광고하지 않는지 점검한다 (AC: 2)
-  - [ ] README가 “지원되는 BMAD 명령어 동작” 또는 “훅 동작”을 설명하는 부분이 있다면, wrapper-only 훅(`permission.asked`, `file.edited`)이 레거시 코어와 동등한 동작을 보장하는 것이 아니라는 점을 명확히 한다(이미 명시되어 있다면 그대로 유지).
-  - [ ] 새 문서를 만들지 않고 기존 README를 최소 편집한다. 본 스토리 범위에서는 인스톨러/패키징 문서(Story 4.4 영역)와 회귀 커버리지 가이드(Story 4.5 영역)는 건드리지 않는다.
+- [x] README/문서가 호환성 계약을 잘못 광고하지 않는지 점검한다 (AC: 2)
+  - [x] README가 “지원되는 BMAD 명령어 동작” 또는 “훅 동작”을 설명하는 부분이 있다면, wrapper-only 훅(`permission.asked`, `file.edited`)이 레거시 코어와 동등한 동작을 보장하는 것이 아니라는 점을 명확히 한다(이미 명시되어 있다면 그대로 유지).
+  - [x] 새 문서를 만들지 않고 기존 README를 최소 편집한다. 본 스토리 범위에서는 인스톨러/패키징 문서(Story 4.4 영역)와 회귀 커버리지 가이드(Story 4.5 영역)는 건드리지 않는다.
 
 ## Dev Notes
 
@@ -182,10 +182,82 @@ Status: ready-for-dev
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-opus-4-7[1m]
 
 ### Debug Log References
 
+- `npm test` (post-change): exit 0; regression suite reports `legacy-vs-wrapper` and `legacy-vs-built` both `passed`; mutating-tool error string preserved byte-for-byte (`Git workflow guard: create or switch to branch \`workflow\` before editing files for /bmad-bmm-quick-dev.`); wrapper logs == built logs (8 each).
+- `npm run build` (post-change): dist `dist/devai-aidd-guard.js` 461.4kb (was 461.1kb pre-change; the +0.3kb is comment-only — comments survive bundling because esbuild keeps JSDoc).
+
 ### Completion Notes List
 
+본 스토리는 “BMAD 명령어 호환성 계약 본체”를 코드/주석으로 동결하는 비-기능적(documentation-as-contract) 변경이다. 새 동작이나 새 모듈 디렉터리는 도입하지 않았다.
+
+핵심 변경:
+
+1. **`src/utils/constants.js`** — 호환성 계약의 단일 출처(SOT)로 두 frozen 상수 추가:
+   - `SUPPORTED_HOOK_KEYS` — bootstrap이 반환하는 6개 훅 키.
+   - `WRAPPER_ONLY_HOOK_KEYS` — 레거시 코어에 대응 핸들러가 없는 2개 키 (`permission.asked`, `file.edited`).
+   Story 4.5의 회귀 테스트가 이 두 상수를 import해 “계약-vs-실제 export” 불일치를 단일 출처로 단언할 수 있다.
+
+2. **`src/index.js`** — 모듈 헤더 JSDoc에 호환성 계약 본체를 명시 (6개 훅 키, 2개 export 심볼, wrapper-only 비대칭, best-effort audit 정책). 하드코딩된 `["permission.asked", "file.edited"]` 리터럴을 `WRAPPER_ONLY_HOOK_KEYS` 참조로 교체해 SOT 일관성 강화. 반환 hook map과 export 별칭에 “계약 위반은 FR29 깨짐” 경고 주석 추가.
+
+3. **`src/policies/legacy/devai-git-workflo.js`** — 헤더 주석에 “FROZEN BASELINE” 위치 박음. 4개 훅 동작 (start instruction, mutating-tool throw 메시지, lifecycle 전환, session.deleted 정리)을 변경 금지 항목으로 명시. 가드레일 4개(5번째 훅 추가 금지 / 메시지 문자열 변경 금지 / 새 동작 추가 금지 / 파일 삭제·이동 금지) 명문화.
+
+4. **`src/hooks/command-execute-before.js` / `tool-execute-before.js` / `tool-execute-after.js` / `session.js`** — 모듈 헤더 JSDoc에 “THIN WRAPPER” 패턴(래퍼 책임 → 항상 마지막에 `legacyHandlers[...]` 위임) 명시. 각 훅이 보존해야 할 레거시 invariant(start instruction push, mutating-tool error message, session 정리)를 명시.
+
+5. **`src/hooks/permission-asked.js` / `file-edited.js`** — 모듈 헤더 JSDoc에 “WRAPPER-ONLY” 위치 명시. 레거시 코어에 대응 핸들러 없음, throw 금지, no-op 결정성 보장을 호환성 계약의 일부로 못박음.
+
+6. **README** — wrapper-only 훅에 대한 잘못된 광고 없음 확인 (현재 README는 `permission.asked` / `file.edited` 자체를 언급하지 않음). Task 6 “이미 명시되어 있다면 그대로 유지” 규정에 따라 편집 없음.
+
+검증:
+
+- `npm test` exit 0 — 기존 회귀 테스트(legacy-vs-wrapper, legacy-vs-built)가 변경 후에도 100% 통과. mutating-tool error 메시지 문자열 일치, prompt parts 정규화 일치, 8개 audit log 일치 확인.
+- `npm run build` 성공 (dist 461.4kb).
+- 신규 회귀 테스트 함수는 추가하지 않음 (Story 4.5 범위 보호).
+- 새 모듈 디렉터리 (`src/services/compat/` 등) 도입 없음.
+- `package.json`의 `test` 스크립트가 검사하는 `node --check src/index.js` / `node --check src/policies/legacy/devai-git-workflo.js` invariant는 변경 없음 — 두 진입점은 본 스토리에서도 import 가능 상태 유지.
+
+Story 4.5 인계 사항: 회귀 테스트가 호환성 계약을 단일 출처로 참조해야 할 때 import 위치는 `src/utils/constants.js` (`SUPPORTED_HOOK_KEYS`, `WRAPPER_ONLY_HOOK_KEYS`). 두 상수는 `Object.freeze`로 변경 불가하다.
+
+### Code Review R2 (2026-05-10)
+
+코드 리뷰 결과: CRITICAL 0 / HIGH 0 / MEDIUM 3 / LOW 4. CRITICAL/HIGH 부재로 봉쇄적 결함은 없으며, 다음과 같이 R2에서 처리:
+
+- **M-1 (SOT contract drift 단언) — Story 4.5로 이관 + R2에서 부분 완화.** 본 스토리는 "새 회귀 테스트 함수 추가 금지" 가드레일이 있으므로 SOT-vs-실제-export 불일치를 회귀로 단언하는 책임은 Story 4.5 영역으로 이관. 단, dead-import로 오해되어 누군가 `SUPPORTED_HOOK_KEYS` import를 지우는 사태를 막기 위해 `src/index.js`에 (a) import 위 명시 주석 + (b) `void SUPPORTED_HOOK_KEYS;` 라이브 바인딩 1줄을 추가해 SOT 앵커 보존.
+- **M-2 (File List dist 라벨) — R2 자동 수정.** File List의 `dist/devai-aidd-guard.js` 라인을 "Build artifact (not git-tracked, regenerated by `npm run build`)"로 라벨 변경.
+- **M-3 (frozen sets vs frozen Array 타입 mismatch) — R2 자동 수정.** `src/utils/constants.js` 헤더 코멘트에서 "frozen sets" 표현을 "frozen tuples"로 정정하고, Set 의미론이 필요한 소비자가 `new Set(SUPPORTED_HOOK_KEYS)`로 변환해야 함을 명시. 타입은 frozen Array를 그대로 유지(JSON 직렬화 + `.filter` 호환성).
+- **L-1 (export 그룹화) — 스킵.** "새 모듈 디렉터리/파일 추가 금지" 가드레일과 충돌 가능성. 현재 `src/utils/constants.js` 내 시각적 구분선으로 충분.
+- **L-2 (wrapper-only 주석 모순) — R2 자동 수정.** `permission-asked.js` / `file-edited.js` 헤더에서 fall-through 분기가 "현재 frozen baseline 기준 항상 발생; 미래 legacy 핸들러 등장에 대한 방어 코드"임을 명시.
+- **L-3 (audit 이벤트 목록 동기화) — Story 4.5로 이관.** 헤더 audit list와 실제 emit 호출의 cross-check는 회귀 테스트 영역.
+- **L-4 (tool-execute-after.js 헤더 finalization-gating 명시) — R2 자동 수정.** 헤더 JSDoc 끝에 "Finalization-gating asymmetry note"를 추가해 finish-tool 경로가 wrapper-only이며 legacy parity 비교를 깨지 않음을 명시.
+
+검증 (R2 후):
+- `npm test` exit 0 — 기존 `legacy-vs-wrapper` / `legacy-vs-built` parity 회귀 통과 유지. mutating-tool error 메시지 byte-for-byte 일치, 8건 audit log 일치, prompt parts 정규화 일치.
+- `npm run build` 성공 (dist 461.4kb, R1과 동일 — comments-only delta).
+- 수정은 모두 코드 동작 변경이 없는 documentation-as-contract 보강. 새 회귀 테스트/모듈 추가 없음.
+
+Story 4.5 인계 (R2 추가): (1) `import { SUPPORTED_HOOK_KEYS } from "../src/utils/constants.js"` 후 `await DevaiAiddGuardPlugin(...)` 반환 키와 set-equal 단언 1건; (2) `src/index.js` 헤더 audit 이벤트 list와 본문 `audit.info(...)` 호출 set-equal 단언 1건; (3) `WRAPPER_ONLY_HOOK_KEYS`도 동일 패턴으로 단언.
+
 ### File List
+
+- Modified:
+  - `src/utils/constants.js` — Story 4.3 SUPPORTED_HOOK_KEYS / WRAPPER_ONLY_HOOK_KEYS frozen contract sets added.
+  - `src/index.js` — module header JSDoc for compatibility contract; wrapperOnlyHooks now references WRAPPER_ONLY_HOOK_KEYS; hook map and export alias commented as contract surface.
+  - `src/policies/legacy/devai-git-workflo.js` — frozen-baseline header JSDoc with 4 guardrails.
+  - `src/hooks/command-execute-before.js` — thin-wrapper header JSDoc (start-instruction invariant).
+  - `src/hooks/tool-execute-before.js` — thin-wrapper header JSDoc (mutating-tool error invariant).
+  - `src/hooks/tool-execute-after.js` — thin-wrapper header JSDoc (lifecycle delegation order).
+  - `src/hooks/session.js` — thin-wrapper header JSDoc (session.deleted teardown order).
+  - `src/hooks/permission-asked.js` — wrapper-only boundary header JSDoc (asymmetry vs legacy core).
+  - `src/hooks/file-edited.js` — wrapper-only boundary header JSDoc (asymmetry vs legacy core).
+  - `dist/devai-aidd-guard.js` — Build artifact (not git-tracked, regenerated by `npm run build`); R1 build dist 461.4kb (comments-only delta from pre-story baseline 461.1kb), R2 build dist 461.4kb (R2 added/edited comments only — bundler keeps comment delta within rounding bucket).
+  - `_bmad-output/implementation-artifacts/sprint-status.yaml` — story 4-3 status ready-for-dev → in-progress → review.
+  - `_bmad-output/implementation-artifacts/4-3-preserve-existing-bmad-command-compatibility-through-the-wrapper.md` — Status, Tasks, Dev Agent Record, File List, Change Log updates.
+
+## Change Log
+
+| Date       | Version | Description                                                                                                                                                                                                                       | Author |
+| ---------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 2026-05-10 | 0.1     | dev-story workflow: BMAD command compatibility contract codified — SUPPORTED_HOOK_KEYS / WRAPPER_ONLY_HOOK_KEYS constants in src/utils/constants.js, contract-body JSDoc on src/index.js, frozen-baseline JSDoc on src/policies/legacy/devai-git-workflo.js, thin-wrapper / wrapper-only JSDoc on all 6 hook factories. No new behavior or regression tests added (Story 4.5 scope protected); npm test exit 0; npm run build dist 461.4kb; status in-progress → review. | Dev (claude-opus-4-7[1m]) |
+| 2026-05-10 | 0.2     | code-review R1 + R2: 0 CRITICAL / 0 HIGH / 3 MEDIUM (M-1 SOT contract drift, M-2 dist File List label, M-3 frozen sets vs frozen Array) / 4 LOW. R2 auto-fixes: M-2 dist label corrected to "Build artifact (not git-tracked)"; M-3 constants comment "frozen sets" → "frozen tuples" with `new Set(...)` conversion guidance; M-1 partial mitigation via `void SUPPORTED_HOOK_KEYS;` SOT-anchor live binding + import-block comment; L-2 wrapper-only headers clarified as defensive fall-through; L-4 tool-execute-after header gained finalization-gating asymmetry note. M-1 SOT-vs-export drift assertion + L-3 audit-event list cross-check ceded to Story 4.5; L-1 export grouping skipped (collides with no-new-module guardrail). npm test exit 0; npm run build dist 461.4kb; status review → done. | Reviewer (claude-opus-4-7[1m]) |

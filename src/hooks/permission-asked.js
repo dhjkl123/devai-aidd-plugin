@@ -1,6 +1,24 @@
 /**
  * permission-asked.js
  *
+ * Story 4.3 — WRAPPER-ONLY hook. There is NO matching legacy core handler in
+ * `src/policies/legacy/devai-git-workflo.js` for `permission.asked`; this is
+ * by design (`WRAPPER_ONLY_HOOK_KEYS` in `src/utils/constants.js`). The
+ * approval ingress + recovery routing implemented below are wrapper-only
+ * forward-looking responsibilities, not "legacy-equivalent" behavior — the
+ * compatibility contract (FR29) does NOT promise that the legacy plugin had
+ * an analogous handler. The bootstrap audit `plugin bootstrap registered
+ * no-op hooks` documents that asymmetry once per session.
+ *
+ * Determinism guarantee: when wrapper-side resolution paths fail or no
+ * `legacyHandlers["permission.asked"]` exists (always the case under the
+ * current frozen baseline — the legacy core does not implement this key;
+ * the fall-through branch is purely defensive against a future legacy core
+ * that would re-introduce the key without going through a contract change),
+ * this hook returns `undefined` without throwing. A throw here would be
+ * misread by the runtime as a permission failure and break unrelated
+ * workflows.
+ *
  * Story 2.3: this hook is the primary ingress for approval outcomes
  * (accept / deny / ignore-and-continue) selected by the runtime user.
  *

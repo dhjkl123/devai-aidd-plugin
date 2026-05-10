@@ -1,3 +1,31 @@
+/**
+ * src/index.js — DevAI AIDD Guard plugin bootstrap.
+ *
+ * Story 4.3 — BMAD command compatibility contract entry point.
+ *
+ * The function `DevaiAiddGuardPlugin` returns the 6 hook keys listed in
+ * `SUPPORTED_HOOK_KEYS` (see `src/utils/constants.js`). Two of those keys —
+ * `WRAPPER_ONLY_HOOK_KEYS` — have NO matching legacy core handler and stay
+ * deterministic no-ops at the boundary. The remaining 4 keys are implemented
+ * by the frozen legacy core (`src/policies/legacy/devai-git-workflo.js`) and
+ * the wrapper hook factories ALWAYS delegate to those legacy handlers as the
+ * last step — preserving start-instruction text, mutating-tool guard message
+ * strings, and `session.deleted` cleanup byte-for-byte.
+ *
+ * Two export symbols MUST stay alive: `DevaiAiddGuardPlugin` (current name)
+ * and the legacy alias `DevaiGitWorkflowPlugin`. Existing manifests/installers
+ * may still reference either symbol; dropping one is a contract break under
+ * FR29.
+ *
+ * This module also performs best-effort bootstrap audit emissions
+ * (`config.validation.failed`, `compat.bridge.evaluated`, `plugin bootstrap`,
+ * `plugin bootstrap registered no-op hooks`) — none of these may abort
+ * bootstrap on a throwing audit sink (NFR7/NFR8).
+ *
+ * Story 4.3 freezes the above as the "compatibility contract body". Story 4.5
+ * supplies the regression coverage that validates it.
+ */
+
 import { DevaiGitWorkflowPlugin } from "./policies/legacy/devai-git-workflo.js";
 import { createFileSystemAdapter } from "./adapters/fs.js";
 import { createConsoleAdapter } from "./adapters/console.js";
@@ -19,6 +47,26 @@ import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-poli
 import { runGitAction, runGitCommand } from "./services/git/run-git-command.js";
 import { buildRecoveryPrompt } from "./services/approval/build-recovery-prompt.js";
 import { parseStatusPorcelainPaths } from "./services/workflow/parse-status-porcelain.js";
+// Story 4.3: `SUPPORTED_HOOK_KEYS` is imported here for documentation /
+// SOT traceability — the symbol itself is the canonical 6-key contract list
+// referenced by the JSDoc header above and by Story 4.5's regression suite
+// (`legacy vs wrapper vs built` hook-key existence assertions will import
+// the SAME symbol). Do NOT drop this import as "unused"; removing it would
+// silently delete the SOT anchor that the contract comments point at.
+// `WRAPPER_ONLY_HOOK_KEYS` is consumed below to derive the actual no-op set
+// against `legacyHandlers`.
+import {
+  // eslint-disable-next-line no-unused-vars -- SOT anchor; see comment above
+  SUPPORTED_HOOK_KEYS,
+  WRAPPER_ONLY_HOOK_KEYS,
+} from "./utils/constants.js";
+
+// Story 4.3: keep SUPPORTED_HOOK_KEYS reachable at module scope so a future
+// linter or bundler tree-shaker treats it as a live binding. The runtime
+// effect is zero (truthy frozen array) but the reference prevents accidental
+// dead-code removal of the SOT anchor before Story 4.5 wires it into a
+// regression assertion.
+void SUPPORTED_HOOK_KEYS;
 
 const SUPPORTED_RUNTIME = "Node.js ESM plugin runtime (Node 22 target)";
 
@@ -170,7 +218,13 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       throw new Error("Legacy hook registration did not return a handler map.");
     }
 
-    const wrapperOnlyHooks = ["permission.asked", "file.edited"].filter(
+    // Story 4.3: WRAPPER_ONLY_HOOK_KEYS (`permission.asked`, `file.edited`)
+    // are the keys with NO legacy core counterpart. We re-derive the actual
+    // no-op set against `legacyHandlers` to keep the audit faithful to what
+    // the legacy bootstrap returned, but the canonical contract list itself
+    // lives in `src/utils/constants.js` so Story 4.5's regression suite can
+    // assert the contract from a single source.
+    const wrapperOnlyHooks = WRAPPER_ONLY_HOOK_KEYS.filter(
       (hookName) => typeof legacyHandlers[hookName] !== "function",
     );
     if (wrapperOnlyHooks.length > 0) {
@@ -300,6 +354,17 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       },
     };
 
+    // Story 4.3: the hook map below is the external plugin contract surface.
+    // Its keys MUST stay byte-for-byte equal to `SUPPORTED_HOOK_KEYS`; renaming,
+    // dropping, or adding a key is a compatibility break under FR29 and would
+    // also break Story 4.5 regression assertions (`legacy vs wrapper vs built`
+    // hook key existence). Each wrapper handler is a "thin wrapper": after the
+    // wrapper-side responsibility runs (workflow detection, approval/recovery
+    // ingress, phase advance, finalization gating, sessionState cleanup), it
+    // ALWAYS delegates to the matching `legacyHandlers[...]` as the last step.
+    // The two wrapper-only keys (`permission.asked`, `file.edited`) honor that
+    // shape too — they fall through to a no-op return when no legacy handler
+    // is present, instead of throwing.
     return {
       "command.execute.before": createCommandExecuteBeforeHook(legacyHandlers, {
         workflowCommands,
@@ -349,5 +414,11 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
   }
 }
 
+// Story 4.3: BOTH symbols below are part of the FR29 compatibility contract.
+// `DevaiAiddGuardPlugin` is the canonical name used by current packaging and
+// installer manifests; `DevaiGitWorkflowPlugin` is the legacy alias preserved
+// for installs whose manifest still points at the old name. Removing either
+// export — or making them point at different functions — is a contract break
+// and will be regression-asserted from Story 4.5.
 export { DevaiAiddGuardPlugin as DevaiGitWorkflowPlugin };
 export default DevaiAiddGuardPlugin;
