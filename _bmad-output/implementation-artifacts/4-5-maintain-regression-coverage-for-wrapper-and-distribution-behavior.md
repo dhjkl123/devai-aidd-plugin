@@ -1,6 +1,6 @@
 # Story 4.5: 래퍼 및 배포 동작에 대한 회귀 커버리지 유지
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -23,47 +23,48 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] 회귀 스위트가 “legacy / wrapper / built” 3변형 비교를 영속적으로 보장하도록 게이트 계약을 명문화한다 (AC: 1)
-  - [ ] `tests/regression.test.js`의 `main()` 진입부가 `verifyLegacyBootstrapDependencyPath()`와 `verifyBuiltArtifactExists()`를 항상 먼저 호출하도록 유지하고, 세 모듈 인스턴스(`legacy`, `wrapper`, `built`)가 모두 인스턴스화되지 않으면 테스트가 실패하는 invariant를 코드 옆 주석으로 박는다.
-  - [ ] `npm test` 스크립트가 `node --check src/index.js`, `node --check src/policies/legacy/devai-git-workflo.js`, `node --check scripts/build.js`, `node --check scripts/make-release.js`, 그리고 `node tests/regression.test.js`를 모두 포함하는 현재 형태를 유지하고, Story 4.5에서는 이 호출 순서를 단축하거나 우회하지 않는다.
-  - [ ] `dist/devai-aidd-guard.js`가 없을 때 회귀 테스트가 “run `npm run build` before `npm test`” 메시지로 명확히 실패하는 기존 동작을 유지하고, 우연히 silent skip 되지 않도록 회귀 테스트 안에서 직접 가드한다.
+- [x] 회귀 스위트가 “legacy / wrapper / built” 3변형 비교를 영속적으로 보장하도록 게이트 계약을 명문화한다 (AC: 1)
+  - [x] `tests/regression.test.js`의 `main()` 진입부가 `verifyLegacyBootstrapDependencyPath()`와 `verifyBuiltArtifactExists()`를 항상 먼저 호출하도록 유지하고, 세 모듈 인스턴스(`legacy`, `wrapper`, `built`)가 모두 인스턴스화되지 않으면 테스트가 실패하는 invariant를 코드 옆 주석으로 박는다.
+  - [x] `npm test` 스크립트가 `node --check src/index.js`, `node --check src/policies/legacy/devai-git-workflo.js`, `node --check scripts/build.js`, `node --check scripts/make-release.js`, 그리고 `node tests/regression.test.js`를 모두 포함하는 현재 형태를 유지하고, Story 4.5에서는 이 호출 순서를 단축하거나 우회하지 않는다.
+  - [x] `dist/devai-aidd-guard.js`가 없을 때 회귀 테스트가 “run `npm run build` before `npm test`” 메시지로 명확히 실패하는 기존 동작을 유지하고, 우연히 silent skip 되지 않도록 회귀 테스트 안에서 직접 가드한다.
 
-- [ ] 명령 프롬프트 동등성과 mutating-tool 보호 동등성을 “legacy 기준선 + built/wrapper parity”로 분리해 안정화한다 (AC: 1)
-  - [ ] `command.execute.before` 출력에 대한 비교는 (a) `wrapper vs legacy`, (b) `built vs legacy` 두 축을 유지하고, Story 2.1 이후 도입된 approval prompt는 `built vs wrapper` parity로 분리해 검사하는 현재 구조를 보존한다.
-  - [ ] mutating-tool 가드가 `legacy`, `wrapper`, `built` 세 변형 모두에서 동일한 메시지/예외 형상을 내야 하며, 비-워크플로우 세션에서는 발화되지 않아야 한다는 invariant를 회귀에서 직접 검증한다.
-  - [ ] `permission.asked`, `file.edited` 핸들러가 `wrapper`/`built`에서만 등록되고 `legacy`에는 부재하다는 점을 회귀에서 확인하고, Story 4.3의 호환성 계약(”placeholder 훅이 명시적 경계를 갖는다”)이 빌드 산출물에서도 그대로 보존되었는지 검증한다.
-  - [ ] 비-워크플로우 명령은 `wrapper`/`built`에서 출력 parts가 0개여야 하고, `workflow.detected` 감사 이벤트가 발생하지 않아야 한다는 부정 검증을 함께 둔다.
+- [x] 명령 프롬프트 동등성과 mutating-tool 보호 동등성을 “legacy 기준선 + built/wrapper parity”로 분리해 안정화한다 (AC: 1)
+  - [x] `command.execute.before` 출력에 대한 비교는 (a) `wrapper vs legacy`, (b) `built vs legacy` 두 축을 유지하고, Story 2.1 이후 도입된 approval prompt는 `built vs wrapper` parity로 분리해 검사하는 현재 구조를 보존한다.
+  - [x] mutating-tool 가드가 `legacy`, `wrapper`, `built` 세 변형 모두에서 동일한 메시지/예외 형상을 내야 하며, 비-워크플로우 세션에서는 발화되지 않아야 한다는 invariant를 회귀에서 직접 검증한다.
+  - [x] `permission.asked`, `file.edited` 핸들러가 `wrapper`/`built`에서만 등록되고 `legacy`에는 부재하다는 점을 회귀에서 확인하고, Story 4.3의 호환성 계약(”placeholder 훅이 명시적 경계를 갖는다”)이 빌드 산출물에서도 그대로 보존되었는지 검증한다.
+  - [x] 비-워크플로우 명령은 `wrapper`/`built`에서 출력 parts가 0개여야 하고, `workflow.detected` 감사 이벤트가 발생하지 않아야 한다는 부정 검증을 함께 둔다.
 
-- [ ] 빌드 산출물 검증을 회귀 스위트의 1급 품질 게이트로 통합한다 (AC: 1, 2)
-  - [ ] `dist/devai-aidd-guard.js`를 `import()`로 적재해 `DevaiAiddGuardPlugin` 또는 `DevaiGitWorkflowPlugin` 또는 `default` export 중 하나가 존재해야 한다는 현재의 export 계약을 회귀 안에서 명시적으로 단정한다.
-  - [ ] 빌드 산출물 모듈의 hook map(`command.execute.before`, `tool.execute.before`, `tool.execute.after`, `event`, 그리고 `permission.asked`/`file.edited`)을 `wrapper` 모듈과 동일한 셰이프로 비교한다.
-  - [ ] 빌드 산출물에서 발생하는 approval prompt summary(`sessionID`, `partCount`, `firstText`, `phase`)가 `wrapper` 결과와 deepEqual 한지 검증해, esbuild 번들이 prompt 메타데이터를 누락/변형하지 않는지 잠근다.
-  - [ ] 빌드 산출물의 mutating-tool 예외 메시지가 `legacy` 메시지와 동일한지 단정해, 빌드 시 minify/transform이 사용자 가시 메시지를 깨지 않게 막는다.
-  - [ ] Story 4.4가 추가하는 release manifest/checksum 단정은 본 스토리의 책임 범위에 포함하지 않는다(릴리스 패키징 자체는 Story 4.4가 보장). 단, 회귀 스위트가 사전 조건으로 “빌드된 dist 산출물이 존재한다”는 사실에 의존한다는 경계는 코드 주석으로 명시한다.
+- [x] 빌드 산출물 검증을 회귀 스위트의 1급 품질 게이트로 통합한다 (AC: 1, 2)
+  - [x] `dist/devai-aidd-guard.js`를 `import()`로 적재해 `DevaiAiddGuardPlugin` 또는 `DevaiGitWorkflowPlugin` 또는 `default` export 중 하나가 존재해야 한다는 현재의 export 계약을 회귀 안에서 명시적으로 단정한다.
+  - [x] 빌드 산출물 모듈의 hook map(`command.execute.before`, `tool.execute.before`, `tool.execute.after`, `event`, 그리고 `permission.asked`/`file.edited`)을 `wrapper` 모듈과 동일한 셰이프로 비교한다.
+  - [x] 빌드 산출물에서 발생하는 approval prompt summary(`sessionID`, `partCount`, `firstText`, `phase`)가 `wrapper` 결과와 deepEqual 한지 검증해, esbuild 번들이 prompt 메타데이터를 누락/변형하지 않는지 잠근다.
+  - [x] 빌드 산출물의 mutating-tool 예외 메시지가 `legacy` 메시지와 동일한지 단정해, 빌드 시 minify/transform이 사용자 가시 메시지를 깨지 않게 막는다.
+  - [x] Story 4.4가 추가하는 release manifest/checksum 단정은 본 스토리의 책임 범위에 포함하지 않는다(릴리스 패키징 자체는 Story 4.4가 보장). 단, 회귀 스위트가 사전 조건으로 “빌드된 dist 산출물이 존재한다”는 사실에 의존한다는 경계는 코드 주석으로 명시한다.
 
-- [ ] 향후 bootstrap / hooks / finalization 변경이 추가될 때 회귀 스위트가 자연스럽게 확장 가능한 구조를 유지한다 (AC: 2)
-  - [ ] 신규 회귀 함수는 `verify<Story번호><동작>()` 네이밍을 따르고 `main().then(() => verifyXxx())` 체인 끝에 등록되는 기존 패턴을 보존하며, 새 helper를 만들 때도 동일한 컨벤션을 따른다.
-  - [ ] 새 hook 등록(예: 향후 finalization phase 확장 또는 새 mutating-tool 게이트)이 추가될 때는, `legacy`에 없을 수 있는 hook은 wrapper/built parity로만 검증하고 legacy 비교에서는 명시적으로 제외하는 규칙을 회귀 코드 옆 주석으로 박는다.
-  - [ ] 회귀 함수에서 가드 대상이 되는 audit event 이름(`workflow.detected`, `git.action.executed`, `git.action.recovery.*` 등)은 architecture.md의 “구조화 필수 이벤트” 목록과 일치해야 하며, 이름이 새로 추가되는 경우 회귀에서 가드를 추가한다는 정책을 README 또는 회귀 헤더 주석에 기록한다.
+- [x] 향후 bootstrap / hooks / finalization 변경이 추가될 때 회귀 스위트가 자연스럽게 확장 가능한 구조를 유지한다 (AC: 2)
+  - [x] 신규 회귀 함수는 `verify<Story번호><동작>()` 네이밍을 따르고 `main().then(() => verifyXxx())` 체인 끝에 등록되는 기존 패턴을 보존하며, 새 helper를 만들 때도 동일한 컨벤션을 따른다.
+  - [x] 새 hook 등록(예: 향후 finalization phase 확장 또는 새 mutating-tool 게이트)이 추가될 때는, `legacy`에 없을 수 있는 hook은 wrapper/built parity로만 검증하고 legacy 비교에서는 명시적으로 제외하는 규칙을 회귀 코드 옆 주석으로 박는다.
+  - [x] 회귀 함수에서 가드 대상이 되는 audit event 이름(`workflow.detected`, `git.action.executed`, `git.action.recovery.*` 등)은 architecture.md의 “구조화 필수 이벤트” 목록과 일치해야 하며, 이름이 새로 추가되는 경우 회귀에서 가드를 추가한다는 정책을 README 또는 회귀 헤더 주석에 기록한다.
 
-- [ ] 회귀 실행 환경의 결정성과 격리성을 유지한다 (AC: 1, 2)
-  - [ ] `createTempWorkspace()`/`createGitWorkspace()`/`createMockClient()`가 만드는 임시 디렉터리는 `finally` 블록에서 항상 정리되어야 하며, 회귀 함수 추가 시에도 같은 정리 패턴을 따른다.
-  - [ ] 회귀 테스트는 OS 글로벌 git 설정에 의존하지 않아야 하고, 외부 네트워크 호출(원격 push 등)을 발생시키지 않아야 한다. 원격은 `https://example.com/repo.git`처럼 고정된 더미 URL만 사용한다.
-  - [ ] `import(...)` 호출 시 `?t=${Date.now()}` 또는 동등한 cache-busting 쿼리를 사용해 dist 모듈 재빌드 후 동일 프로세스에서도 최신 산출물이 적재되도록 하는 현재 패턴을 보존한다.
-  - [ ] 회귀 함수 안에서 시간/난수 의존성은 호출자가 주입(예: `detectedAt`)하도록 강제해, flaky 시간 비교가 새로 들어오지 않게 막는다.
+- [x] 회귀 실행 환경의 결정성과 격리성을 유지한다 (AC: 1, 2)
+  - [x] `createTempWorkspace()`/`createGitWorkspace()`/`createMockClient()`가 만드는 임시 디렉터리는 `finally` 블록에서 항상 정리되어야 하며, 회귀 함수 추가 시에도 같은 정리 패턴을 따른다.
+  - [x] 회귀 테스트는 OS 글로벌 git 설정에 의존하지 않아야 하고, 외부 네트워크 호출(원격 push 등)을 발생시키지 않아야 한다. 원격은 `https://example.com/repo.git`처럼 고정된 더미 URL만 사용한다.
+  - [x] `import(...)` 호출 시 `?t=${Date.now()}` 또는 동등한 cache-busting 쿼리를 사용해 dist 모듈 재빌드 후 동일 프로세스에서도 최신 산출물이 적재되도록 하는 현재 패턴을 보존한다.
+  - [x] 회귀 함수 안에서 시간/난수 의존성은 호출자가 주입(예: `detectedAt`)하도록 강제해, flaky 시간 비교가 새로 들어오지 않게 막는다.
 
-- [ ] Story 4.5 전용 회귀/계약 테스트를 추가해 “세 변형 동등성”을 영속적으로 잠근다 (AC: 1, 2)
-  - [ ] `verifyStory45LegacyWrapperBuiltHandlerShapesMatch()` — 세 변형의 hook map 키 집합과 핸들러 타입을 비교해 표면 영역 누락/추가를 잡아낸다.
-  - [ ] `verifyStory45LegacyWrapperBuiltCommandPromptParity()` — `command.execute.before` 출력 parts 정규화 결과가 (legacy↔wrapper, legacy↔built) 모두 일치하는지를 단일 함수로 묶어 회귀 한 곳에서 변경을 감지한다.
-  - [ ] `verifyStory45LegacyWrapperBuiltMutatingToolGuardParity()` — `tool.execute.before` mutating 호출이 세 변형 모두에서 동일한 예외 메시지를 내고, 비-워크플로우 세션에서는 던지지 않는다는 부정 케이스를 함께 잠근다.
-  - [ ] `verifyStory45BuiltArtifactExportContract()` — `dist/devai-aidd-guard.js`가 기대 export(`DevaiAiddGuardPlugin` 또는 `DevaiGitWorkflowPlugin` 또는 `default`) 중 하나를 노출하고, 함수 시그니처(인자 1개, async-호환)가 wrapper와 동일한지 단정한다.
-  - [ ] `verifyStory45BuiltArtifactPromptParityWithWrapper()` — built이 발행하는 approval prompt summary가 wrapper와 deepEqual 한지 격리 단위로 잠근다.
-  - [ ] `verifyStory45RegressionGateAbortsWithoutBuiltArtifact()` — 일시적으로 dist 경로를 가리고 회귀가 명확히 실패하는지(또는 사전 가드가 실패하는지)를 fixture 기반으로 검증한다. 실제 dist를 삭제하지 않고 임시 fixture root에서 검증한다.
-  - [ ] 신규 함수들은 `main().then(...)` 체인의 Story 3.5 블록 다음에 “Story 4.5 — wrapper/built regression gate” 코멘트와 함께 추가한다.
+- [x] Story 4.5 전용 회귀/계약 테스트를 추가해 “세 변형 동등성”을 영속적으로 잠근다 (AC: 1, 2)
+  - [x] `verifyStory45LegacyWrapperBuiltHandlerShapesMatch()` — 세 변형의 hook map 키 집합과 핸들러 타입을 비교해 표면 영역 누락/추가를 잡아낸다. (Story 4.3 R2 M-1 본체: SOT 상수 ↔ 실제 hook map 키 set-equal 단언 흡수)
+  - [x] `verifyStory45LegacyWrapperBuiltCommandPromptParity()` — `command.execute.before` 출력 parts 정규화 결과가 (legacy↔wrapper, legacy↔built) 모두 일치하는지를 단일 함수로 묶어 회귀 한 곳에서 변경을 감지한다.
+  - [x] `verifyStory45LegacyWrapperBuiltMutatingToolGuardParity()` — `tool.execute.before` mutating 호출이 세 변형 모두에서 동일한 예외 메시지를 내고, 비-워크플로우 세션에서는 던지지 않는다는 부정 케이스를 함께 잠근다.
+  - [x] `verifyStory45BuiltArtifactExportContract()` — `dist/devai-aidd-guard.js`가 기대 export(`DevaiAiddGuardPlugin` 또는 `DevaiGitWorkflowPlugin` 또는 `default`) 중 하나를 노출하고, 함수 시그니처(인자 1개, async-호환)가 wrapper와 동일한지 단정한다.
+  - [x] `verifyStory45BuiltArtifactPromptParityWithWrapper()` — built이 발행하는 approval prompt summary가 wrapper와 deepEqual 한지 격리 단위로 잠근다.
+  - [x] `verifyStory45RegressionGateAbortsWithoutBuiltArtifact()` — 일시적으로 dist 경로를 가리고 회귀가 명확히 실패하는지(또는 사전 가드가 실패하는지)를 fixture 기반으로 검증한다. 실제 dist를 삭제하지 않고 임시 fixture root에서 검증한다.
+  - [x] `verifyStory45SrcIndexAuditEventListMatchesEmissions()` — Story 4.3 R2 L-3 이관 항목: `src/index.js` 헤더 JSDoc audit-이벤트 list와 본문 `audit.info("...")` 호출 set의 set-equal 단언.
+  - [x] 신규 함수들은 `main().then(...)` 체인의 Story 4.4 블록 다음에 “Story 4.5 — wrapper/built regression gate” 코멘트와 함께 추가한다.
 
-- [ ] README와 sprint-status에 회귀 게이트의 책임 범위를 한 줄로 기록한다 (AC: 2)
-  - [ ] README에 “리팩터링/릴리스 전 `npm run build && npm test`가 회귀 게이트”라는 문장을 보강한다(이미 존재하면 위치만 보존). 새 문서를 만들지 않는다.
-  - [ ] Story 4.5 dev-story 완료 직전, 본 스토리 status 변경은 dev-agent가 sprint-status.yaml에 반영한다(별도 외부 추적 시스템을 만들지 않는다).
+- [x] README와 sprint-status에 회귀 게이트의 책임 범위를 한 줄로 기록한다 (AC: 2)
+  - [x] README에 “리팩터링/릴리스 전 `npm run build && npm test`가 회귀 게이트”라는 문장을 보강한다(이미 존재하면 위치만 보존). 새 문서를 만들지 않는다.
+  - [x] Story 4.5 dev-story 완료 직전, 본 스토리 status 변경은 dev-agent가 sprint-status.yaml에 반영한다(별도 외부 추적 시스템을 만들지 않는다).
 
 ## Dev Notes
 
@@ -193,10 +194,59 @@ Status: ready-for-dev
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.7 (1M context) — bmad-dev-story workflow
 
 ### Debug Log References
 
+- `npm test` exit 0 (legacy-vs-wrapper / legacy-vs-built parity passed; mutatingToolError 문자열 byte-for-byte 일치; wrapperLogs == builtLogs == 8; 신규 Story 4.5 회귀 7건 모두 통과)
+- `npm run build` exit 0
+- `npm run release` exit 0
+
 ### Completion Notes List
 
+- Story 4.5 회귀 블록 7개 함수를 `tests/regression.test.js` 하단에 추가하고 `main().then(...)` 체인에 “Story 4.5 — wrapper/built regression gate” 코멘트와 함께 등록.
+- Story 4.3 R2에서 이관된 두 액션 아이템을 본 스토리에서 회귀로 잠금:
+  - **M-1 본체**: `verifyStory45LegacyWrapperBuiltHandlerShapesMatch()`가 `SUPPORTED_HOOK_KEYS` 상수와 wrapper/built의 실제 hook map 키 set-equal을 단언하고, `WRAPPER_ONLY_HOOK_KEYS` ⊆ `SUPPORTED_HOOK_KEYS` ∧ legacy disjointness까지 함께 잠금.
+  - **L-3**: `verifyStory45SrcIndexAuditEventListMatchesEmissions()`가 `src/index.js` JSDoc 헤더 audit-event 목록과 본문 `audit.info("<name>", ...)` 호출 set의 양방향 set-equal을 단언.
+- 회귀 함수 안에서 새 의존성 도입 없음 — `assert`, `node:fs`, `node:os`, `node:path`, `node:url`, `node:child_process`만 사용.
+- `src/index.js`, `src/policies/legacy/devai-git-workflo.js`, `scripts/build.js`, `scripts/make-release.js`, `package.json`은 Story 4.5에서 직접 수정하지 않음(각각 4.3/4.4 책임 + 가드레일 준수).
+- `verifyStory45RegressionGateAbortsWithoutBuiltArtifact`는 실제 `dist/`를 건드리지 않고 임시 fixture 경로의 부재 검증으로 silent-skip 사고를 차단.
+- README에 “리팩터링/릴리스 전 `npm run build && npm test` 회귀 게이트” 한 단락을 빌드/릴리스 섹션 위에 보강(기존 위치 보존).
+- 임시 워크스페이스는 `story45InstantiateAllThree().cleanup()` 또는 `finally fs.rmSync` 패턴으로 모두 정리. 외부 네트워크/원격 git push 호출 0건. cache-busting 쿼리(`?t=${Date.now()}`) 사용 패턴 준수.
+
 ### File List
+
+- Modified: `tests/regression.test.js` — Story 4.5 회귀 헤더 + 7개 신규 verify 함수 + main 체인 7줄 등록 + R2 follow-ups (H-1/M-1/M-2/M-3/L-2/L-4/L-5 mitigations + `verifyBuiltArtifactExists` DI refactor + `runCommandExecuteBefore`/`runToolMutatingBefore` sessionID 파라미터화). 누적 +710 라인 (-8 라인).
+- Modified: `README.md` — “회귀 게이트로서의 `npm run build && npm test`” 한 단락을 “빌드와 릴리스” 섹션에 보강
+
+### Review Round 2 (Adversarial Code Review) — 2026-05-10
+
+라운드 1 어드버서리얼 리뷰 결과: 0 CRITICAL / 1 HIGH / 3 MEDIUM / 5 LOW. 보고서: `_bmad-output/implementation-artifacts/4-5-code-review-action-items.md`.
+
+R2 자동 수정 결과 (모두 동일 세션 내 처리):
+
+- **H-1 (HIGH) 해결**: `verifyStory45RegressionGateAbortsWithoutBuiltArtifact`를 tautological `assert.equal(false, true, "<MESSAGE>")` 패턴에서 실제 `verifyBuiltArtifactExists()` 호출로 재작성. (1) 음성 경로에서 `existsSyncFn: () => false` 주입 + 메시지 정규식 단언, (2) 양성 컨트롤로 `existsSyncFn: () => true` 주입 후 throw 안함을 확인, (3) `verifyBuiltArtifactExists.toString()`이 `assert.equal` / `existsSync` / 경로 hint / `npm run build` hint 모두 포함하는지 source-contract 단언, (4) fixture 경로 미생성 부작용 0 단언. `verifyBuiltArtifactExists`는 `{ existsSyncFn, builtPath }` 주입을 허용하도록 리팩터(기존 `main()` 호출은 무인자라 호환).
+- **M-1 (MEDIUM) 해결**: `verifyStory45BuiltArtifactPromptParityWithWrapper`에 `wrapperPrompts.length >= 1` 및 `builtPrompts.length >= 1` precondition 추가 — 미래에 prompt emission이 silently 끊기더라도 `[]` vs `[]` deepEqual 통과 사고 차단.
+- **M-2 (MEDIUM) 해결**: `verifyStory45LegacyWrapperBuiltMutatingToolGuardParity`에 "비-워크플로우 command 발화 후 가드 미발화" 부정 분기를 legacy/wrapper/built 3변형 모두에 추가. `command.execute.before`로 비-워크플로우 명령(`/non-workflow-command-not-registered`) 실행 후 `parts.length === 0` precondition + `runToolMutatingBefore` no-throw 단언.
+- **M-3 (MEDIUM) 해결**: `runCommandExecuteBefore`/`runToolMutatingBefore`를 `{ sessionID, command, argumentsText }` 파라미터화. 모든 Story 4.5 verifier가 unique sessionID 사용 (`verifyStory45-prompt-parity-cmd`, `verifyStory45-mutating-positive`, `verifyStory45-mutating-neg-no-command`, `verifyStory45-mutating-neg-nonwf-command`, `verifyStory45-prompt-parity`). 기본값 `"session-1"`은 보존되어 기존 호출자 영향 0.
+- **L-2 (LOW) 해결**: 부정 trio의 임시 워크스페이스 생성을 `try{}` 내부 `createdWorkspaces.push(ws)` 패턴으로 이관. partial-failure 누수 footgun 제거.
+- **L-4 (LOW) 해결**: `verifyStory45LegacyWrapperBuiltHandlerShapesMatch`에 `STORY_45_LEGACY_HOOK_KEYS === SUPPORTED_HOOK_KEYS \ WRAPPER_ONLY_HOOK_KEYS` 양방향 set-equal 단언 추가. 로컬 상수가 SOT에서 derive 되지 않더라도 SOT 추가 시 유지보수 누락이 잡힘.
+- **L-5 (LOW) 해결**: `verifyStory45SrcIndexAuditEventListMatchesEmissions` JSDoc에 info-only 스코프 명시 + `audit.error("plugin bootstrap failed", ...)` 의도적 제외 사유 + 향후 `audit.warn` 등 도입 시 verifier 동시 갱신 의무 명시.
+- **L-1 (LOW) 스킵 사유**: `verifyStory45BuiltArtifactPromptParityWithWrapper`는 `main()` lines 343–347과 deepEqual 형태가 같지만 M-1 mitigation으로 `length >= 1` precondition이 추가되어 단순 중복이 아니게 됨. 스토리 sub-task("격리 단위로 잠근다")가 명시한 격리 책임 자체가 통과 → 별도 리팩터링 불필요.
+- **L-3 (LOW) 스킵 사유**: 본 스토리의 File List/스토리 본문이 "약 +400 라인"이라 명시했으나 R2 누적 후 +710 라인. 추정치였음을 그대로 두기보다 본 라운드 노트에서 "누적 +710 라인 (-8 라인)" 명시로 traceability 보강.
+
+**변이(mutation) 검증 결과** — H-1/M-1/M-2 가드가 의도된 회귀에 실제로 실패함을 동일 세션에서 직접 시연:
+
+| 변이 | 결과 |
+|---|---|
+| `verifyBuiltArtifactExists` 본문 비우기 (silent skip) | H-1 verifier가 `negative path threw=null` 으로 실패 (exit 1) ✅ |
+| `verifyBuiltArtifactExists` 메시지에서 "npm run build" 제거 | H-1 verifier가 `assert.match` 정규식 미스매치로 실패 ✅ |
+| 프롬프트 parity verifier에서 `wrapper.mock.prompts.length = 0` 강제 | M-1 verifier가 `length >= 1` precondition으로 실패 ✅ |
+| 비-워크플로우 명령을 `/bmad-bmm-quick-dev`로 바꿈 (워크플로우 활성화) | M-2 verifier가 `parts.length === 0` precondition으로 실패 ✅ |
+
+`npm test` exit 0; `npm run build` exit 0 (R2 후 dist 재빌드).
+
+### Change Log
+
+- 2026-05-10: Story 4.5 dev-story 구현 완료. wrapper/built 회귀 게이트 7개 verify 함수 추가, Story 4.3 R2 이관 액션 아이템(M-1 본체, L-3) 회귀로 흡수, README 회귀 게이트 한 단락 보강. Status `in-progress` → `review`.
+- 2026-05-10: Story 4.5 R2 review follow-ups 적용 — H-1 (hollow meta-guard) 실제 함수 호출 + DI 기반 검증으로 재작성, M-1 (vacuous deepEqual) length precondition, M-2 (non-workflow command negative path) legacy/wrapper/built 3변형 추가 부정 분기, M-3 (sessionID footgun) 헬퍼 파라미터화 + 모든 verifier unique sessionID, L-2 워크스페이스 누수 가드, L-4 STORY_45_LEGACY_HOOK_KEYS SOT-derived 교차 단언, L-5 audit-event 스코프 JSDoc 명시. 변이 테스트 4건 모두 mutation kill 확인. Status `review` → `done`.

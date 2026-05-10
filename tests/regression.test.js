@@ -96,9 +96,17 @@ const legacyModulePath = path.join(
   "devai-git-workflo.js",
 );
 
-function verifyBuiltArtifactExists() {
+// Story 4.5 R2 (H-1 mitigation): accept injected dependencies so the
+// regression-gate meta-guard (`verifyStory45RegressionGateAbortsWithoutBuiltArtifact`)
+// can exercise the actual silent-skip protection by passing an `existsSync`
+// that returns false against a fixture path. Defaults preserve the original
+// behavior for `main()` and any external caller.
+function verifyBuiltArtifactExists({
+  existsSyncFn = fs.existsSync,
+  builtPath = builtModulePath,
+} = {}) {
   assert.equal(
-    fs.existsSync(builtModulePath),
+    existsSyncFn(builtPath),
     true,
     "missing dist/devai-aidd-guard.js — run `npm run build` before `npm test`",
   );
@@ -214,11 +222,19 @@ async function instantiate(pluginFactory, directory) {
   return { handlers, mock };
 }
 
-async function runCommandExecuteBefore(handlers) {
+async function runCommandExecuteBefore(handlers, options = {}) {
+  // Story 4.5 R2 (M-3 mitigation): callers may override the workflow command
+  // and sessionID so verifiers can register state under unique session ids
+  // (avoiding cross-trio contamination footguns) and exercise the
+  // non-workflow path on the same helper. Defaults preserve the legacy
+  // call sites.
   const input = {
-    command: "/bmad-bmm-quick-dev",
-    arguments: "ABC-123 regression coverage",
-    sessionID: "session-1",
+    command: typeof options.command === "string" ? options.command : "/bmad-bmm-quick-dev",
+    arguments:
+      typeof options.argumentsText === "string"
+        ? options.argumentsText
+        : "ABC-123 regression coverage",
+    sessionID: typeof options.sessionID === "string" ? options.sessionID : "session-1",
   };
   const output = { parts: [] };
   await handlers["command.execute.before"](input, output);
@@ -235,9 +251,11 @@ async function runToolReadBefore(handlers) {
   await handlers["tool.execute.before"](input, output);
 }
 
-async function runToolMutatingBefore(handlers) {
+async function runToolMutatingBefore(handlers, options = {}) {
+  // Story 4.5 R2 (M-3 mitigation): accept a sessionID override so verifiers
+  // can isolate positive vs negative trios under distinct session ids.
   const input = {
-    sessionID: "session-1",
+    sessionID: typeof options.sessionID === "string" ? options.sessionID : "session-1",
     tool: "write",
     args: {},
   };
@@ -11899,6 +11917,682 @@ async function verifyStory44ReleaseMissingBundleEmitsBuildHint() {
   }
 }
 
+// =============================================================================
+// Story 4.5 — wrapper/built regression gate
+// =============================================================================
+//
+// These assertions lock the persistent quality gate that Story 4.5 promised:
+// the "legacy / wrapper / built" three-variant comparison must remain a single
+// source of behavioral truth. Story 4.5 does NOT define new contracts; it
+// validates that the contracts defined by Story 4.3 (wrapper hook compatibility,
+// `SUPPORTED_HOOK_KEYS` / `WRAPPER_ONLY_HOOK_KEYS` SOT) and Story 4.4 (release
+// packaging) remain observable across all three variants.
+//
+// Pre-condition (intentional): every Story 4.5 verifier here assumes the built
+// dist artifact (`dist/devai-aidd-guard.js`) exists. The chain entry point
+// `main()` already calls `verifyBuiltArtifactExists()` first, so a missing
+// dist aborts the suite before the Story 4.5 block runs. Story 4.4 owns
+// release manifest/checksum/installer assertions; Story 4.5 only depends on
+// "the bundle is present and behaviorally equivalent to the wrapper".
+//
+// Naming convention: `verifyStory45<Behavior>()`. Each new invariant must
+// register one verifier function and one `main().then(() => ...)` line at the
+// chain tail, mirroring the Story 1.x → Story 4.4 cumulative pattern.
+//
+// Legacy comparison rule: hooks present in `WRAPPER_ONLY_HOOK_KEYS`
+// (`permission.asked`, `file.edited`) are validated only by wrapper↔built
+// parity; legacy does not expose them by design (see Story 4.3 frozen
+// baseline header in `src/policies/legacy/devai-git-workflo.js`). Future hooks
+// added to wrapper but absent in legacy must follow the same rule and be
+// excluded from legacy comparisons explicitly.
+
+const STORY_45_LEGACY_HOOK_KEYS = Object.freeze([
+  "command.execute.before",
+  "tool.execute.before",
+  "tool.execute.after",
+  "event",
+]);
+
+async function story45InstantiateAllThree() {
+  const legacyModule = await import(legacyModuleUrl);
+  const wrapperModule = await import(wrapperModuleUrl);
+  const builtModule = await import(`${builtModuleUrl}?t=${Date.now()}`);
+  const builtFactory =
+    builtModule.DevaiAiddGuardPlugin ||
+    builtModule.DevaiGitWorkflowPlugin ||
+    builtModule.default;
+
+  const legacyWorkspace = createTempWorkspace();
+  const wrapperWorkspace = createTempWorkspace();
+  const builtWorkspace = createTempWorkspace();
+  const legacy = await instantiate(legacyModule.DevaiGitWorkflowPlugin, legacyWorkspace);
+  const wrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
+  const built = await instantiate(builtFactory, builtWorkspace);
+
+  return {
+    legacy,
+    wrapper,
+    built,
+    builtModule,
+    cleanup() {
+      fs.rmSync(legacyWorkspace, { recursive: true, force: true });
+      fs.rmSync(wrapperWorkspace, { recursive: true, force: true });
+      fs.rmSync(builtWorkspace, { recursive: true, force: true });
+    },
+  };
+}
+
+/**
+ * Story 4.5 (M-1 carried over from Story 4.3 review): assert that the hook
+ * map keys returned by the wrapper and the built artifact are set-equal to
+ * `SUPPORTED_HOOK_KEYS` (single-source-of-truth) and that the legacy core
+ * exposes exactly the 4-key subset (`SUPPORTED_HOOK_KEYS \ WRAPPER_ONLY_HOOK_KEYS`).
+ * Also asserts every key has a function-typed handler. Renaming, dropping, or
+ * adding a hook key without updating the SOT constant — or vice versa — fires
+ * here.
+ */
+async function verifyStory45LegacyWrapperBuiltHandlerShapesMatch() {
+  const constantsModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "utils", "constants.js"),
+  ).href;
+  const { SUPPORTED_HOOK_KEYS, WRAPPER_ONLY_HOOK_KEYS } = await import(constantsModuleUrl);
+
+  const sot = new Set(SUPPORTED_HOOK_KEYS);
+  const wrapperOnly = new Set(WRAPPER_ONLY_HOOK_KEYS);
+  const legacyExpected = new Set(STORY_45_LEGACY_HOOK_KEYS);
+
+  // Story 4.5 R2 (L-4 mitigation): cross-check that the local
+  // STORY_45_LEGACY_HOOK_KEYS constant equals SUPPORTED_HOOK_KEYS \ WRAPPER_ONLY_HOOK_KEYS
+  // so a future maintainer cannot extend SUPPORTED_HOOK_KEYS without also
+  // updating this verifier's legacy-expected baseline.
+  const derivedLegacyExpected = new Set(
+    SUPPORTED_HOOK_KEYS.filter((key) => !WRAPPER_ONLY_HOOK_KEYS.includes(key)),
+  );
+  assert.equal(
+    legacyExpected.size,
+    derivedLegacyExpected.size,
+    `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: STORY_45_LEGACY_HOOK_KEYS size (${legacyExpected.size}) drifted from SUPPORTED_HOOK_KEYS \\ WRAPPER_ONLY_HOOK_KEYS size (${derivedLegacyExpected.size}); update STORY_45_LEGACY_HOOK_KEYS to track the SOT`,
+  );
+  for (const key of derivedLegacyExpected) {
+    assert.equal(
+      legacyExpected.has(key),
+      true,
+      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: STORY_45_LEGACY_HOOK_KEYS is missing key "${key}" derived from SUPPORTED_HOOK_KEYS \\ WRAPPER_ONLY_HOOK_KEYS — update the local constant or the SOT`,
+    );
+  }
+  for (const key of legacyExpected) {
+    assert.equal(
+      derivedLegacyExpected.has(key),
+      true,
+      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: STORY_45_LEGACY_HOOK_KEYS contains stale key "${key}" not derivable from SUPPORTED_HOOK_KEYS \\ WRAPPER_ONLY_HOOK_KEYS`,
+    );
+  }
+
+  // M-1 helper: WRAPPER_ONLY_HOOK_KEYS ⊆ SUPPORTED_HOOK_KEYS
+  for (const key of wrapperOnly) {
+    assert.equal(
+      sot.has(key),
+      true,
+      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: WRAPPER_ONLY_HOOK_KEYS contains ${key} which is not in SUPPORTED_HOOK_KEYS — SOT drift`,
+    );
+  }
+  // legacy expectation ⊆ SUPPORTED_HOOK_KEYS, and disjoint from wrapper-only
+  for (const key of legacyExpected) {
+    assert.equal(
+      sot.has(key),
+      true,
+      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy-expected key ${key} missing from SUPPORTED_HOOK_KEYS`,
+    );
+    assert.equal(
+      wrapperOnly.has(key),
+      false,
+      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy-expected key ${key} must not appear in WRAPPER_ONLY_HOOK_KEYS`,
+    );
+  }
+  // Every SUPPORTED_HOOK_KEYS entry is either wrapper-only or legacy-expected.
+  for (const key of sot) {
+    const inWrapperOnly = wrapperOnly.has(key);
+    const inLegacy = legacyExpected.has(key);
+    assert.equal(
+      inWrapperOnly !== inLegacy,
+      true,
+      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: SOT key ${key} must be exactly one of {wrapper-only, legacy-expected}; got wrapperOnly=${inWrapperOnly}, legacy=${inLegacy}`,
+    );
+  }
+
+  const trio = await story45InstantiateAllThree();
+  try {
+    const { legacy, wrapper, built } = trio;
+
+    const wrapperKeys = new Set(Object.keys(wrapper.handlers));
+    const builtKeys = new Set(Object.keys(built.handlers));
+    const legacyKeys = new Set(Object.keys(legacy.handlers));
+
+    // wrapper keys ≡ built keys ≡ SUPPORTED_HOOK_KEYS (set equality)
+    assert.equal(
+      wrapperKeys.size,
+      sot.size,
+      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: wrapper hook count ${wrapperKeys.size} differs from SUPPORTED_HOOK_KEYS count ${sot.size}`,
+    );
+    assert.equal(
+      builtKeys.size,
+      sot.size,
+      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: built hook count ${builtKeys.size} differs from SUPPORTED_HOOK_KEYS count ${sot.size}`,
+    );
+    for (const key of sot) {
+      assert.equal(
+        wrapperKeys.has(key),
+        true,
+        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: wrapper missing SOT key ${key}`,
+      );
+      assert.equal(
+        builtKeys.has(key),
+        true,
+        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: built missing SOT key ${key}`,
+      );
+      assert.equal(
+        typeof wrapper.handlers[key],
+        "function",
+        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: wrapper handler ${key} must be function`,
+      );
+      assert.equal(
+        typeof built.handlers[key],
+        "function",
+        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: built handler ${key} must be function`,
+      );
+    }
+
+    // legacy keys ≡ legacyExpected (4 keys, no wrapper-only)
+    assert.equal(
+      legacyKeys.size,
+      legacyExpected.size,
+      `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy hook count ${legacyKeys.size} differs from expected ${legacyExpected.size}`,
+    );
+    for (const key of legacyExpected) {
+      assert.equal(
+        legacyKeys.has(key),
+        true,
+        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy missing expected key ${key}`,
+      );
+      assert.equal(
+        typeof legacy.handlers[key],
+        "function",
+        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy handler ${key} must be function`,
+      );
+    }
+    for (const key of wrapperOnly) {
+      assert.equal(
+        legacyKeys.has(key),
+        false,
+        `verifyStory45LegacyWrapperBuiltHandlerShapesMatch: legacy must NOT expose wrapper-only key ${key} (Story 4.3 frozen baseline asymmetry)`,
+      );
+    }
+  } finally {
+    trio.cleanup();
+  }
+}
+
+/**
+ * Story 4.5: bundle the `command.execute.before` parts-normalization parity
+ * comparison into a single verifier so future drift surfaces in one place.
+ * Both axes (wrapper↔legacy, built↔legacy) are exercised here. The legacy
+ * comparison is the canonical baseline; built↔wrapper parity is checked
+ * separately via the prompt summary verifier (legacy emits no prompt).
+ */
+async function verifyStory45LegacyWrapperBuiltCommandPromptParity() {
+  const trio = await story45InstantiateAllThree();
+  try {
+    const { legacy, wrapper, built } = trio;
+
+    // Story 4.5 R2 (M-3 mitigation): unique sessionID per verifier so
+    // hypothetical shared state across trios cannot cross-contaminate.
+    const sessionID = "verifyStory45-prompt-parity-cmd";
+    const legacyOut = await runCommandExecuteBefore(legacy.handlers, { sessionID });
+    const wrapperOut = await runCommandExecuteBefore(wrapper.handlers, { sessionID });
+    const builtOut = await runCommandExecuteBefore(built.handlers, { sessionID });
+
+    const baseline = normalizeOutputParts(legacyOut.output.parts);
+    assert.deepEqual(
+      normalizeOutputParts(wrapperOut.output.parts),
+      baseline,
+      "verifyStory45LegacyWrapperBuiltCommandPromptParity: wrapper command.execute.before parts diverged from legacy",
+    );
+    assert.deepEqual(
+      normalizeOutputParts(builtOut.output.parts),
+      baseline,
+      "verifyStory45LegacyWrapperBuiltCommandPromptParity: built command.execute.before parts diverged from legacy",
+    );
+  } finally {
+    trio.cleanup();
+  }
+}
+
+/**
+ * Story 4.5: mutating-tool guard behavior must match across all three
+ * variants on workflow sessions, AND must be silent (no throw) on
+ * non-workflow sessions. Locks the byte-for-byte exception message parity
+ * that Story 4.3 promised, plus TWO negative cases: (1) "no command issued"
+ * (no state entry at all), (2) "non-workflow command issued" (state may
+ * exist but workflow detection rejected it). Both cases must remain silent
+ * across legacy/wrapper/built.
+ *
+ * Story 4.5 R2 (M-2 mitigation): added the "non-workflow command issued"
+ * negative path for all three variants — previous implementation only
+ * exercised the "no command" sub-case which is a strict subset. Story 4.5
+ * R2 (M-3 mitigation): unique sessionIDs per trio so positive vs negative
+ * trios cannot cross-contaminate even if a future refactor introduces
+ * module-scoped state. Story 4.5 R2 (L-2 mitigation): all temp workspace
+ * creations now happen inside the try{} so a partial-failure leak is
+ * impossible.
+ */
+async function verifyStory45LegacyWrapperBuiltMutatingToolGuardParity() {
+  const trio = await story45InstantiateAllThree();
+  try {
+    const { legacy, wrapper, built } = trio;
+
+    // Activate the workflow session for all three variants under a
+    // unique sessionID so the positive trio cannot leak state into the
+    // negative trio below.
+    const positiveSessionID = "verifyStory45-mutating-positive";
+    await runCommandExecuteBefore(legacy.handlers, { sessionID: positiveSessionID });
+    await runCommandExecuteBefore(wrapper.handlers, { sessionID: positiveSessionID });
+    await runCommandExecuteBefore(built.handlers, { sessionID: positiveSessionID });
+
+    const legacyError = await runToolMutatingBefore(legacy.handlers, { sessionID: positiveSessionID });
+    const wrapperError = await runToolMutatingBefore(wrapper.handlers, { sessionID: positiveSessionID });
+    const builtError = await runToolMutatingBefore(built.handlers, { sessionID: positiveSessionID });
+
+    assert.ok(
+      legacyError && legacyError.message,
+      "verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: legacy must throw mutating-tool guard error on workflow session",
+    );
+    assert.equal(
+      wrapperError?.message,
+      legacyError.message,
+      "verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: wrapper mutating-tool error message diverged from legacy",
+    );
+    assert.equal(
+      builtError?.message,
+      legacyError.message,
+      "verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: built mutating-tool error message diverged from legacy (esbuild minify/transform must not mutate user-visible strings)",
+    );
+
+    // ── Negative trio: must remain silent across all three variants ──
+    const legacyMod = await import(legacyModuleUrl);
+    const wrapperMod = await import(wrapperModuleUrl);
+    const builtMod = await import(`${builtModuleUrl}?t=${Date.now()}`);
+    // L-2 mitigation: track every workspace we create and clean each in
+    // finally regardless of which creation step threw.
+    const createdWorkspaces = [];
+    try {
+      const negLegacyWs = createTempWorkspace();
+      createdWorkspaces.push(negLegacyWs);
+      const negWrapperWs = createTempWorkspace();
+      createdWorkspaces.push(negWrapperWs);
+      const negBuiltWs = createTempWorkspace();
+      createdWorkspaces.push(negBuiltWs);
+
+      const negLegacy = await instantiate(legacyMod.DevaiGitWorkflowPlugin, negLegacyWs);
+      const negWrapper = await instantiate(wrapperMod.DevaiAiddGuardPlugin, negWrapperWs);
+      const negBuilt = await instantiate(
+        builtMod.DevaiAiddGuardPlugin || builtMod.DevaiGitWorkflowPlugin || builtMod.default,
+        negBuiltWs,
+      );
+
+      // (a) "No command issued" — sessionID has zero state entries.
+      const noCommandSessionID = "verifyStory45-mutating-neg-no-command";
+      for (const [label, instance] of [
+        ["legacy", negLegacy],
+        ["wrapper", negWrapper],
+        ["built", negBuilt],
+      ]) {
+        const err = await runToolMutatingBefore(instance.handlers, {
+          sessionID: noCommandSessionID,
+        });
+        assert.equal(
+          err,
+          null,
+          `verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: ${label} mutating-tool guard must NOT fire when no command was issued (no state entry); got error: ${err?.message}`,
+        );
+      }
+
+      // (b) "Non-workflow command issued" — command.execute.before fired
+      //     but the command name is not in `workflowCommands`. State is
+      //     either absent (legacy) or present without workflow context
+      //     (wrapper/built); guard MUST stay silent.
+      // M-2 mitigation: this sub-case was missing in the original
+      // implementation. It is the canonical "user runs a non-bmad command"
+      // scenario and must not throw on any variant.
+      const nonWorkflowSessionID = "verifyStory45-mutating-neg-nonwf-command";
+      const nonWorkflowCommand = "/non-workflow-command-not-registered";
+      for (const [label, instance] of [
+        ["legacy", negLegacy],
+        ["wrapper", negWrapper],
+        ["built", negBuilt],
+      ]) {
+        const { output: nonWorkflowOutput } = await runCommandExecuteBefore(instance.handlers, {
+          command: nonWorkflowCommand,
+          sessionID: nonWorkflowSessionID,
+          argumentsText: "",
+        });
+        // Wrapper/built: command must produce zero output parts on a
+        // non-workflow command (legacy implements the same contract).
+        assert.equal(
+          (nonWorkflowOutput.parts || []).length,
+          0,
+          `verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: ${label} non-workflow command must produce zero output parts; got ${(nonWorkflowOutput.parts || []).length}`,
+        );
+        const err = await runToolMutatingBefore(instance.handlers, {
+          sessionID: nonWorkflowSessionID,
+        });
+        assert.equal(
+          err,
+          null,
+          `verifyStory45LegacyWrapperBuiltMutatingToolGuardParity: ${label} mutating-tool guard must NOT fire after a non-workflow command (no workflow state registered); got error: ${err?.message}`,
+        );
+      }
+    } finally {
+      for (const ws of createdWorkspaces) {
+        fs.rmSync(ws, { recursive: true, force: true });
+      }
+    }
+  } finally {
+    trio.cleanup();
+  }
+}
+
+/**
+ * Story 4.5: the built artifact must explicitly expose at least one of the
+ * three documented export names (`DevaiAiddGuardPlugin`, the legacy alias
+ * `DevaiGitWorkflowPlugin`, or the default export) and the resolved factory
+ * must be a function with arity 1 (single `{ client, directory }` arg). This
+ * lifts the implicit `||` fallback inside `main()` into a contract-level
+ * assertion so an accidental rename or signature change cannot pass silently.
+ */
+async function verifyStory45BuiltArtifactExportContract() {
+  const builtModule = await import(`${builtModuleUrl}?t=${Date.now()}`);
+  const candidates = ["DevaiAiddGuardPlugin", "DevaiGitWorkflowPlugin", "default"];
+  const present = candidates.filter((name) => typeof builtModule[name] === "function");
+  assert.ok(
+    present.length > 0,
+    `verifyStory45BuiltArtifactExportContract: built artifact must export at least one of ${JSON.stringify(candidates)} as a function; got keys: ${Object.keys(builtModule).join(", ")}`,
+  );
+  const factory =
+    builtModule.DevaiAiddGuardPlugin ||
+    builtModule.DevaiGitWorkflowPlugin ||
+    builtModule.default;
+  assert.equal(
+    typeof factory,
+    "function",
+    "verifyStory45BuiltArtifactExportContract: resolved factory must be a function",
+  );
+  assert.equal(
+    factory.length,
+    1,
+    `verifyStory45BuiltArtifactExportContract: resolved factory must accept exactly 1 destructured argument; got arity ${factory.length}`,
+  );
+
+  // Wrapper signature parity: same arity expected.
+  const wrapperModule = await import(wrapperModuleUrl);
+  assert.equal(
+    typeof wrapperModule.DevaiAiddGuardPlugin,
+    "function",
+    "verifyStory45BuiltArtifactExportContract: wrapper DevaiAiddGuardPlugin must be a function",
+  );
+  assert.equal(
+    wrapperModule.DevaiAiddGuardPlugin.length,
+    factory.length,
+    `verifyStory45BuiltArtifactExportContract: wrapper factory arity (${wrapperModule.DevaiAiddGuardPlugin.length}) must match built factory arity (${factory.length})`,
+  );
+
+  // Legacy alias preservation (FR29): if `DevaiGitWorkflowPlugin` exists in
+  // wrapper (it does — re-exported), it must also exist (or default-fall) in
+  // built. This catches accidental drop of the legacy alias from packaging.
+  if (typeof wrapperModule.DevaiGitWorkflowPlugin === "function") {
+    const legacyAliasResolvable =
+      typeof builtModule.DevaiGitWorkflowPlugin === "function" ||
+      typeof builtModule.default === "function" ||
+      typeof builtModule.DevaiAiddGuardPlugin === "function";
+    assert.equal(
+      legacyAliasResolvable,
+      true,
+      "verifyStory45BuiltArtifactExportContract: legacy alias DevaiGitWorkflowPlugin compatibility must remain resolvable in built artifact",
+    );
+  }
+}
+
+/**
+ * Story 4.5: approval prompt summary parity between built and wrapper, in
+ * isolation. Story 2.1+ established that only wrapper/built emit prompts
+ * (legacy is intentionally excluded from this comparison). Locking parity
+ * here ensures the esbuild bundle does not drop or mutate prompt metadata.
+ *
+ * Story 4.5 R2 (M-1 mitigation): a non-empty precondition asserts that the
+ * `/bmad-bmm-quick-dev` workflow command actually publishes at least one
+ * approval prompt before deepEqual-ing the summaries. Without this, both
+ * sides could degenerate to `[]` (e.g. a future approval-policy regression
+ * that silently disables prompt emission) and the parity check would pass
+ * vacuously — the very drift this verifier exists to catch.
+ */
+async function verifyStory45BuiltArtifactPromptParityWithWrapper() {
+  const trio = await story45InstantiateAllThree();
+  try {
+    const { wrapper, built } = trio;
+    const promptSessionID = "verifyStory45-prompt-parity";
+    await runCommandExecuteBefore(wrapper.handlers, { sessionID: promptSessionID });
+    await runCommandExecuteBefore(built.handlers, { sessionID: promptSessionID });
+    const wrapperPrompts = wrapper.mock.prompts.map(summarizePrompt);
+    const builtPrompts = built.mock.prompts.map(summarizePrompt);
+    // M-1 mitigation: non-empty precondition. If a future change silently
+    // suppresses approval prompt emission, both sides degenerate to [] and
+    // the deepEqual below would pass vacuously.
+    assert.ok(
+      wrapperPrompts.length >= 1,
+      `verifyStory45BuiltArtifactPromptParityWithWrapper: wrapper must publish at least one approval prompt for /bmad-bmm-quick-dev; got 0 — the deepEqual parity check would pass vacuously without this guard`,
+    );
+    assert.ok(
+      builtPrompts.length >= 1,
+      `verifyStory45BuiltArtifactPromptParityWithWrapper: built must publish at least one approval prompt for /bmad-bmm-quick-dev; got 0`,
+    );
+    assert.deepEqual(
+      builtPrompts,
+      wrapperPrompts,
+      `verifyStory45BuiltArtifactPromptParityWithWrapper: built prompt summaries diverged from wrapper. wrapper=${JSON.stringify(wrapperPrompts)}, built=${JSON.stringify(builtPrompts)}`,
+    );
+  } finally {
+    trio.cleanup();
+  }
+}
+
+/**
+ * Story 4.5: when the built artifact is absent, the regression gate must
+ * abort with a clear message — silent skip is forbidden. This is a meta-guard
+ * for the actual `verifyBuiltArtifactExists()` function defined at the top
+ * of this file; the production `dist/devai-aidd-guard.js` is never touched.
+ *
+ * Story 4.5 R2 (H-1 mitigation): the original implementation called
+ * `assert.equal(false, true, "<MESSAGE>")` directly and verified that the
+ * AssertionError contained the literal string the verifier itself just
+ * passed in — a tautology that would pass even if `verifyBuiltArtifactExists`
+ * were deleted from the file. The new implementation actually invokes
+ * `verifyBuiltArtifactExists()` with an injected `existsSyncFn` returning
+ * `false` against a fixture path AND a positive control invocation
+ * returning `true`, so deleting / silently rewriting either the function or
+ * its error message will trip a real regression assertion.
+ *
+ * Defenses against drift:
+ *   1. Negative path — call `verifyBuiltArtifactExists({ existsSyncFn: () => false, builtPath: <fixture> })`,
+ *      assert it throws, assert the message names the dist path AND the
+ *      `npm run build` hint.
+ *   2. Positive control — call `verifyBuiltArtifactExists({ existsSyncFn: () => true, builtPath: <fixture> })`,
+ *      assert it does NOT throw. Catches a regression where the gate
+ *      always-throws (which would silently break `main()` from any error
+ *      surface other than missing-dist).
+ *   3. Source contract — `verifyBuiltArtifactExists.toString()` must
+ *      reference `assert.equal`, `existsSync`, and the literal error
+ *      tokens. Catches a refactor that hollows the function body to a
+ *      `return` while preserving the import/call surface.
+ *   4. No side effects — fixture dist path stays un-created.
+ */
+async function verifyStory45RegressionGateAbortsWithoutBuiltArtifact() {
+  const tempRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "devai-aidd-story45-missing-dist-"),
+  );
+  try {
+    const fixtureDist = path.join(tempRoot, "dist", "devai-aidd-guard.js");
+
+    // 1. Negative path — exercise the actual `verifyBuiltArtifactExists`
+    //    function via dependency injection, simulating a missing dist.
+    let threw = null;
+    try {
+      verifyBuiltArtifactExists({
+        existsSyncFn: () => false,
+        builtPath: fixtureDist,
+      });
+    } catch (error) {
+      threw = error;
+    }
+    assert.ok(
+      threw,
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must throw when the bundle is absent (silent skip is forbidden)",
+    );
+    assert.match(
+      threw.message,
+      /missing dist\/devai-aidd-guard\.js/,
+      `verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() error must name the missing path; got: ${threw.message}`,
+    );
+    assert.match(
+      threw.message,
+      /npm run build/,
+      `verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() error must include the \`npm run build\` hint; got: ${threw.message}`,
+    );
+
+    // 2. Positive control — the gate must NOT throw when existsSync returns
+    //    true. This catches a regression where the gate always-throws.
+    let positiveErr = null;
+    try {
+      verifyBuiltArtifactExists({
+        existsSyncFn: () => true,
+        builtPath: fixtureDist,
+      });
+    } catch (error) {
+      positiveErr = error;
+    }
+    assert.equal(
+      positiveErr,
+      null,
+      `verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must NOT throw when the bundle is present; got: ${positiveErr?.message}`,
+    );
+
+    // 3. Source contract — defend against a hollowed-body refactor.
+    const source = verifyBuiltArtifactExists.toString();
+    assert.match(
+      source,
+      /assert\.equal/,
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must use assert.equal — body refactored away from the gate",
+    );
+    assert.match(
+      source,
+      /existsSync/,
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must call an existsSync to check the bundle — body refactored away from the gate",
+    );
+    assert.match(
+      source,
+      /missing dist\/devai-aidd-guard\.js/,
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must contain the literal `missing dist/devai-aidd-guard.js` hint — message rewritten without coordinated update",
+    );
+    assert.match(
+      source,
+      /npm run build/,
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must contain the literal `npm run build` hint — message rewritten without coordinated update",
+    );
+
+    // 4. No side effects — fixture dist path stayed un-created.
+    assert.equal(
+      fs.existsSync(fixtureDist),
+      false,
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: fixture dist path must remain un-created (no side effects)",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.5 (L-3 carried over from Story 4.3 review): the audit-event list
+ * documented in the `src/index.js` JSDoc header must match the actual
+ * `audit.info("<name>", ...)` first-argument set emitted from the same file.
+ * Drift between header documentation and code emissions is invisible to
+ * end-to-end tests but breaks the operator-facing audit contract.
+ *
+ * Implementation: read `src/index.js` as text, extract event names from the
+ * JSDoc backtick list and from `audit.info("...")` call sites, then assert
+ * set-equality. This is a documentation-as-contract guard; it does NOT
+ * exercise runtime audit emissions (the existing trio test already counts
+ * emitted events).
+ *
+ * Story 4.5 R2 (L-5 mitigation): scope is intentionally restricted to
+ * `audit.info(...)` call sites under the `best-effort bootstrap audit
+ * emissions` parenthetical anchor. The error-path emission
+ * (`audit.error("plugin bootstrap failed", ...)` on the catch branch) is
+ * documented separately in the JSDoc header and is NOT covered by this
+ * verifier — it is *not* a "best-effort" emission (it is the canonical
+ * failure-mode signal). If a future story adds `audit.warn(...)` or moves
+ * `plugin bootstrap` to `audit.error`, that contract change must be
+ * coordinated with this verifier explicitly (extend the regex AND the
+ * JSDoc anchor name) — silent introduction must trip a new assertion.
+ */
+async function verifyStory45SrcIndexAuditEventListMatchesEmissions() {
+  const indexPath = path.join(projectRoot, "src", "index.js");
+  const source = fs.readFileSync(indexPath, "utf8");
+
+  // Extract names from the JSDoc header line:
+  // " * (`config.validation.failed`, `compat.bridge.evaluated`, `plugin bootstrap`, "
+  // We grab every backtick-quoted token that follows the literal phrase
+  // "best-effort bootstrap audit emissions".
+  const headerSliceMatch = source.match(
+    /best-effort bootstrap audit emissions\s*\n\s*\*\s*\(([^)]+)\)/,
+  );
+  assert.ok(
+    headerSliceMatch,
+    "verifyStory45SrcIndexAuditEventListMatchesEmissions: src/index.js JSDoc must contain a `best-effort bootstrap audit emissions` parenthetical list",
+  );
+  const headerEvents = new Set(
+    Array.from(headerSliceMatch[1].matchAll(/`([^`]+)`/g)).map((m) => m[1]),
+  );
+  assert.ok(
+    headerEvents.size > 0,
+    "verifyStory45SrcIndexAuditEventListMatchesEmissions: header parenthetical must list at least one backtick-quoted event name",
+  );
+
+  // Extract first-arg event names from every audit.info(<string>, ...) call.
+  const emittedEvents = new Set();
+  for (const match of source.matchAll(/audit\.info\(\s*"([^"]+)"/g)) {
+    emittedEvents.add(match[1]);
+  }
+  assert.ok(
+    emittedEvents.size > 0,
+    "verifyStory45SrcIndexAuditEventListMatchesEmissions: src/index.js must contain at least one audit.info(\"<name>\", ...) call",
+  );
+
+  // Set equality: every documented event is emitted; every emitted event is
+  // documented. Symmetric assertions surface drift in either direction.
+  for (const name of headerEvents) {
+    assert.equal(
+      emittedEvents.has(name),
+      true,
+      `verifyStory45SrcIndexAuditEventListMatchesEmissions: header documents event "${name}" but no audit.info("${name}", ...) call exists in src/index.js`,
+    );
+  }
+  for (const name of emittedEvents) {
+    assert.equal(
+      headerEvents.has(name),
+      true,
+      `verifyStory45SrcIndexAuditEventListMatchesEmissions: src/index.js emits audit.info("${name}", ...) but the JSDoc header does not document it (update the header parenthetical)`,
+    );
+  }
+}
+
 main()
   .then(() => verifyBootstrapFailureShape())
   .then(() => verifyMissingLegacyBootstrapDependencyFails())
@@ -12063,6 +12757,14 @@ main()
   .then(() => verifyStory44ReleaseMissingSourceFails())
   // Story 4.4 R2 LOW-1: multi-missing + bundle hint
   .then(() => verifyStory44ReleaseMissingBundleEmitsBuildHint())
+  // Story 4.5 — wrapper/built regression gate
+  .then(() => verifyStory45LegacyWrapperBuiltHandlerShapesMatch())
+  .then(() => verifyStory45LegacyWrapperBuiltCommandPromptParity())
+  .then(() => verifyStory45LegacyWrapperBuiltMutatingToolGuardParity())
+  .then(() => verifyStory45BuiltArtifactExportContract())
+  .then(() => verifyStory45BuiltArtifactPromptParityWithWrapper())
+  .then(() => verifyStory45RegressionGateAbortsWithoutBuiltArtifact())
+  .then(() => verifyStory45SrcIndexAuditEventListMatchesEmissions())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;
