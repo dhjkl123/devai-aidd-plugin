@@ -60,27 +60,37 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         message: err.message,
         params: err.params,
       }));
-      await audit.info("config.validation.failed", {
-        event: "config.validation.failed",
-        timestamp: new Date().toISOString(),
-        workflow: null,
-        command: null,
-        details: {
-          droppedLayers: runtimeConfig.validation.droppedLayers,
-          errors: normalizedErrors,
-        },
-      });
+      // Story 3.4 (review L2): bootstrap audit emissions are best-effort —
+      // a throwing logger here must not crash plugin bootstrap.
+      try {
+        await audit.info("config.validation.failed", {
+          event: "config.validation.failed",
+          timestamp: new Date().toISOString(),
+          workflow: null,
+          command: null,
+          details: {
+            droppedLayers: runtimeConfig.validation.droppedLayers,
+            errors: normalizedErrors,
+          },
+        });
+      } catch {
+        // best-effort
+      }
     }
 
     ensureLegacyProjectConfigCompatibility(directory, fsAdapter, runtimeConfig);
 
-    await audit.info("plugin bootstrap", {
-      workflowCommandCount: workflowCommands.size,
-      hasGlobalConfig: runtimeConfig.sources.hasGlobalConfig,
-      hasProjectConfig: runtimeConfig.sources.hasProjectConfig,
-      hasLegacyProjectConfig: runtimeConfig.sources.hasLegacyProjectConfig,
-      supportedRuntime: SUPPORTED_RUNTIME,
-    });
+    try {
+      await audit.info("plugin bootstrap", {
+        workflowCommandCount: workflowCommands.size,
+        hasGlobalConfig: runtimeConfig.sources.hasGlobalConfig,
+        hasProjectConfig: runtimeConfig.sources.hasProjectConfig,
+        hasLegacyProjectConfig: runtimeConfig.sources.hasLegacyProjectConfig,
+        supportedRuntime: SUPPORTED_RUNTIME,
+      });
+    } catch {
+      // best-effort
+    }
 
     const legacyHandlers = await DevaiGitWorkflowPlugin({
       client,
@@ -95,10 +105,14 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       (hookName) => typeof legacyHandlers[hookName] !== "function",
     );
     if (wrapperOnlyHooks.length > 0) {
-      await audit.info("plugin bootstrap registered no-op hooks", {
-        hooks: wrapperOnlyHooks,
-        reason: "no legacy handler present; wrapper returns undefined for these hook names",
-      });
+      try {
+        await audit.info("plugin bootstrap registered no-op hooks", {
+          hooks: wrapperOnlyHooks,
+          reason: "no legacy handler present; wrapper returns undefined for these hook names",
+        });
+      } catch {
+        // best-effort
+      }
     }
 
     const workflowState = createWorkflowStateStore();

@@ -235,11 +235,15 @@ async function deliverRecoveryPrompt({ pluginContext, gate, audit, sessionID, wo
   } catch (error) {
     if (audit) {
       try {
+        // Story 3.4 (review L1): adopt the top-level sessionID convention
+        // used by the rest of the finalization audit events so this skip
+        // event aligns with approval.resolved / git.action.skipped shape.
         await audit.info("recovery.prompt.delivery.failed", {
           event: "recovery.prompt.delivery.failed",
           timestamp: new Date().toISOString(),
           workflow: workflow ?? null,
           command: command ?? null,
+          sessionID,
           outcome: "skip",
           details: {
             reason: "prompt-delivery-failed",

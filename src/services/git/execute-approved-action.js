@@ -269,6 +269,10 @@ export async function executeApprovedAction({
     // audit instead of disappearing through this branch unnoticed.
     if (audit) {
       try {
+        // Story 3.4 (review M2): keep the unsupported-actionType skip event
+        // on the same correlation axes as the runtime skip events emitted
+        // from build-approval-resolution.js so an auditor sees a uniform
+        // git.action.skipped shape across all skip causes.
         await audit.info("git.action.skipped", {
           event: "git.action.skipped",
           timestamp: new Date().toISOString(),
@@ -278,7 +282,12 @@ export async function executeApprovedAction({
           outcome: "skip",
           details: {
             reason: "unsupported-action-type",
+            actionKind: approvalRequest?.proposal?.kind ?? null,
             actionType: approvalRequest?.actionType ?? null,
+            actionId: approvalRequest?.actionId ?? null,
+            correlationId: approvalRequest?.proposal?.correlationId ?? null,
+            phase: workflowContext.phase ?? null,
+            finalizationMode: workflowContext.finalizationMode ?? null,
             proposalKind: approvalRequest?.proposal?.kind ?? null,
           },
         });

@@ -1,6 +1,6 @@
 # Story 3.4: 승인 결과와 실행 결과를 감사 기록으로 남기기
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -198,7 +198,19 @@ GPT-5 Codex
 - src/services/git/execute-approved-action.js
 - src/hooks/permission-asked.js
 - src/hooks/command-execute-before.js
+- src/index.js
+- src/services/workflow/evaluate-workflow-finalization.js
 - tests/regression.test.js
 - _bmad-output/implementation-artifacts/3-4-record-approval-outcomes-and-execution-results-for-audit.md
 - _bmad-output/implementation-artifacts/sprint-status.yaml
 - dist/devai-aidd-guard.js (rebuilt from src; no manual edits)
+
+### Review Follow-ups (AI)
+
+#### Round 1 (resolved in commit "Address Story 3.4 review round 1 follow-ups")
+
+- [x] [AI-Review][Medium] commit `git.action.planned` (evaluate-workflow-finalization.js)이 push 변형과 비교해 `sessionID`/`actionId`/`correlationId`/`phase`/`finalizationMode` 누락 — Story 3.4 일관성 목표 위반. 동일한 correlation 축으로 보강했다. [src/services/workflow/evaluate-workflow-finalization.js]
+- [x] [AI-Review][Medium] `executeApprovedAction`의 unsupported-actionType skip event(`git.action.skipped`)이 `actionKind`/`actionId`/`correlationId`/`phase`/`finalizationMode` 누락 — 다른 skip 이벤트와 모양 불일치. 동일 축으로 통일했다. [src/services/git/execute-approved-action.js]
+- [x] [AI-Review][Low] `recovery.prompt.delivery.failed`가 top-level `sessionID`를 안 가짐 — 다른 finalization 이벤트와 컨벤션 불일치. top-level `sessionID` 추가. [src/hooks/permission-asked.js]
+- [x] [AI-Review][Low] bootstrap 경로 `audit.info` 호출 3곳(`config.validation.failed`, `plugin bootstrap`, `plugin bootstrap registered no-op hooks`)이 try/catch 미적용 — AC2 best-effort 원칙 위반. 모두 try/catch로 감쌌다. [src/index.js]
+- [드롭] [AI-Review][Low] 브랜치 `approval.requested`가 `correlationId: null` — Story 3.4 범위(commit/push) 외이며 의도적 동작이라 이번 라운드 작업 범위에서 제외.

@@ -160,16 +160,27 @@ export async function evaluateWorkflowFinalization({
     }
     if (commitProposal) {
       try {
+        // Story 3.4 (review M1): mirror the push planned-event correlation
+        // axes (sessionID, actionId, correlationId, phase, finalizationMode)
+        // so an auditor can join the commit-planned → commit-requested →
+        // commit-executed chain by the same correlationId family used by
+        // the push variant in execute-approved-action.js.
         await audit.info("git.action.planned", {
           event: "git.action.planned",
           timestamp: new Date().toISOString(),
           workflow: workflowContext.commandName,
           command: workflowContext.commandName,
+          sessionID,
           outcome: "allow",
           details: {
             kind: "commit",
             action: "commit",
+            actionKind: "commit",
             requiresApproval: true,
+            actionId: commitProposal.correlationId ?? null,
+            correlationId: commitProposal.correlationId ?? null,
+            phase: workflowContext.phase ?? "finish",
+            finalizationMode: workflowPolicy?.finalization ?? null,
             fileCount: commitProposal.files.length,
             artifactScope: commitProposal.artifactScope,
           },
