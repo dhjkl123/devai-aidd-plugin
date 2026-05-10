@@ -211,12 +211,10 @@ const SINGLE_FILE_DOC_BUCKETS = new Map([
  */
 export function summarizePathScope(files) {
   const counts = new Map();
-  const order = [];
 
   function increment(bucket) {
     if (!counts.has(bucket.prefix)) {
       counts.set(bucket.prefix, { prefix: bucket.prefix, label: bucket.label, count: 0 });
-      order.push(bucket.prefix);
     }
     counts.get(bucket.prefix).count += 1;
   }

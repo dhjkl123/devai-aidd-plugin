@@ -1,6 +1,6 @@
 # Story 3.5: 표준 Git 이력을 통한 리뷰어 추적성 보존
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -197,5 +197,19 @@ GPT-5 Codex
 - `src/services/workflow/workflow-state.js` — Story 3.5 “새 state 필드 추가하지 않는다” invariant 주석 (동작 변경 없음)
 - `README.md` — “표준 Git 도구로 워크플로 산출물 추적하기” 섹션 추가
 - `tests/regression.test.js` — Story 3.5 회귀 7건 + main() chain 등록
-- `_bmad-output/implementation-artifacts/sprint-status.yaml` — Story 3.5 status: ready-for-dev → in-progress → review
-- `_bmad-output/implementation-artifacts/3-5-preserve-reviewer-traceability-through-standard-git-history.md` — Status: review, 모든 task/subtask 체크, Completion Notes 업데이트, File List 추가
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — Story 3.5 status: ready-for-dev → in-progress → review → done
+- `_bmad-output/implementation-artifacts/3-5-preserve-reviewer-traceability-through-standard-git-history.md` — Status: done, 모든 task/subtask 체크, Completion Notes 업데이트, File List 추가, Review Follow-ups (AI) 추가
+
+### Review Follow-ups (AI)
+
+#### Round 1 (resolved during Story 3.5 code review)
+
+- [x] [AI-Review][Low] `summarizePathScope()`에 사용되지 않는 `order` 배열이 선언/append만 되고 다시 읽히지 않는 dead code였음 — 최종 ordering이 `orderedPrefixes` (PATH_SCOPE_BUCKETS + SINGLE_FILE_DOC_BUCKETS + "other") 기반으로 결정되므로 `order` 변수와 push 호출을 제거. 동작 동일, 회귀 테스트 7건 모두 통과. [src/services/workflow/finalization-artifacts.js]
+
+#### Code review summary (2026-05-10)
+
+- 0 Critical, 0 High, 0 Medium, 1 Low 발견. Critical/High가 없어 자동 수정 정책에 따라 Low 1건은 즉시 수정하고 status를 `review` → `done`으로 승격.
+- AC1 (표준 Git 도구로 추적, 최소 정보) 검증: PASS — `pathScopeSummary`는 prefix-기반 bucket count만 노출하며 basename/절대경로/원격 URL을 일절 포함하지 않음. 회귀 테스트 `verifyStory35CommitExplanationSurfacesScopeWithoutSensitiveData`가 직접 가드.
+- AC2 (코드+비코드 산출물 함께 추적) 검증: PASS — 단일 commit proposal이 `artifactKinds`와 `pathScopeSummary`를 통해 코드/문서를 같은 commit에 묶고, 회귀 테스트 `verifyStory35CommitProposalMixedScope`가 bucket 순서까지 고정.
+- 신규 audit event/approval type/state 필드/dependency 도입 없음 (Story 3.4의 `git.action.executed` 패밀리, Story 3.2/3.3의 commitProposal/pushProposal, Story 2.5의 recovery gate 그대로 재사용).
+- Story 3.1~3.4 invariant (selectNextPlannedAction priority, audit field shapes, push-after-commit gating)는 그대로 유지됨을 코드 리뷰에서 확인.
