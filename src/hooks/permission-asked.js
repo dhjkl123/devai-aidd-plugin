@@ -323,8 +323,20 @@ export function createPermissionAskedHook(legacyHandlers, injections = {}) {
               });
 
               if (result.outcome === "resolved" && audit && Array.isArray(result.auditEvents)) {
+                // Story 3.4: emit each resolution audit event independently
+                // and best-effort. Without per-event isolation, a throwing
+                // audit sink on the first event (e.g. approval.resolved)
+                // would propagate up and prevent the second event
+                // (git.action.skipped) AND the downstream executor /
+                // recovery hand-off from running. Story 3.4 contract: a
+                // throwing logger MUST NOT abort the finalization envelope.
                 for (const event of result.auditEvents) {
-                  await audit.info(event.event, event);
+                  try {
+                    await audit.info(event.event, event);
+                  } catch {
+                    // Best-effort: keep emitting subsequent events and let
+                    // the rest of the resolution flow proceed.
+                  }
                 }
               }
 

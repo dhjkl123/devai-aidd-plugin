@@ -16,11 +16,18 @@ function buildRepositorySnapshot(state) {
   };
 }
 
-function buildWorkflowContext(sessionID, approvalRequest) {
+function buildWorkflowContext(sessionID, approvalRequest, extras = {}) {
   return {
     sessionID,
     commandName: approvalRequest.command ?? approvalRequest.workflow ?? null,
     phase: approvalRequest.phase ?? "finish",
+    // Story 3.4: thread the deterministic actionId and finalization mode
+    // into the executor so `git.action.executed` carries the same correlation
+    // axes as `approval.requested` / `approval.resolved`. The executor reads
+    // these as optional `workflowContext` fields, so passing them here keeps
+    // the executor signature stable.
+    actionId: approvalRequest.actionId ?? null,
+    finalizationMode: extras.finalizationMode ?? null,
   };
 }
 
@@ -157,7 +164,27 @@ export async function executeApprovedAction({
 
   const state = workflowState.get(sessionID) ?? {};
   const repositorySnapshot = buildRepositorySnapshot(state);
-  const workflowContext = buildWorkflowContext(sessionID, approvalRequest);
+  // Story 3.4: derive finalizationMode from the request metadata first (it
+  // was set by buildApprovalRequest from the workflow policy at planning
+  // time) and fall back to a fresh policy resolve so executor audit always
+  // carries the correct mode even if the request was reconstructed by a
+  // re-entry path.
+  const requestFinalizationMode =
+    typeof approvalRequest?.metadata?.finalization === "string" &&
+    approvalRequest.metadata.finalization.length > 0
+      ? approvalRequest.metadata.finalization
+      : null;
+  const baseWorkflowContext = buildWorkflowContext(sessionID, approvalRequest, {
+    finalizationMode: requestFinalizationMode,
+  });
+  const liveFinalizationMode =
+    requestFinalizationMode ??
+    resolveWorkflowPolicy(pluginContext, baseWorkflowContext)?.finalization ??
+    null;
+  const workflowContext = {
+    ...baseWorkflowContext,
+    finalizationMode: liveFinalizationMode,
+  };
   const approvedAt = resolution?.resolvedAt ?? new Date().toISOString();
 
   let envelope;

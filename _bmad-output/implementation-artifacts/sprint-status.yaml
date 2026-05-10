@@ -70,7 +70,7 @@ development_status:
   3-1-detect-finalizable-workflow-outputs: done
   3-2-prepare-and-execute-workflow-completion-commits: done
   3-3-propose-push-only-when-a-remote-repository-is-available: in-progress
-  3-4-record-approval-outcomes-and-execution-results-for-audit: ready-for-dev
+  3-4-record-approval-outcomes-and-execution-results-for-audit: review
   3-5-preserve-reviewer-traceability-through-standard-git-history: ready-for-dev
   epic-3-retrospective: optional
 

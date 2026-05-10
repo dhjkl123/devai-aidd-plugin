@@ -1,6 +1,6 @@
 # Story 3.4: 승인 결과와 실행 결과를 감사 기록으로 남기기
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -23,35 +23,35 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] 승인 이벤트와 실행 이벤트의 감사 계약을 Story 3 최종화 경로에 맞게 정리한다 (AC: 1)
-  - [ ] `approval.requested`, `approval.resolved`, `git.action.skipped`, `git.action.executed`의 필수 필드 집합을 Story 3.4 관점에서 재검증하고 누락 필드를 보완한다.
-  - [ ] 커밋/푸시 최종화에서 동일한 `workflow`, `command`, `timestamp`, `details.actionKind`, `details.correlationId` 축으로 이벤트를 비교 가능하게 만든다.
-  - [ ] 승인 단계와 실행 단계가 서로 다른 이벤트명을 쓰더라도 감사 소비자가 하나의 최종화 흐름으로 재구성할 수 있게 상관관계 키를 유지한다.
+- [x] 승인 이벤트와 실행 이벤트의 감사 계약을 Story 3 최종화 경로에 맞게 정리한다 (AC: 1)
+  - [x] `approval.requested`, `approval.resolved`, `git.action.skipped`, `git.action.executed`의 필수 필드 집합을 Story 3.4 관점에서 재검증하고 누락 필드를 보완한다.
+  - [x] 커밋/푸시 최종화에서 동일한 `workflow`, `command`, `timestamp`, `details.actionKind`, `details.correlationId` 축으로 이벤트를 비교 가능하게 만든다.
+  - [x] 승인 단계와 실행 단계가 서로 다른 이벤트명을 쓰더라도 감사 소비자가 하나의 최종화 흐름으로 재구성할 수 있게 상관관계 키를 유지한다.
 
-- [ ] 승인 결과 감사 기록을 최종화 액션 중심으로 보강한다 (AC: 1)
-  - [ ] `src/services/approval/build-approval-request.js`와 `src/services/approval/build-approval-resolution.js`가 `commit`, `push`, `finalize` 계열 액션에도 일관된 메타데이터를 제공하는지 확인한다.
-  - [ ] `src/hooks/command-execute-before.js`에서 발행하는 `approval.requested`가 최종화 제안의 액션 식별자와 제안 종류를 빠뜨리지 않도록 정리한다.
-  - [ ] `deny` 및 `ignore-and-continue` 경로가 남기는 `git.action.skipped`가 로컬 커밋 보존, push 미실행 등 Story 3 맥락을 설명할 수 있게 reason/details를 점검한다.
+- [x] 승인 결과 감사 기록을 최종화 액션 중심으로 보강한다 (AC: 1)
+  - [x] `src/services/approval/build-approval-request.js`와 `src/services/approval/build-approval-resolution.js`가 `commit`, `push`, `finalize` 계열 액션에도 일관된 메타데이터를 제공하는지 확인한다.
+  - [x] `src/hooks/command-execute-before.js`에서 발행하는 `approval.requested`가 최종화 제안의 액션 식별자와 제안 종류를 빠뜨리지 않도록 정리한다.
+  - [x] `deny` 및 `ignore-and-continue` 경로가 남기는 `git.action.skipped`가 로컬 커밋 보존, push 미실행 등 Story 3 맥락을 설명할 수 있게 reason/details를 점검한다.
 
-- [ ] Git 실행 결과 감사 기록을 commit/push 최종화 경로에 맞게 확장 또는 정리한다 (AC: 1)
-  - [ ] `src/services/git/git-executor.js`의 `git.action.executed` payload가 commit/push 모두에 대해 충분한 실행 문맥을 남기는지 검토한다.
-  - [ ] `src/services/git/commit-service.js`, `src/services/git/push-service.js`에서 executor에 전달하는 계획 객체에 필요한 correlation 정보와 branch/remote 정보가 빠지지 않도록 맞춘다.
-  - [ ] 실패 시에도 raw stderr, 전체 remote URL, 불필요한 절대 경로를 그대로 기록하지 않도록 기존 redaction/minimal logging 규칙을 유지한다.
+- [x] Git 실행 결과 감사 기록을 commit/push 최종화 경로에 맞게 확장 또는 정리한다 (AC: 1)
+  - [x] `src/services/git/git-executor.js`의 `git.action.executed` payload가 commit/push 모두에 대해 충분한 실행 문맥을 남기는지 검토한다.
+  - [x] `src/services/git/commit-service.js`, `src/services/git/push-service.js`에서 executor에 전달하는 계획 객체에 필요한 correlation 정보와 branch/remote 정보가 빠지지 않도록 맞춘다.
+  - [x] 실패 시에도 raw stderr, 전체 remote URL, 불필요한 절대 경로를 그대로 기록하지 않도록 기존 redaction/minimal logging 규칙을 유지한다.
 
-- [ ] 감사 싱크 best-effort 보장을 Story 3 최종화 흐름에서 회귀 없이 유지한다 (AC: 2)
-  - [ ] `src/audit/logger.js`의 client/file/http 싱크별 개별 try/catch 동작을 활용해 한 싱크 실패가 다른 싱크나 최종화 흐름을 막지 않게 한다.
-  - [ ] `src/hooks/permission-asked.js`, `src/hooks/command-execute-before.js`, `src/services/git/git-executor.js`에서 감사 실패를 주 원인보다 우선시하지 않도록 한다.
-  - [ ] 감사 실패가 발생해도 commit/push 실행 envelope 또는 승인 해석 결과는 정상 반환되도록 계약을 고정한다.
+- [x] 감사 싱크 best-effort 보장을 Story 3 최종화 흐름에서 회귀 없이 유지한다 (AC: 2)
+  - [x] `src/audit/logger.js`의 client/file/http 싱크별 개별 try/catch 동작을 활용해 한 싱크 실패가 다른 싱크나 최종화 흐름을 막지 않게 한다.
+  - [x] `src/hooks/permission-asked.js`, `src/hooks/command-execute-before.js`, `src/services/git/git-executor.js`에서 감사 실패를 주 원인보다 우선시하지 않도록 한다.
+  - [x] 감사 실패가 발생해도 commit/push 실행 envelope 또는 승인 해석 결과는 정상 반환되도록 계약을 고정한다.
 
-- [ ] Story 2.x에서 구축한 승인/복구 상태와 충돌하지 않게 최종화 감사 흐름을 연결한다 (AC: 1, 2)
-  - [ ] `workflowState.lastGitAction`, `lastGitResult`, `lastGitFailure`, `pendingRecoveryContext`를 재사용해 실행 결과와 복구 필요성을 중복 저장하지 않는다.
-  - [ ] Recovery 이벤트(`git.action.recovery.*`)와 Story 3.4 이벤트가 서로 역할을 침범하지 않도록 경계를 문서화한다.
-  - [ ] push 거부 또는 실패가 이미 생성된 로컬 commit의 감사 가능성을 훼손하지 않도록 local-finalized / remote-not-finalized 상태 해석을 명확히 한다.
+- [x] Story 2.x에서 구축한 승인/복구 상태와 충돌하지 않게 최종화 감사 흐름을 연결한다 (AC: 1, 2)
+  - [x] `workflowState.lastGitAction`, `lastGitResult`, `lastGitFailure`, `pendingRecoveryContext`를 재사용해 실행 결과와 복구 필요성을 중복 저장하지 않는다.
+  - [x] Recovery 이벤트(`git.action.recovery.*`)와 Story 3.4 이벤트가 서로 역할을 침범하지 않도록 경계를 문서화한다.
+  - [x] push 거부 또는 실패가 이미 생성된 로컬 commit의 감사 가능성을 훼손하지 않도록 local-finalized / remote-not-finalized 상태 해석을 명확히 한다.
 
-- [ ] 회귀 테스트와 계약 테스트를 추가하거나 보강한다 (AC: 1, 2)
-  - [ ] `tests/regression.test.js`에 승인 요청, 승인 해소, 실행 성공/실패, 감사 싱크 실패를 하나의 최종화 흐름으로 검증하는 테스트를 추가한다.
-  - [ ] commit 성공 후 push 실패 시 `git.action.executed`와 기존 commit 결과가 함께 추적 가능함을 검증한다.
-  - [ ] 감사 payload가 `workflow`, `command`, `timestamp`, `outcome`, `details` 최소 형태를 유지하는지 계약 단언을 추가한다.
+- [x] 회귀 테스트와 계약 테스트를 추가하거나 보강한다 (AC: 1, 2)
+  - [x] `tests/regression.test.js`에 승인 요청, 승인 해소, 실행 성공/실패, 감사 싱크 실패를 하나의 최종화 흐름으로 검증하는 테스트를 추가한다.
+  - [x] commit 성공 후 push 실패 시 `git.action.executed`와 기존 commit 결과가 함께 추적 가능함을 검증한다.
+  - [x] 감사 payload가 `workflow`, `command`, `timestamp`, `outcome`, `details` 최소 형태를 유지하는지 계약 단언을 추가한다.
 
 ## Dev Notes
 
@@ -181,5 +181,24 @@ GPT-5 Codex
 - Epic 3 및 Story 3.4 요구사항, PRD/아키텍처 제약, Epic 2 Story 2.5 학습, 최근 커밋 패턴을 반영해 구현용 컨텍스트를 생성했다.
 - 지정된 산출물 파일만 생성했으며 다른 implementation artifact나 `sprint-status.yaml`은 수정하지 않았다.
 - Dev Notes에 구현 후보 파일, 테스트 포인트, 감사 계약 경계, 최소 데이터 로깅 제약을 구체적으로 명시했다.
+- (2026-05-10 dev) Story 3.4 구현 완료:
+  - `approval.requested`, `approval.resolved`, `git.action.skipped`, `git.action.executed` 페이로드를 일관된 축으로 정리했다. 모든 이벤트가 top-level `workflow`/`command`/`sessionID`/`outcome`/`timestamp`와 `details.actionKind`/`details.correlationId`/`details.phase`를 갖도록 보강했고, commit/push 액션에는 `details.finalizationMode`(workflowPolicy.finalization)와 `details.actionId`도 추가해 한 finalization flow를 단일 correlation 패밀리로 재구성할 수 있게 했다.
+  - `build-approval-resolution.js`에서 `request.proposal.correlationId` 와 `request.metadata.finalization` 을 읽어 resolved/skipped 페이로드에 동일하게 노출했다.
+  - `git-executor.js`는 `workflowContext.actionId` / `workflowContext.finalizationMode`를 옵셔널 필드로 받아 audit details 에 노출하도록 했고, `execute-approved-action.js`가 approval request metadata 에서 finalization mode 를 읽어 executor 로 전달한다 (없으면 pluginContext.resolvePolicy 로 한 번 더 조회).
+  - audit best-effort 보장을 finalization 경로에 일관되게 적용했다: `command-execute-before.js` 의 `workflow.detected`/`git.action.planned`/`git.readiness.checked` emission, `publish-next-planned-action.js` 의 `approval.requested`/`approval.prompt.delivery.failed`/`git.action.recovery.blocked` emission, 그리고 `permission-asked.js` 의 resolution audit emission loop 를 모두 try/catch 로 격리해 한 싱크 실패가 envelope 반환을 막지 않게 했다.
+  - 회귀 테스트 5개 추가: approval.requested 최소 필드 검증, approval.resolved + git.action.skipped 의 correlationId/finalizationMode 보존, git.action.executed actionId/finalizationMode 보존, audit throw 시 envelope 보존, 그리고 commit-success → push-deny 시 양쪽 이벤트가 동일한 workflow + sessionID 로 audit log 에 함께 남는지 검증.
+  - Story 2.5 의 recovery 이벤트(`git.action.recovery.*`)는 손대지 않았으며 새 이벤트명도 도입하지 않았다. workflowState 의 `lastGitAction`/`lastGitResult`/`lastGitFailure`/`pendingRecoveryContext` 는 그대로 재사용했다.
+  - `npm run build` 후 `npm test` 통과 (exit code 0) 확인.
 
 ### File List
+
+- src/services/approval/build-approval-resolution.js
+- src/services/approval/publish-next-planned-action.js
+- src/services/git/git-executor.js
+- src/services/git/execute-approved-action.js
+- src/hooks/permission-asked.js
+- src/hooks/command-execute-before.js
+- tests/regression.test.js
+- _bmad-output/implementation-artifacts/3-4-record-approval-outcomes-and-execution-results-for-audit.md
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- dist/devai-aidd-guard.js (rebuilt from src; no manual edits)

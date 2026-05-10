@@ -48,7 +48,15 @@ export async function publishNextPlannedAction({
             actionKind: classified.kind,
           },
         });
-        await audit.info("git.action.recovery.blocked", hookBlocked);
+        // Story 3.4: audit emission is best-effort. A throwing logger must
+        // NOT prevent the recovery-block decision from short-circuiting
+        // approval publish — the block itself has already been computed and
+        // returning the skip outcome to the caller is the load-bearing path.
+        try {
+          await audit.info("git.action.recovery.blocked", hookBlocked);
+        } catch {
+          // Best-effort only.
+        }
       }
       return { outcome: "skip", reason: recoveryBlock.reason };
     }
@@ -89,27 +97,52 @@ export async function publishNextPlannedAction({
     });
 
     if (audit) {
-      await audit.info("approval.requested", {
-        event: "approval.requested",
-        timestamp: new Date().toISOString(),
-        workflow: workflowContext.commandName,
-        command: workflowContext.commandName,
-        outcome: "ask",
-        details: {
-          actionKind: classified.kind,
-          actionName: nextProposal.action || classified.actionType,
-          proposalKind: nextProposal.kind,
-          proposalReason: nextProposal.reason || null,
-          requiresApproval: classified.requiresApproval === true,
-          phase: approvalRequest.phase,
-          requestId: approvalRequest.id,
-          actionId: approvalRequest.actionId,
-          actionType: classified.actionType,
+      // Story 3.4: audit is best-effort. The approval prompt delivery on the
+      // line below is the load-bearing user-facing step; a throwing audit
+      // sink must NOT prevent the user from seeing the prompt.
+      try {
+        await audit.info("approval.requested", {
+          event: "approval.requested",
+          timestamp: new Date().toISOString(),
+          workflow: workflowContext.commandName,
+          command: workflowContext.commandName,
+          // Story 3.4: surface sessionID at the top-level alongside
+          // workflow/command so audit consumers can group all events for one
+          // finalization flow without having to dig into details.
           sessionID: workflowContext.sessionID,
-          explanationFallback:
-            approvalRequest.metadata?.explanation?.fallback === true,
-        },
-      });
+          outcome: "ask",
+          details: {
+            actionKind: classified.kind,
+            actionName: nextProposal.action || classified.actionType,
+            proposalKind: nextProposal.kind,
+            proposalReason: nextProposal.reason || null,
+            requiresApproval: classified.requiresApproval === true,
+            phase: approvalRequest.phase,
+            requestId: approvalRequest.id,
+            actionId: approvalRequest.actionId,
+            actionType: classified.actionType,
+            sessionID: workflowContext.sessionID,
+            explanationFallback:
+              approvalRequest.metadata?.explanation?.fallback === true,
+            // Story 3.4: correlation axes so the auditor can join this
+            // approval.requested event to the eventual git.action.executed /
+            // git.action.skipped / approval.resolved events without relying
+            // solely on the deterministic actionId fingerprint.
+            correlationId:
+              typeof nextProposal.correlationId === "string" &&
+              nextProposal.correlationId.length > 0
+                ? nextProposal.correlationId
+                : null,
+            finalizationMode:
+              typeof workflowPolicy?.finalization === "string" &&
+              workflowPolicy.finalization.length > 0
+                ? workflowPolicy.finalization
+                : null,
+          },
+        });
+      } catch {
+        // Best-effort only — see comment above.
+      }
     }
 
     if (typeof pluginContext?.requestApproval === "function") {
@@ -117,20 +150,30 @@ export async function publishNextPlannedAction({
         await pluginContext.requestApproval(approvalRequest);
       } catch (err) {
         if (audit) {
-          await audit.info("approval.prompt.delivery.failed", {
-            event: "approval.prompt.delivery.failed",
-            timestamp: new Date().toISOString(),
-            workflow: workflowContext.commandName,
-            command: workflowContext.commandName,
-            outcome: "skip",
-            details: {
-              reason: "prompt-delivery-failed",
-              requestId: approvalRequest.id,
-              actionType: approvalRequest.actionType,
+          // Story 3.4: prompt-delivery-failed is itself best-effort. The
+          // primary failure (prompt delivery) is what the runtime is told
+          // about by leaving approvalCurrent stashed; an audit sink throw
+          // must not overwrite that primary cause with a logger error.
+          try {
+            await audit.info("approval.prompt.delivery.failed", {
+              event: "approval.prompt.delivery.failed",
+              timestamp: new Date().toISOString(),
+              workflow: workflowContext.commandName,
+              command: workflowContext.commandName,
               sessionID: workflowContext.sessionID,
-              error: err?.message ?? String(err),
-            },
-          });
+              outcome: "skip",
+              details: {
+                reason: "prompt-delivery-failed",
+                requestId: approvalRequest.id,
+                actionId: approvalRequest.actionId,
+                actionType: approvalRequest.actionType,
+                sessionID: workflowContext.sessionID,
+                error: err?.message ?? String(err),
+              },
+            });
+          } catch {
+            // Best-effort only.
+          }
         }
       }
     }

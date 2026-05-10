@@ -8780,6 +8780,422 @@ async function verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace() {
   );
 }
 
+/* ----------------------------------------------------------------------- */
+/*                       Story 3.4 — audit traceability                     */
+/* ----------------------------------------------------------------------- */
+
+/**
+ * Story 3.4 (AC1): every audit event on the commit/push finalization path
+ * must carry the same minimal correlation axes (workflow, command, sessionID,
+ * outcome, details.actionKind, details.correlationId, details.phase, and —
+ * where applicable — details.finalizationMode) so an auditor can re-assemble
+ * one finalization flow from disparate event names.
+ */
+async function verifyStory34ApprovalRequestedCarriesCorrelationAxes() {
+  const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
+    await Promise.all([
+      import(`${workflowStateModuleUrl}?s34-req-axes=${Date.now()}`),
+      import(`${commandExecuteBeforeModuleUrl}?s34-req-axes=${Date.now()}`),
+      import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
+    ]);
+
+  const gitWorkspace = createGitWorkspace({ initialize: true });
+  const workflowState = createWorkflowStateStore();
+  const logs = [];
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook(
+    { "command.execute.before": async () => {} },
+    {
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      pluginContext: {
+        directory: gitWorkspace,
+        resolvePolicy(wfCtx) {
+          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          if (!policy) return { outcome: "ask", details: { fallback: {} } };
+          return { outcome: "allow", details: { policy } };
+        },
+      },
+      audit: {
+        async info(message, extra) {
+          logs.push({ message, extra });
+        },
+      },
+    },
+  );
+
+  try {
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "S34-AXES-1", sessionID: "s-34-axes" },
+      { parts: [] },
+    );
+
+    const requested = logs.filter((l) => l.message === "approval.requested");
+    assert.equal(requested.length, 1, "exactly one approval.requested must be emitted");
+    const payload = requested[0].extra;
+
+    // Story 3.4 minimum top-level shape.
+    assert.equal(payload.event, "approval.requested");
+    assert.equal(typeof payload.timestamp, "string");
+    assert.equal(typeof payload.workflow, "string");
+    assert.equal(typeof payload.command, "string");
+    assert.equal(payload.workflow, payload.command, "workflow and command must be the same axis");
+    assert.equal(typeof payload.sessionID, "string", "sessionID must be exposed at top level");
+    assert.equal(payload.sessionID.length > 0, true);
+    assert.equal(payload.outcome, "ask", "approval.requested uses outcome=ask (not yet resolved)");
+
+    // Story 3.4 details contract.
+    assert.equal(typeof payload.details, "object");
+    assert.equal(typeof payload.details.actionKind, "string", "details.actionKind required");
+    assert.equal(typeof payload.details.actionId, "string", "details.actionId required");
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(payload.details, "correlationId"),
+      true,
+      "details.correlationId must be present (string or null)",
+    );
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(payload.details, "finalizationMode"),
+      true,
+      "details.finalizationMode must be present (string or null)",
+    );
+    assert.equal(typeof payload.details.phase, "string", "details.phase required");
+  } finally {
+    fs.rmSync(gitWorkspace, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 3.4 (AC1): commit/push approval.resolved + git.action.skipped must
+ * carry the same correlationId + finalizationMode axes so deny / ignore-and-
+ * continue can be joined to the prior approval.requested event.
+ */
+async function verifyStory34ApprovalResolvedAndSkippedCarryCorrelationAxes() {
+  const { buildApprovalResolvedAudit, buildGitActionSkippedAudit } = await import(
+    `${buildApprovalResolutionModuleUrl}?s34-resolved-axes=${Date.now()}`
+  );
+
+  const request = {
+    id: "approval:s-34:push:push",
+    actionId: "action:push:push",
+    sessionID: "s-34",
+    workflow: "bmad-bmm-quick-dev",
+    command: "bmad-bmm-quick-dev",
+    phase: "finish",
+    actionType: "push",
+    proposal: {
+      kind: "push",
+      action: "push",
+      remoteName: "origin",
+      branchName: "feat/X",
+      correlationId: "corr-push-axes",
+    },
+    metadata: {
+      workflow: "bmad-bmm-quick-dev",
+      command: "bmad-bmm-quick-dev",
+      finalization: "commit-and-push",
+    },
+  };
+  const resolution = {
+    approvalId: request.id,
+    actionId: request.actionId,
+    sessionID: request.sessionID,
+    actionKind: "push",
+    actionType: "push",
+    status: "deny",
+    previousStatus: "pending",
+    continuation: "continue-without-action",
+    resolvedAt: "2026-05-10T00:00:00.000Z",
+    resolvedBy: null,
+    sourceHook: "permission.asked",
+    reasonCode: "approval-denied",
+    metadata: { phase: "finish", workflow: request.workflow, command: request.command },
+  };
+
+  const resolved = buildApprovalResolvedAudit({ request, resolution });
+  assert.equal(resolved.event, "approval.resolved");
+  assert.equal(resolved.workflow, "bmad-bmm-quick-dev");
+  assert.equal(resolved.command, "bmad-bmm-quick-dev");
+  assert.equal(resolved.sessionID, "s-34");
+  assert.equal(resolved.outcome, "deny");
+  assert.equal(resolved.details.actionKind, "push");
+  assert.equal(resolved.details.correlationId, "corr-push-axes", "approval.resolved must carry the proposal correlationId");
+  assert.equal(resolved.details.finalizationMode, "commit-and-push", "approval.resolved must carry workflowPolicy.finalization");
+  assert.equal(resolved.details.phase, "finish");
+  assert.equal(resolved.details.continuation, "continue-without-action");
+
+  const skipped = buildGitActionSkippedAudit({ request, resolution });
+  assert.ok(skipped, "deny outcome must produce a git.action.skipped event");
+  assert.equal(skipped.event, "git.action.skipped");
+  assert.equal(skipped.workflow, "bmad-bmm-quick-dev");
+  assert.equal(skipped.sessionID, "s-34");
+  assert.equal(skipped.outcome, "deny");
+  assert.equal(skipped.details.actionKind, "push");
+  assert.equal(skipped.details.reason, "approval-denied", "deny → reason=approval-denied");
+  assert.equal(skipped.details.correlationId, "corr-push-axes", "git.action.skipped must carry the same correlationId as approval.resolved");
+  assert.equal(skipped.details.finalizationMode, "commit-and-push", "git.action.skipped must carry the same finalizationMode");
+  assert.equal(skipped.details.phase, "finish", "git.action.skipped must carry the resolution phase");
+}
+
+/**
+ * Story 3.4 (AC1): git.action.executed must carry actionId AND
+ * finalizationMode in details so the executor envelope joins to the same
+ * correlation family as the approval events.
+ */
+async function verifyStory34GitActionExecutedCarriesCorrelationAxes() {
+  const { executeGitAction } = await import(
+    `${gitExecutorModuleUrl}?s34-exec-axes=${Date.now()}`
+  );
+
+  const recorded = [];
+  await executeGitAction({
+    plan: {
+      kind: "commit",
+      operation: "commit",
+      branchName: "feat/X",
+      correlationId: "corr-commit-axes",
+    },
+    expectedState: { headBranch: "feat/X" },
+    repositorySnapshot: { headBranch: "feat/X" },
+    workflowContext: {
+      sessionID: "s-34-exec",
+      commandName: "bmad-bmm-quick-dev",
+      phase: "finish",
+      // Story 3.4: both axes are accepted as workflowContext fields so the
+      // executor signature stays stable while audit gets the full picture.
+      actionId: "action:commit:commit",
+      finalizationMode: "commit-and-push",
+    },
+    gitRunner: async () => ({}),
+    audit: {
+      async info(message, payload) {
+        recorded.push({ message, payload });
+      },
+    },
+  });
+
+  assert.equal(recorded.length, 1, "exactly one git.action.executed must be emitted");
+  const [{ message, payload }] = recorded;
+  assert.equal(message, "git.action.executed");
+  assert.equal(payload.workflow, "bmad-bmm-quick-dev");
+  assert.equal(payload.command, "bmad-bmm-quick-dev");
+  assert.equal(payload.sessionID, "s-34-exec", "sessionID must be exposed at top level");
+  assert.equal(payload.outcome, "succeeded");
+  assert.equal(payload.details.actionKind, "commit");
+  assert.equal(payload.details.actionId, "action:commit:commit", "details.actionId must be threaded from workflowContext");
+  assert.equal(payload.details.correlationId, "corr-commit-axes", "details.correlationId must come from the action plan");
+  assert.equal(payload.details.finalizationMode, "commit-and-push", "details.finalizationMode must be threaded from workflowContext");
+  assert.equal(payload.details.phase, "end");
+}
+
+/**
+ * Story 3.4 (AC2): a throwing audit sink on git.action.executed MUST NOT
+ * abort the executor envelope. The envelope is the load-bearing return
+ * value — primary failure code (or success) must reach the caller even if
+ * the logger explodes.
+ */
+async function verifyStory34GitExecutorEnvelopeSurvivesAuditThrow() {
+  const { executeGitAction } = await import(
+    `${gitExecutorModuleUrl}?s34-exec-throws=${Date.now()}`
+  );
+
+  const envelope = await executeGitAction({
+    plan: {
+      kind: "commit",
+      operation: "commit",
+      branchName: "feat/X",
+      correlationId: "corr-throw",
+    },
+    expectedState: { headBranch: "feat/X" },
+    repositorySnapshot: { headBranch: "feat/X" },
+    workflowContext: { sessionID: "s-throw", commandName: "bmad-bmm-quick-dev", phase: "finish" },
+    gitRunner: async () => ({}),
+    audit: {
+      async info() {
+        throw new Error("audit sink unavailable");
+      },
+    },
+  });
+
+  // Primary outcome (success) must survive even though audit threw.
+  assert.equal(envelope.ok, true, "envelope must report primary success despite audit throw");
+  assert.equal(envelope.status, "succeeded");
+  assert.equal(envelope.code, null, "audit failure must NOT overwrite the primary cause");
+  assert.equal(envelope.action.kind, "commit");
+  assert.equal(envelope.audit.attempted, true);
+  assert.equal(envelope.audit.logged, false, "audit.logged must reflect that emission failed");
+  assert.equal(typeof envelope.audit.loggingError, "string", "loggingError must capture the sink error");
+}
+
+/**
+ * Story 3.4 (AC1, AC2): after a successful commit, a denied push must NOT
+ * undermine the already-recorded git.action.executed (commit) audit trail.
+ * Both events must remain in the audit log with the same workflow + sessionID
+ * so an auditor can reconstruct "local-finalized, remote-not-finalized".
+ */
+async function verifyStory34CommitSuccessThenPushDenyPreservesAuditChain() {
+  const [
+    { createWorkflowStateStore },
+    { createPermissionAskedHook },
+  ] = await Promise.all([
+    import(`${workflowStateModuleUrl}?s34-commit-then-push-deny=${Date.now()}`),
+    import(`${permissionAskedHookModuleUrl}?s34-commit-then-push-deny=${Date.now()}`),
+  ]);
+
+  const events = [];
+  const audit = {
+    async info(message, payload) {
+      events.push({ message, payload });
+    },
+  };
+
+  const store = createWorkflowStateStore();
+  store.set("s-34-cp", {
+    sessionID: "s-34-cp",
+    commandName: "bmad-bmm-quick-dev",
+    phase: "finish",
+    readiness: {
+      outcome: "allow",
+      details: {
+        isGitRepository: true,
+        branch: "feat/story-3-4",
+        hasRemote: true,
+        remoteNames: ["origin"],
+      },
+    },
+    approvalCurrent: {
+      id: "approval:s-34-cp:commit:commit",
+      actionId: "action:commit:commit",
+      sessionID: "s-34-cp",
+      workflow: "bmad-bmm-quick-dev",
+      command: "bmad-bmm-quick-dev",
+      phase: "finish",
+      actionType: "commit",
+      status: "awaitingApproval",
+      proposal: {
+        kind: "commit",
+        action: "commit",
+        message: "Finish bmad-bmm-quick-dev: update implementation outputs",
+        artifactScope: "implementation",
+        changeCountSummary: "1 code file",
+        files: ["src/index.js"],
+        correlationId: "corr-commit-cp",
+      },
+      metadata: {
+        workflow: "bmad-bmm-quick-dev",
+        command: "bmad-bmm-quick-dev",
+        finalization: "commit-and-push",
+      },
+    },
+    approvalHistory: [],
+    pendingActions: [],
+    commitProposal: {
+      kind: "commit",
+      action: "commit",
+      message: "Finish bmad-bmm-quick-dev: update implementation outputs",
+      artifactScope: "implementation",
+      changeCountSummary: "1 code file",
+      files: ["src/index.js"],
+      correlationId: "corr-commit-cp",
+    },
+  });
+
+  const hook = createPermissionAskedHook(
+    { "permission.asked": async () => {} },
+    {
+      workflowState: store,
+      audit,
+      pluginContext: {
+        resolvePolicy() {
+          return {
+            outcome: "allow",
+            details: {
+              policy: {
+                category: "implementation",
+                identityStrategy: "story",
+                branchRequired: true,
+                finalization: "commit-and-push",
+              },
+            },
+          };
+        },
+        async gitActionRunner({ action }) {
+          assert.equal(action.kind, "commit");
+          return {
+            observedState: { headBranch: "feat/story-3-4", hasRemote: true },
+          };
+        },
+        async requestApproval() {
+          // Simulate the runtime publishing the push prompt — no-op for the
+          // assertions; we only care about audit trail correlation here.
+        },
+      },
+    },
+  );
+
+  // Step 1: accept the commit. This emits approval.resolved (accept) +
+  // git.action.executed (commit, succeeded), then publishes the push
+  // approval (which itself emits approval.requested for push).
+  await hook({
+    sessionID: "s-34-cp",
+    approvalId: "approval:s-34-cp:commit:commit",
+    actionId: "action:commit:commit",
+    outcome: "accept",
+  });
+
+  const commitExecuted = events.find(
+    (e) => e.message === "git.action.executed" && e.payload?.details?.actionKind === "commit",
+  );
+  assert.ok(commitExecuted, "commit success must emit git.action.executed");
+  assert.equal(commitExecuted.payload.outcome, "succeeded");
+  assert.equal(commitExecuted.payload.workflow, "bmad-bmm-quick-dev");
+  assert.equal(commitExecuted.payload.sessionID, "s-34-cp");
+  assert.equal(commitExecuted.payload.details.correlationId, "corr-commit-cp");
+
+  // Confirm push approval is now active before we deny it.
+  const afterCommit = store.get("s-34-cp");
+  assert.equal(afterCommit.approvalCurrent?.actionType, "push", "push approval must be active after commit success");
+  const pushApprovalId = afterCommit.approvalCurrent.id;
+
+  // Step 2: deny the push approval.
+  await hook({
+    sessionID: "s-34-cp",
+    approvalId: pushApprovalId,
+    actionId: afterCommit.approvalCurrent.actionId,
+    outcome: "deny",
+  });
+
+  // Both events must be present in the audit log, sharing workflow + sessionID.
+  const commitExecutedEvents = events.filter(
+    (e) => e.message === "git.action.executed" && e.payload?.details?.actionKind === "commit",
+  );
+  const pushSkippedEvents = events.filter(
+    (e) => e.message === "git.action.skipped" && e.payload?.details?.actionKind === "push",
+  );
+  assert.equal(commitExecutedEvents.length, 1, "commit-success git.action.executed must remain in the log");
+  assert.equal(pushSkippedEvents.length, 1, "push-deny must produce git.action.skipped");
+
+  const commitEvt = commitExecutedEvents[0].payload;
+  const pushEvt = pushSkippedEvents[0].payload;
+
+  assert.equal(commitEvt.workflow, pushEvt.workflow, "commit and push events must share workflow axis");
+  assert.equal(commitEvt.sessionID, pushEvt.sessionID, "commit and push events must share sessionID axis");
+  assert.equal(commitEvt.details.finalizationMode, "commit-and-push", "commit event finalizationMode");
+  assert.equal(pushEvt.details.finalizationMode, "commit-and-push", "push-skipped event finalizationMode must be the same family");
+  assert.equal(pushEvt.details.reason, "approval-denied", "push deny reason");
+  assert.equal(commitEvt.outcome, "succeeded", "commit succeeded must be preserved");
+  assert.equal(pushEvt.outcome, "deny", "push deny outcome must be recorded");
+
+  // Story 3.4 contract: minimum-data logging — no raw stderr / remote URL
+  // leaks into either payload.
+  assert.equal(commitEvt.details.stderrSummary, null, "commit succeeded must not carry stderr");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(pushEvt.details, "remoteUrl"),
+    false,
+    "git.action.skipped must NOT carry full remoteUrl",
+  );
+}
+
 main()
   .then(() => verifyBootstrapFailureShape())
   .then(() => verifyMissingLegacyBootstrapDependencyFails())
@@ -8904,6 +9320,12 @@ main()
   .then(() => verifySingletonArtifactPolicyIgnoresRepoWideStatusFallback())
   .then(() => verifyNormalizeTrackedFilePathRejectsOutOfRepoAbsolutePath())
   .then(() => verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace())
+  // Story 3.4 — record approval outcomes and execution results for audit
+  .then(() => verifyStory34ApprovalRequestedCarriesCorrelationAxes())
+  .then(() => verifyStory34ApprovalResolvedAndSkippedCarryCorrelationAxes())
+  .then(() => verifyStory34GitActionExecutedCarriesCorrelationAxes())
+  .then(() => verifyStory34GitExecutorEnvelopeSurvivesAuditThrow())
+  .then(() => verifyStory34CommitSuccessThenPushDenyPreservesAuditChain())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -55,17 +55,24 @@ export function createCommandExecuteBeforeHook(
           initProposal: undefined,
         });
         if (audit) {
-          await audit.info("workflow.detected", {
-            event: "workflow.detected",
-            timestamp: context.detectedAt,
-            workflow: context.commandName,
-            command: context.commandName,
-            details: {
+          // Story 3.4: every audit emission on the finalization path is
+          // best-effort. A throwing audit sink must NEVER abort the hook.
+          try {
+            await audit.info("workflow.detected", {
+              event: "workflow.detected",
+              timestamp: context.detectedAt,
+              workflow: context.commandName,
+              command: context.commandName,
               sessionID: context.sessionID,
-              hasArguments: Boolean(context.arguments),
-              source: "command.execute.before",
-            },
-          });
+              details: {
+                sessionID: context.sessionID,
+                hasArguments: Boolean(context.arguments),
+                source: "command.execute.before",
+              },
+            });
+          } catch {
+            // Best-effort only.
+          }
         }
 
         const resolvedPolicy = pluginContext?.resolvePolicy?.(context);
@@ -90,34 +97,48 @@ export function createCommandExecuteBeforeHook(
             initProposal: readiness.details.proposal,
           });
           if (audit) {
-            await audit.info("git.action.planned", {
-              event: "git.action.planned",
-              timestamp: new Date().toISOString(),
-              workflow: context.commandName,
-              command: context.commandName,
-              outcome: readiness.outcome,
-              details: {
-                kind: "init",
-                requiresApproval: true,
-              },
-            });
+            // Story 3.4: best-effort audit; never abort the hook on a
+            // throwing logger.
+            try {
+              await audit.info("git.action.planned", {
+                event: "git.action.planned",
+                timestamp: new Date().toISOString(),
+                workflow: context.commandName,
+                command: context.commandName,
+                sessionID: context.sessionID,
+                outcome: readiness.outcome,
+                details: {
+                  kind: "init",
+                  requiresApproval: true,
+                },
+              });
+            } catch {
+              // Best-effort only.
+            }
           }
         }
 
         if (audit) {
-          await audit.info("git.readiness.checked", {
-            event: "git.readiness.checked",
-            timestamp: new Date().toISOString(),
-            workflow: context.commandName,
-            command: context.commandName,
-            outcome: readiness.outcome,
-            details: {
-              isGitRepository: readiness.details?.isGitRepository === true,
-              hasRemote: readiness.details?.hasRemote === true,
-              branch: readiness.details?.branch || null,
-              durationMs: readinessDurationMs,
-            },
-          });
+          // Story 3.4: best-effort audit; never abort the hook on a
+          // throwing logger.
+          try {
+            await audit.info("git.readiness.checked", {
+              event: "git.readiness.checked",
+              timestamp: new Date().toISOString(),
+              workflow: context.commandName,
+              command: context.commandName,
+              sessionID: context.sessionID,
+              outcome: readiness.outcome,
+              details: {
+                isGitRepository: readiness.details?.isGitRepository === true,
+                hasRemote: readiness.details?.hasRemote === true,
+                branch: readiness.details?.branch || null,
+                durationMs: readinessDurationMs,
+              },
+            });
+          } catch {
+            // Best-effort only.
+          }
         }
 
         if (!shouldSkipBranchPlanning(readiness)) {
@@ -147,19 +168,26 @@ export function createCommandExecuteBeforeHook(
                 branchProposal: proposal,
               });
               if (audit) {
-                await audit.info("git.action.planned", {
-                  event: "git.action.planned",
-                  timestamp: new Date().toISOString(),
-                  workflow: context.commandName,
-                  command: context.commandName,
-                  details: {
-                    kind: "branch",
-                    action: proposal.action,
-                    name: proposal.name,
-                    reason: proposal.reason,
-                    isLongLived: strategy.isLongLived,
-                  },
-                });
+                // Story 3.4: best-effort audit; never abort the hook on a
+                // throwing logger.
+                try {
+                  await audit.info("git.action.planned", {
+                    event: "git.action.planned",
+                    timestamp: new Date().toISOString(),
+                    workflow: context.commandName,
+                    command: context.commandName,
+                    sessionID: context.sessionID,
+                    details: {
+                      kind: "branch",
+                      action: proposal.action,
+                      name: proposal.name,
+                      reason: proposal.reason,
+                      isLongLived: strategy.isLongLived,
+                    },
+                  });
+                } catch {
+                  // Best-effort only.
+                }
               }
             }
           }
