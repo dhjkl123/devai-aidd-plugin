@@ -4,7 +4,7 @@ import path from "node:path";
 
 const projectRoot = process.cwd();
 const entryFile = path.join(projectRoot, "src", "index.js");
-const outputFile = path.join(projectRoot, "dist", "devai-aidd-guard.js");
+const outputFile = path.join(projectRoot, "dist", "devai-aidd-plugin.js");
 
 fs.mkdirSync(path.dirname(outputFile), { recursive: true });
 

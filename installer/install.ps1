@@ -1,5 +1,5 @@
 param(
-  [string]$BaseUrl = "https://<storage-account>.blob.core.windows.net/opencode-plugins/devai-aidd-guard/latest",
+  [string]$BaseUrl = "https://<storage-account>.blob.core.windows.net/opencode-plugins/devai-aidd-plugin/latest",
   [string]$InstallRoot = "$env:USERPROFILE\\.config\\opencode"
 )
 
@@ -25,11 +25,11 @@ function Get-FileHashHex {
 
 $pluginDir = Join-Path $InstallRoot "plugins"
 $templateDir = Join-Path $InstallRoot "templates"
-$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("devai-aidd-guard-" + [guid]::NewGuid().ToString("N"))
+$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("devai-aidd-plugin-" + [guid]::NewGuid().ToString("N"))
 $files = @(
-  "devai-aidd-guard.js",
-  "devai-aidd-guard.global.jsonc",
-  "devai-aidd-guard.project.jsonc",
+  "devai-aidd-plugin.js",
+  "devai-aidd-plugin.global.jsonc",
+  "devai-aidd-plugin.project.jsonc",
   "manifest.json",
   "checksums.txt"
 )
@@ -44,23 +44,23 @@ try {
   }
 
   $checksums = Get-ChecksumMap -Content (Get-Content (Join-Path $tempDir "checksums.txt") -Raw)
-  foreach ($file in @("devai-aidd-guard.js", "devai-aidd-guard.global.jsonc", "devai-aidd-guard.project.jsonc", "manifest.json")) {
+  foreach ($file in @("devai-aidd-plugin.js", "devai-aidd-plugin.global.jsonc", "devai-aidd-plugin.project.jsonc", "manifest.json")) {
     $actual = Get-FileHashHex -Path (Join-Path $tempDir $file)
     if ($checksums[$file] -ne $actual) {
       throw "Checksum mismatch for $file"
     }
   }
 
-  Copy-Item (Join-Path $tempDir "devai-aidd-guard.js") (Join-Path $pluginDir "devai-aidd-guard.js") -Force
+  Copy-Item (Join-Path $tempDir "devai-aidd-plugin.js") (Join-Path $pluginDir "devai-aidd-plugin.js") -Force
 
-  $globalConfigTarget = Join-Path $InstallRoot "devai-aidd-guard.global.jsonc"
+  $globalConfigTarget = Join-Path $InstallRoot "devai-aidd-plugin.global.jsonc"
   if (-not (Test-Path $globalConfigTarget)) {
-    Copy-Item (Join-Path $tempDir "devai-aidd-guard.global.jsonc") $globalConfigTarget
+    Copy-Item (Join-Path $tempDir "devai-aidd-plugin.global.jsonc") $globalConfigTarget
   }
 
-  $projectTemplateTarget = Join-Path $templateDir "devai-aidd-guard.project.jsonc"
+  $projectTemplateTarget = Join-Path $templateDir "devai-aidd-plugin.project.jsonc"
   if (-not (Test-Path $projectTemplateTarget)) {
-    Copy-Item (Join-Path $tempDir "devai-aidd-guard.project.jsonc") $projectTemplateTarget
+    Copy-Item (Join-Path $tempDir "devai-aidd-plugin.project.jsonc") $projectTemplateTarget
   }
 
   $manifestTarget = Join-Path $InstallRoot "manifest.json"
@@ -69,7 +69,7 @@ try {
   $checksumTarget = Join-Path $InstallRoot "checksums.txt"
   Copy-Item (Join-Path $tempDir "checksums.txt") $checksumTarget -Force
 
-  Write-Host "Installed DevAI AIDD Guard to $InstallRoot"
+  Write-Host "Installed DevAI AIDD Plugin to $InstallRoot"
   Write-Host "Project override template: $projectTemplateTarget"
 } finally {
   if (Test-Path $tempDir) {

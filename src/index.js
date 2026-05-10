@@ -1,5 +1,5 @@
 /**
- * src/index.js — DevAI AIDD Guard plugin bootstrap.
+ * src/index.js — DevAI AIDD Plugin bootstrap.
  *
  * Story 4.3 — BMAD command compatibility contract entry point.
  *
@@ -404,11 +404,11 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         supportedRuntime: SUPPORTED_RUNTIME,
       });
     } else {
-      consoleAdapter.error(`[devai-aidd-guard] plugin bootstrap failed: ${message}`);
+      consoleAdapter.error(`[devai-aidd-plugin] plugin bootstrap failed: ${message}`);
     }
 
     throw new Error(
-      `DevAI AIDD Guard bootstrap failed: ${message}. Supported runtime: ${SUPPORTED_RUNTIME}.`,
+      `DevAI AIDD Plugin bootstrap failed: ${message}. Supported runtime: ${SUPPORTED_RUNTIME}.`,
       { cause: error },
     );
   }

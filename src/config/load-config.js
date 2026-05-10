@@ -5,6 +5,8 @@ import {
 import {
   GLOBAL_CONFIG_DIR,
   GLOBAL_CONFIG_FILE_NAME,
+  GUARD_LEGACY_GLOBAL_CONFIG_FILE_NAME,
+  GUARD_LEGACY_PROJECT_CONFIG_FILE_NAME,
   LEGACY_COMPAT_MARKER_FILE_NAME,
   LEGACY_PROJECT_CONFIG_FILE_NAME,
   LEGACY_WORKFLOW_PROJECT_CONFIG_FILE_NAME,
@@ -221,6 +223,18 @@ function readLegacyConfigs(fsAdapter, paths, parseErrors) {
       "legacyWorkflowProjectConfig",
       parseErrors,
     ),
+    guardLegacyGlobalConfig: readConfigFile(
+      fsAdapter,
+      paths.guardLegacyGlobalConfigPath,
+      "guardLegacyGlobalConfig",
+      parseErrors,
+    ),
+    guardLegacyProjectConfig: readConfigFile(
+      fsAdapter,
+      paths.guardLegacyProjectConfigPath,
+      "guardLegacyProjectConfig",
+      parseErrors,
+    ),
   };
 }
 
@@ -262,16 +276,34 @@ function tagErrorsWithLayer(errors, layerName) {
  *   - When every layer fails, the result is the normalized DEFAULT_PLUGIN_CONFIG.
  *
  * Precedence order (lowest to highest priority):
- *   DEFAULT_PLUGIN_CONFIG → globalConfig → legacyProjectConfig
- *   → legacyWorkflowProjectConfig → projectConfig
+ *   DEFAULT_PLUGIN_CONFIG → guardLegacyGlobalConfig → globalConfig
+ *   → legacyProjectConfig → legacyWorkflowProjectConfig
+ *   → guardLegacyProjectConfig → projectConfig
+ *
+ * Guard-tier layers (`guardLegacyGlobalConfig`, `guardLegacyProjectConfig`)
+ * read the previous "modern" file names (`devai-aidd-guard.{global,project}.jsonc`)
+ * so existing user installs keep working after the rename to
+ * `devai-aidd-plugin`. Each guard layer sits immediately below the new
+ * file at the same scope, so a freshly-written `devai-aidd-plugin.*` file
+ * always wins on a per-key basis while untouched keys continue to come from
+ * the previously-named file.
  *
  * @returns {{ mergedConfig: object, droppedLayers: string[], errors: import("ajv").ErrorObject[] }}
  */
-function validateAndRecover(globalConfig, legacyProjectConfig, legacyWorkflowProjectConfig, projectConfig) {
+function validateAndRecover(
+  guardLegacyGlobalConfig,
+  globalConfig,
+  legacyProjectConfig,
+  legacyWorkflowProjectConfig,
+  guardLegacyProjectConfig,
+  projectConfig,
+) {
   const orderedLayers = [
+    { name: "guardLegacyGlobalConfig", value: guardLegacyGlobalConfig },
     { name: "globalConfig", value: globalConfig },
     { name: "legacyProjectConfig", value: legacyProjectConfig },
     { name: "legacyWorkflowProjectConfig", value: legacyWorkflowProjectConfig },
+    { name: "guardLegacyProjectConfig", value: guardLegacyProjectConfig },
     { name: "projectConfig", value: projectConfig },
   ];
 
@@ -309,7 +341,17 @@ export function resolveConfigPaths(directory, fsAdapter) {
     GLOBAL_CONFIG_DIR,
     GLOBAL_CONFIG_FILE_NAME,
   );
+  const guardLegacyGlobalConfigPath = path.join(
+    fsAdapter.homedir(),
+    GLOBAL_CONFIG_DIR,
+    GUARD_LEGACY_GLOBAL_CONFIG_FILE_NAME,
+  );
   const projectConfigPath = path.join(directory, PROJECT_CONFIG_DIR, PROJECT_CONFIG_FILE_NAME);
+  const guardLegacyProjectConfigPath = path.join(
+    directory,
+    PROJECT_CONFIG_DIR,
+    GUARD_LEGACY_PROJECT_CONFIG_FILE_NAME,
+  );
   const legacyProjectConfigPath = path.join(
     directory,
     PROJECT_CONFIG_DIR,
@@ -328,7 +370,9 @@ export function resolveConfigPaths(directory, fsAdapter) {
 
   return {
     globalConfigPath,
+    guardLegacyGlobalConfigPath,
     projectConfigPath,
+    guardLegacyProjectConfigPath,
     legacyProjectConfigPath,
     legacyWorkflowProjectConfigPath,
     legacyCompatMarkerPath,
@@ -380,16 +424,19 @@ export function loadRuntimeConfig(directory, fsAdapter) {
   );
   const globalConfig = globalConfigRaw || {};
   const projectConfig = readProjectConfig(fsAdapter, paths, parseErrors);
-  const { legacyProjectConfig, legacyWorkflowProjectConfig } = readLegacyConfigs(
-    fsAdapter,
-    paths,
-    parseErrors,
-  );
+  const {
+    legacyProjectConfig,
+    legacyWorkflowProjectConfig,
+    guardLegacyGlobalConfig,
+    guardLegacyProjectConfig,
+  } = readLegacyConfigs(fsAdapter, paths, parseErrors);
 
   const { mergedConfig, droppedLayers, errors: schemaErrors } = validateAndRecover(
+    guardLegacyGlobalConfig || {},
     globalConfig,
     legacyProjectConfig,
     legacyWorkflowProjectConfig,
+    guardLegacyProjectConfig,
     projectConfig,
   );
 
@@ -415,7 +462,9 @@ export function loadRuntimeConfig(directory, fsAdapter) {
     paths,
     sources: {
       hasGlobalConfig: globalConfigRaw !== null,
+      hasGuardLegacyGlobalConfig: Boolean(guardLegacyGlobalConfig),
       hasProjectConfig: Boolean(projectConfig),
+      hasGuardLegacyProjectConfig: Boolean(guardLegacyProjectConfig),
       hasLegacyWorkflowProjectConfig: Boolean(legacyWorkflowProjectConfig),
       hasLegacyProjectConfig: Boolean(legacyProjectConfig),
     },

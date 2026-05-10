@@ -86,7 +86,7 @@ const recoveryOrchestratorModuleUrl = pathToFileURL(
 const legacyBridgeServiceModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "compat", "legacy-bridge-service.js"),
 ).href;
-const builtModulePath = path.join(projectRoot, "dist", "devai-aidd-guard.js");
+const builtModulePath = path.join(projectRoot, "dist", "devai-aidd-plugin.js");
 const builtModuleUrl = pathToFileURL(builtModulePath).href;
 const legacyModulePath = path.join(
   projectRoot,
@@ -108,7 +108,7 @@ function verifyBuiltArtifactExists({
   assert.equal(
     existsSyncFn(builtPath),
     true,
-    "missing dist/devai-aidd-guard.js — run `npm run build` before `npm test`",
+    "missing dist/devai-aidd-plugin.js — run `npm run build` before `npm test`",
   );
 }
 
@@ -729,14 +729,14 @@ async function verifyConfigMergePrecedence() {
   try {
     // Write global config with a known defaultType
     fs.writeFileSync(
-      path.join(globalConfigDir, "devai-aidd-guard.global.jsonc"),
+      path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
       JSON.stringify({ branch: { defaultType: "docs" } }),
       "utf8",
     );
 
     // Write project config that overrides defaultType
     fs.writeFileSync(
-      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }),
       "utf8",
     );
@@ -810,7 +810,7 @@ async function verifyValidationFallback() {
   try {
     // Write an intentionally invalid project config: branch.longLivedBranches must be array, not integer
     fs.writeFileSync(
-      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { longLivedBranches: 42 } }),
       "utf8",
     );
@@ -873,13 +873,13 @@ async function verifyValidationFallbackLowerLayer() {
   try {
     // Invalid global config: longLivedBranches must be an array, not an integer.
     fs.writeFileSync(
-      path.join(globalConfigDir, "devai-aidd-guard.global.jsonc"),
+      path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
       JSON.stringify({ branch: { longLivedBranches: 99, defaultType: "docs" } }),
       "utf8",
     );
     // Valid project config that overrides defaultType to "feat".
     fs.writeFileSync(
-      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }),
       "utf8",
     );
@@ -951,7 +951,7 @@ async function verifyParseFailureSurfacing() {
   try {
     // Write a syntactically broken JSON file.
     fs.writeFileSync(
-      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       "{ this is not valid JSON",
       "utf8",
     );
@@ -1006,7 +1006,7 @@ async function verifyForwardCompatExtensionKeys() {
 
   try {
     fs.writeFileSync(
-      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({
         branch: { defaultType: "feat", futureField: "preview" },
         audit: { enabled: true, futureTransport: "kafka" },
@@ -1281,11 +1281,11 @@ async function verifyEffectiveConfigNormalizationContract() {
 
   try {
     const globalTemplate = fs.readFileSync(
-      path.join(projectRoot, "templates", "devai-aidd-guard.global.jsonc"),
+      path.join(projectRoot, "templates", "devai-aidd-plugin.global.jsonc"),
       "utf8",
     );
     const projectTemplate = fs.readFileSync(
-      path.join(projectRoot, "templates", "devai-aidd-guard.project.jsonc"),
+      path.join(projectRoot, "templates", "devai-aidd-plugin.project.jsonc"),
       "utf8",
     );
     const legacyTemplate = fs.readFileSync(
@@ -1297,7 +1297,7 @@ async function verifyEffectiveConfigNormalizationContract() {
 
     // Source A: only global template installed (project A)
     fs.writeFileSync(
-      path.join(globalConfigDir, "devai-aidd-guard.global.jsonc"),
+      path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
       globalTemplate,
       "utf8",
     );
@@ -1309,7 +1309,7 @@ async function verifyEffectiveConfigNormalizationContract() {
 
     // Source B: project template ADDED on top of global
     fs.writeFileSync(
-      path.join(projectBDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectBDir, "devai-aidd-plugin.project.jsonc"),
       projectTemplate,
       "utf8",
     );
@@ -1418,7 +1418,7 @@ async function verifyMissingOptionalValuesFallback() {
     // Only one tiny override — every other branch.* and workflowPolicy[*] key
     // is intentionally missing.
     fs.writeFileSync(
-      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultMergeTarget: "develop" } }),
       "utf8",
     );
@@ -1494,7 +1494,7 @@ async function verifyWorkflowPolicyVocabularySchema() {
   fs.mkdirSync(projectOkDir, { recursive: true });
   try {
     fs.writeFileSync(
-      path.join(projectOkDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectOkDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({
         workflowPolicy: {
           "bmad-bmm-custom": {
@@ -1532,7 +1532,7 @@ async function verifyWorkflowPolicyVocabularySchema() {
   fs.mkdirSync(projectBadDir, { recursive: true });
   try {
     fs.writeFileSync(
-      path.join(projectBadDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectBadDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({
         workflowPolicy: {
           "bmad-bmm-typo": {
@@ -1649,7 +1649,7 @@ async function verifyEffectivePolicyDeterminism() {
 
   try {
     fs.writeFileSync(
-      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({
         branch: {
           defaultMergeTarget: "main",
@@ -1738,7 +1738,7 @@ async function verifyLatestPolicyChangesReflectedAcrossRuns() {
   fs.mkdirSync(projectConfigDir, { recursive: true });
 
   try {
-    const cfgPath = path.join(projectConfigDir, "devai-aidd-guard.project.jsonc");
+    const cfgPath = path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc");
     fs.writeFileSync(
       cfgPath,
       JSON.stringify({
@@ -2232,7 +2232,7 @@ async function verifyInvalidBranchRegexValidation() {
 
   try {
     fs.writeFileSync(
-      path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { validationRegex: "[" } }),
       "utf8",
     );
@@ -2511,7 +2511,7 @@ async function verifyConfigValidationFailedAuditPayload() {
 
   // Write invalid project config to trigger validation failure
   fs.writeFileSync(
-    path.join(projectConfigDir, "devai-aidd-guard.project.jsonc"),
+    path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
     JSON.stringify({ branch: { longLivedBranches: 99 } }),
     "utf8",
   );
@@ -3323,7 +3323,7 @@ async function verifyApprovalRequestPayloadShape() {
 
 /**
  * Story 2.1: built artifact parity for approval.requested event and approvalCurrent stash.
- * Both wrapper (src/index.js) and built (dist/devai-aidd-guard.js) must produce the
+ * Both wrapper (src/index.js) and built (dist/devai-aidd-plugin.js) must produce the
  * same approvalCurrent shape for the same input.
  */
 async function verifyApprovalBuiltArtifactParity() {
@@ -10728,7 +10728,7 @@ async function verifyStory42BridgePreservesUserLegacyWithoutMarker() {
   try {
     const projectConfigContent = JSON.stringify({ branch: { defaultType: "feat" } }, null, 2);
     fs.writeFileSync(
-      path.join(sandboxF.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(sandboxF.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       projectConfigContent,
       "utf8",
     );
@@ -10787,7 +10787,7 @@ async function verifyStory42BridgeRefreshWhenMarkerPresent() {
   const sandboxC = createStory42Sandbox("s42-case-c");
   try {
     const legacyPath = path.join(sandboxC.projectConfigDir, "opencode-aidd-plugin.json");
-    const markerPath = path.join(sandboxC.projectConfigDir, ".devai-aidd-guard.compat.generated");
+    const markerPath = path.join(sandboxC.projectConfigDir, ".devai-aidd-plugin.compat.generated");
     // Pre-existing legacy mirror (from a previous run) + marker — content
     // intentionally stale so refresh has something to do.
     fs.writeFileSync(
@@ -10848,7 +10848,7 @@ async function verifyStory42BridgeRefreshWhenMarkerPresent() {
   const sandboxE = createStory42Sandbox("s42-case-e");
   try {
     fs.writeFileSync(
-      path.join(sandboxE.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(sandboxE.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
       "utf8",
     );
@@ -10859,7 +10859,7 @@ async function verifyStory42BridgeRefreshWhenMarkerPresent() {
       "utf8",
     );
     fs.writeFileSync(
-      path.join(sandboxE.projectConfigDir, ".devai-aidd-guard.compat.generated"),
+      path.join(sandboxE.projectConfigDir, ".devai-aidd-plugin.compat.generated"),
       "legacy marker",
       "utf8",
     );
@@ -10905,7 +10905,7 @@ async function verifyStory42BridgeCreatesMirrorForModernOnly() {
   const sandbox = createStory42Sandbox("s42-case-d");
   try {
     fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
       "utf8",
     );
@@ -10962,7 +10962,7 @@ async function verifyStory42BridgeWriteIsIdempotent() {
   const sandbox = createStory42Sandbox("s42-idem");
   try {
     fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
       "utf8",
     );
@@ -11034,7 +11034,7 @@ async function verifyStory42BridgePrecedenceProjectOverridesLegacy() {
   const sandbox = createStory42Sandbox("s42-prec");
   try {
     fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
       "utf8",
     );
@@ -11093,7 +11093,7 @@ async function verifyStory42BridgeAuditEventShape() {
   const sandbox = createStory42Sandbox("s42-audit");
   try {
     fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
       "utf8",
     );
@@ -11180,7 +11180,7 @@ async function verifyStory42BridgeMirrorOmitsAuditSection() {
   const sandbox = createStory42Sandbox("s42-shape");
   try {
     fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify(
         {
           branch: { defaultType: "feat" },
@@ -11289,7 +11289,7 @@ async function verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker() {
   const sandbox2 = createStory42Sandbox("s42-r2m1-coexist");
   try {
     fs.writeFileSync(
-      path.join(sandbox2.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(sandbox2.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
       "utf8",
     );
@@ -11354,13 +11354,13 @@ async function verifyStory42BridgeRebuildLabelOnMarkerLeftover() {
   const sandbox = createStory42Sandbox("s42-r2m3");
   try {
     fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
       "utf8",
     );
     // Marker exists but the two mirror files do NOT (user `rm`'d them).
     fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, ".devai-aidd-guard.compat.generated"),
+      path.join(sandbox.projectConfigDir, ".devai-aidd-plugin.compat.generated"),
       "leftover marker\n",
       "utf8",
     );
@@ -11415,7 +11415,7 @@ async function verifyStory42BridgeWriteFailureIsBestEffort() {
   const sandbox = createStory42Sandbox("s42-r2m2");
   try {
     fs.writeFileSync(
-      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      path.join(sandbox.projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
       "utf8",
     );
@@ -11509,13 +11509,13 @@ function story44PackageVersion() {
 function story44GenerateFixtureRelease(label) {
   // Pre-flight: the bundle artifact must exist for make-release to succeed.
   // `npm test` already runs `npm --check src/index.js && ... && node tests/...`
-  // and Story 3.5's verifyBuiltArtifactExists asserts `dist/devai-aidd-guard.js`
+  // and Story 3.5's verifyBuiltArtifactExists asserts `dist/devai-aidd-plugin.js`
   // is present. We re-assert here so the failure mode is locally explainable.
-  const bundlePath = path.join(projectRoot, "dist", "devai-aidd-guard.js");
+  const bundlePath = path.join(projectRoot, "dist", "devai-aidd-plugin.js");
   assert.equal(
     fs.existsSync(bundlePath),
     true,
-    `story44GenerateFixtureRelease[${label}]: dist/devai-aidd-guard.js missing — run \`npm run build\` before \`npm test\``,
+    `story44GenerateFixtureRelease[${label}]: dist/devai-aidd-plugin.js missing — run \`npm run build\` before \`npm test\``,
   );
 
   const tempReleaseRoot = fs.mkdtempSync(
@@ -11535,7 +11535,7 @@ function story44GenerateFixtureRelease(label) {
     );
   }
 
-  const releaseRoot = path.join(tempReleaseRoot, "devai-aidd-guard");
+  const releaseRoot = path.join(tempReleaseRoot, "devai-aidd-plugin");
   const latestRoot = path.join(releaseRoot, "latest");
   const versionRoot = path.join(releaseRoot, "versions", story44PackageVersion());
   return { tempReleaseRoot, releaseRoot, latestRoot, versionRoot };
@@ -11579,12 +11579,12 @@ function story44ParseChecksumsPwsh(text, name) {
 // caught by the regression. If `filesToPublish` in scripts/make-release.js
 // changes, update this constant intentionally to confirm the change.
 const STORY_44_EXPECTED_PUBLISHED_FILES = Object.freeze([
-  "devai-aidd-guard.js",
+  "devai-aidd-plugin.js",
   "install.ps1",
   "install.sh",
   "uninstall.ps1",
-  "devai-aidd-guard.global.jsonc",
-  "devai-aidd-guard.project.jsonc",
+  "devai-aidd-plugin.global.jsonc",
+  "devai-aidd-plugin.project.jsonc",
   "opencode.jsonc.example",
 ]);
 
@@ -11594,9 +11594,9 @@ const STORY_44_EXPECTED_PUBLISHED_FILES = Object.freeze([
 // this list that lacks a checksums.txt line will cause every install
 // attempt to fail at the integrity-check step.
 const STORY_44_INSTALLER_VERIFIED_FILES = Object.freeze([
-  "devai-aidd-guard.js",
-  "devai-aidd-guard.global.jsonc",
-  "devai-aidd-guard.project.jsonc",
+  "devai-aidd-plugin.js",
+  "devai-aidd-plugin.global.jsonc",
+  "devai-aidd-plugin.project.jsonc",
   "manifest.json",
 ]);
 
@@ -11631,8 +11631,8 @@ async function verifyStory44ReleaseManifestCompleteness() {
       );
       assert.equal(
         manifest.name,
-        "devai-aidd-guard",
-        `verifyStory44ReleaseManifestCompleteness: ${label} manifest.name must be "devai-aidd-guard"`,
+        "devai-aidd-plugin",
+        `verifyStory44ReleaseManifestCompleteness: ${label} manifest.name must be "devai-aidd-plugin"`,
       );
       assert.equal(
         manifest.displayName,
@@ -11842,11 +11842,11 @@ async function verifyStory44LatestAndVersionedDirsMirrored() {
       const versionPath = path.join(fixture.versionRoot, name);
       assert.ok(
         fs.existsSync(latestPath),
-        `verifyStory44LatestAndVersionedDirsMirrored: ${name} must exist under release/devai-aidd-guard/latest/`,
+        `verifyStory44LatestAndVersionedDirsMirrored: ${name} must exist under release/devai-aidd-plugin/latest/`,
       );
       assert.ok(
         fs.existsSync(versionPath),
-        `verifyStory44LatestAndVersionedDirsMirrored: ${name} must exist under release/devai-aidd-guard/versions/<version>/`,
+        `verifyStory44LatestAndVersionedDirsMirrored: ${name} must exist under release/devai-aidd-plugin/versions/<version>/`,
       );
       const latestHash = crypto
         .createHash("sha256")
@@ -11892,7 +11892,7 @@ async function verifyStory44ReleaseMissingSourceFails() {
     // Provide everything except uninstall.ps1.
     fs.mkdirSync(path.join(tempRoot, "dist"), { recursive: true });
     fs.writeFileSync(
-      path.join(tempRoot, "dist", "devai-aidd-guard.js"),
+      path.join(tempRoot, "dist", "devai-aidd-plugin.js"),
       "// stub bundle\nexport const x = 1;\n",
       "utf8",
     );
@@ -11902,12 +11902,12 @@ async function verifyStory44ReleaseMissingSourceFails() {
     // uninstall.ps1 INTENTIONALLY MISSING.
     fs.mkdirSync(path.join(tempRoot, "templates"), { recursive: true });
     fs.writeFileSync(
-      path.join(tempRoot, "templates", "devai-aidd-guard.global.jsonc"),
+      path.join(tempRoot, "templates", "devai-aidd-plugin.global.jsonc"),
       "{}",
       "utf8",
     );
     fs.writeFileSync(
-      path.join(tempRoot, "templates", "devai-aidd-guard.project.jsonc"),
+      path.join(tempRoot, "templates", "devai-aidd-plugin.project.jsonc"),
       "{}",
       "utf8",
     );
@@ -11962,7 +11962,7 @@ async function verifyStory44ReleaseMissingSourceFails() {
 }
 
 /**
- * Story 4.4 R2 LOW-1: when the bundle artifact (`dist/devai-aidd-guard.js`)
+ * Story 4.4 R2 LOW-1: when the bundle artifact (`dist/devai-aidd-plugin.js`)
  * is missing alongside other publish sources, `make-release.js` must (a)
  * list ALL missing files in a single error message and (b) include the
  * `npm run build` hint that targets the bundle specifically. This locks
@@ -11984,19 +11984,19 @@ async function verifyStory44ReleaseMissingBundleEmitsBuildHint() {
       path.join(tempRoot, "scripts", "make-release.js"),
     );
 
-    // Provide installer + templates but OMIT dist/devai-aidd-guard.js AND install.sh.
+    // Provide installer + templates but OMIT dist/devai-aidd-plugin.js AND install.sh.
     fs.mkdirSync(path.join(tempRoot, "installer"), { recursive: true });
     fs.writeFileSync(path.join(tempRoot, "installer", "install.ps1"), "stub", "utf8");
     // install.sh INTENTIONALLY MISSING (second missing file).
     fs.writeFileSync(path.join(tempRoot, "installer", "uninstall.ps1"), "stub", "utf8");
     fs.mkdirSync(path.join(tempRoot, "templates"), { recursive: true });
     fs.writeFileSync(
-      path.join(tempRoot, "templates", "devai-aidd-guard.global.jsonc"),
+      path.join(tempRoot, "templates", "devai-aidd-plugin.global.jsonc"),
       "{}",
       "utf8",
     );
     fs.writeFileSync(
-      path.join(tempRoot, "templates", "devai-aidd-guard.project.jsonc"),
+      path.join(tempRoot, "templates", "devai-aidd-plugin.project.jsonc"),
       "{}",
       "utf8",
     );
@@ -12005,7 +12005,7 @@ async function verifyStory44ReleaseMissingBundleEmitsBuildHint() {
       "{}",
       "utf8",
     );
-    // dist/devai-aidd-guard.js INTENTIONALLY MISSING (no `dist/` directory at all).
+    // dist/devai-aidd-plugin.js INTENTIONALLY MISSING (no `dist/` directory at all).
 
     let threw = null;
     let stderr = "";
@@ -12025,8 +12025,8 @@ async function verifyStory44ReleaseMissingBundleEmitsBuildHint() {
     );
     assert.match(
       stderr,
-      /devai-aidd-guard\.js/,
-      `verifyStory44ReleaseMissingBundleEmitsBuildHint: error must name the missing bundle (devai-aidd-guard.js); got: ${stderr}`,
+      /devai-aidd-plugin\.js/,
+      `verifyStory44ReleaseMissingBundleEmitsBuildHint: error must name the missing bundle (devai-aidd-plugin.js); got: ${stderr}`,
     );
     assert.match(
       stderr,
@@ -12065,7 +12065,7 @@ async function verifyStory44ReleaseMissingBundleEmitsBuildHint() {
 // packaging) remain observable across all three variants.
 //
 // Pre-condition (intentional): every Story 4.5 verifier here assumes the built
-// dist artifact (`dist/devai-aidd-guard.js`) exists. The chain entry point
+// dist artifact (`dist/devai-aidd-plugin.js`) exists. The chain entry point
 // `main()` already calls `verifyBuiltArtifactExists()` first, so a missing
 // dist aborts the suite before the Story 4.5 block runs. Story 4.4 owns
 // release manifest/checksum/installer assertions; Story 4.5 only depends on
@@ -12544,7 +12544,7 @@ async function verifyStory45BuiltArtifactPromptParityWithWrapper() {
  * Story 4.5: when the built artifact is absent, the regression gate must
  * abort with a clear message — silent skip is forbidden. This is a meta-guard
  * for the actual `verifyBuiltArtifactExists()` function defined at the top
- * of this file; the production `dist/devai-aidd-guard.js` is never touched.
+ * of this file; the production `dist/devai-aidd-plugin.js` is never touched.
  *
  * Story 4.5 R2 (H-1 mitigation): the original implementation called
  * `assert.equal(false, true, "<MESSAGE>")` directly and verified that the
@@ -12575,7 +12575,7 @@ async function verifyStory45RegressionGateAbortsWithoutBuiltArtifact() {
     path.join(os.tmpdir(), "devai-aidd-story45-missing-dist-"),
   );
   try {
-    const fixtureDist = path.join(tempRoot, "dist", "devai-aidd-guard.js");
+    const fixtureDist = path.join(tempRoot, "dist", "devai-aidd-plugin.js");
 
     // 1. Negative path — exercise the actual `verifyBuiltArtifactExists`
     //    function via dependency injection, simulating a missing dist.
@@ -12594,7 +12594,7 @@ async function verifyStory45RegressionGateAbortsWithoutBuiltArtifact() {
     );
     assert.match(
       threw.message,
-      /missing dist\/devai-aidd-guard\.js/,
+      /missing dist\/devai-aidd-plugin\.js/,
       `verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() error must name the missing path; got: ${threw.message}`,
     );
     assert.match(
@@ -12634,8 +12634,8 @@ async function verifyStory45RegressionGateAbortsWithoutBuiltArtifact() {
     );
     assert.match(
       source,
-      /missing dist\/devai-aidd-guard\.js/,
-      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must contain the literal `missing dist/devai-aidd-guard.js` hint — message rewritten without coordinated update",
+      /missing dist\/devai-aidd-plugin\.js/,
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must contain the literal `missing dist/devai-aidd-plugin.js` hint — message rewritten without coordinated update",
     );
     assert.match(
       source,

@@ -73,8 +73,8 @@ export const KNOWN_WORKFLOW_POLICY_VOCABULARY = Object.freeze({
 export const RUNTIME_CONFIG_SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "runtime-config.schema.json",
-  title: "DevAI AIDD Guard Runtime Configuration",
-  description: "Full effective configuration shape for the devai-aidd-guard plugin.",
+  title: "DevAI AIDD Plugin Runtime Configuration",
+  description: "Full effective configuration shape for the devai-aidd-plugin.",
   type: "object",
   properties: {
     schemaVersion: {

@@ -1,5 +1,5 @@
 {
-  // DevAI AIDD Guard global defaults
+  // DevAI AIDD Plugin global defaults
   //
   // FR18 — Per-team policy tuning without code changes:
   //   Edit the keys below in this file (or in the project-level override) to

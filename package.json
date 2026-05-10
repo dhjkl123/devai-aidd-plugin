@@ -1,7 +1,7 @@
 {
-  "name": "devai-aidd-guard",
+  "name": "devai-aidd-plugin",
   "version": "1.0.0",
-  "description": "DevAI AIDD Guard plugin for opencode-based DevAI environments.",
+  "description": "DevAI AIDD Plugin for opencode-based DevAI environments.",
   "type": "module",
   "private": true,
   "scripts": {

@@ -7,8 +7,8 @@ import path from "node:path";
  *
  * Invariants enforced by this script (kept stable for installer compatibility
  * and regression coverage in tests/regression.test.js):
- *   - Output directories: `release/devai-aidd-guard/versions/<version>/` and
- *     `release/devai-aidd-guard/latest/` MUST contain the SAME 7 published
+ *   - Output directories: `release/devai-aidd-plugin/versions/<version>/` and
+ *     `release/devai-aidd-plugin/latest/` MUST contain the SAME 7 published
  *     files with byte-identical SHA-256 hashes plus `manifest.json` and
  *     `checksums.txt`.
  *   - `manifest.json.version === package.json.version`. The directory name
@@ -39,7 +39,7 @@ import path from "node:path";
  *
  * Optional override for testability: when the environment variable
  * `RELEASE_TARGET_ROOT` is set to an absolute directory, the script writes
- * `<RELEASE_TARGET_ROOT>/devai-aidd-guard/{latest,versions/<version>}/`
+ * `<RELEASE_TARGET_ROOT>/devai-aidd-plugin/{latest,versions/<version>}/`
  * instead of `<projectRoot>/release/...`. This lets the regression suite
  * generate fixture release trees inside `os.tmpdir()` without polluting
  * the maintainer's working tree. Source paths still resolve from the
@@ -55,22 +55,22 @@ const version = packageJson.version;
 
 const releaseRootOverride = process.env.RELEASE_TARGET_ROOT;
 const releaseRoot = releaseRootOverride
-  ? path.join(releaseRootOverride, "devai-aidd-guard")
-  : path.join(projectRoot, "release", "devai-aidd-guard");
+  ? path.join(releaseRootOverride, "devai-aidd-plugin")
+  : path.join(projectRoot, "release", "devai-aidd-plugin");
 const versionRoot = path.join(releaseRoot, "versions", version);
 const latestRoot = path.join(releaseRoot, "latest");
 
 const filesToPublish = [
-  { source: path.join(projectRoot, "dist", "devai-aidd-guard.js"), name: "devai-aidd-guard.js" },
+  { source: path.join(projectRoot, "dist", "devai-aidd-plugin.js"), name: "devai-aidd-plugin.js" },
   { source: path.join(projectRoot, "installer", "install.ps1"), name: "install.ps1" },
   { source: path.join(projectRoot, "installer", "install.sh"), name: "install.sh" },
   { source: path.join(projectRoot, "installer", "uninstall.ps1"), name: "uninstall.ps1" },
-  { source: path.join(projectRoot, "templates", "devai-aidd-guard.global.jsonc"), name: "devai-aidd-guard.global.jsonc" },
-  { source: path.join(projectRoot, "templates", "devai-aidd-guard.project.jsonc"), name: "devai-aidd-guard.project.jsonc" },
+  { source: path.join(projectRoot, "templates", "devai-aidd-plugin.global.jsonc"), name: "devai-aidd-plugin.global.jsonc" },
+  { source: path.join(projectRoot, "templates", "devai-aidd-plugin.project.jsonc"), name: "devai-aidd-plugin.project.jsonc" },
   { source: path.join(projectRoot, "templates", "opencode.jsonc.example"), name: "opencode.jsonc.example" },
 ];
 
-const BUNDLE_ARTIFACT_NAME = "devai-aidd-guard.js";
+const BUNDLE_ARTIFACT_NAME = "devai-aidd-plugin.js";
 
 /**
  * Story 4.4 AC1: pre-flight validation.
@@ -83,9 +83,9 @@ const BUNDLE_ARTIFACT_NAME = "devai-aidd-guard.js";
  * knows exactly what to rebuild or restore.
  *
  * The `npm run build` hint is appended only when the missing-files set
- * contains the bundle artifact (`devai-aidd-guard.js`). The check is by
+ * contains the bundle artifact (`devai-aidd-plugin.js`). The check is by
  * exact file name, not substring, so future additions like
- * `devai-aidd-guard.js.map` cannot trigger a false-positive hint
+ * `devai-aidd-plugin.js.map` cannot trigger a false-positive hint
  * (Story 4.4 R2 MEDIUM-1).
  */
 function validatePublishSources() {
@@ -109,7 +109,7 @@ function validatePublishSources() {
   }
   if (missing.length > 0) {
     const hint = missingNames.has(BUNDLE_ARTIFACT_NAME)
-      ? "\nHint: run `npm run build` before `npm run release` to produce dist/devai-aidd-guard.js."
+      ? "\nHint: run `npm run build` before `npm run release` to produce dist/devai-aidd-plugin.js."
       : "";
     throw new Error(
       `make-release: cannot package release v${version} because required source files are missing:\n${missing.join("\n")}${hint}`,
@@ -120,7 +120,7 @@ function validatePublishSources() {
 /**
  * Story 4.4 AC1: cleanup pre-existing release directory contents but
  * preserve the `.gitkeep` placeholder that lives directly under
- * `release/devai-aidd-guard/{latest,versions/<version>}/`. The bare
+ * `release/devai-aidd-plugin/{latest,versions/<version>}/`. The bare
  * placeholder is the only file these directories track in git; everything
  * else is generated artifact and must be regenerated each release run so
  * that stale files (renamed publish entries, prior-version artifacts)
@@ -187,7 +187,7 @@ function writeMetadata(targetRoot) {
   });
 
   const manifest = {
-    name: "devai-aidd-guard",
+    name: "devai-aidd-plugin",
     displayName: "DevAI AIDD Plugin",
     version,
     generatedAt: new Date().toISOString(),
@@ -226,5 +226,5 @@ for (const targetRoot of [versionRoot, latestRoot]) {
 // message so a maintainer who has `RELEASE_TARGET_ROOT` set (intentionally or
 // accidentally — e.g. leaked from a shell rc) can immediately see where the
 // release tree was written instead of assuming the default
-// `release/devai-aidd-guard/`.
+// `release/devai-aidd-plugin/`.
 console.log(`Release created for version ${version} at ${releaseRoot}`);

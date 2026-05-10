@@ -1,8 +1,8 @@
-# DevAI AIDD Guard
+# DevAI AIDD Plugin
 
-DevAI AIDD Guard는 opencode 기반 DevAI 환경에서 AIDD 가드레일, 정책 적용, 감사 로그, 권한 통제를 담당하는 플러그인이다. 이번 리팩토링의 목표는 기능 변경이 아니라 단일 파일 구조를 표준 배포 구조로 정리하는 것이다.
+DevAI AIDD Plugin은 opencode 기반 DevAI 환경에서 AIDD 가드레일, 정책 적용, 감사 로그, 권한 통제를 담당하는 플러그인이다. 이번 리팩토링의 목표는 기능 변경이 아니라 단일 파일 구조를 표준 배포 구조로 정리하는 것이다.
 
-표시명은 `DevAI AIDD Plugin`으로 유지하고, 배포 산출물과 설정 파일명은 `devai-aidd-guard` 표준을 따른다.
+표시명·패키지명·배포 산출물·설정 파일명 모두 `devai-aidd-plugin` 표준을 따른다. 이전 버전(`devai-aidd-guard`)으로 설치된 사용자의 `~/.config/opencode/devai-aidd-guard.global.jsonc`와 `{project}/.opencode/devai-aidd-guard.project.jsonc` 파일은 호환 브리지를 통해 자동으로 함께 읽힌다(자세한 내용은 [레거시 구성 호환성](#레거시-구성-호환성) 참고).
 
 ## 주요 역할
 
@@ -39,14 +39,14 @@ devai-aidd-plugin/
 Windows PowerShell:
 
 ```powershell
-iwr "https://<storage-account>.blob.core.windows.net/opencode-plugins/devai-aidd-guard/latest/install.ps1" -OutFile install.ps1
+iwr "https://<storage-account>.blob.core.windows.net/opencode-plugins/devai-aidd-plugin/latest/install.ps1" -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 Linux/WSL:
 
 ```bash
-curl -fsSL "https://<storage-account>.blob.core.windows.net/opencode-plugins/devai-aidd-guard/latest/install.sh" -o install.sh
+curl -fsSL "https://<storage-account>.blob.core.windows.net/opencode-plugins/devai-aidd-plugin/latest/install.sh" -o install.sh
 bash install.sh
 ```
 
@@ -56,14 +56,14 @@ bash install.sh
 
 - Windows: `%USERPROFILE%\.config\opencode\`
 - Linux/WSL: `~/.config/opencode/`
-- 플러그인 파일: `plugins/devai-aidd-guard.js`
+- 플러그인 파일: `plugins/devai-aidd-plugin.js`
 
 ## 설정 파일
 
 우선순위는 아래와 같다.
 
-1. 글로벌 설정: `~/.config/opencode/devai-aidd-guard.global.jsonc`
-2. 프로젝트 설정: `{project-root}/.opencode/devai-aidd-guard.project.jsonc`
+1. 글로벌 설정: `~/.config/opencode/devai-aidd-plugin.global.jsonc`
+2. 프로젝트 설정: `{project-root}/.opencode/devai-aidd-plugin.project.jsonc`
 3. 레거시 호환 설정: `{project-root}/.opencode/opencode-aidd-plugin.json`
 
 프로젝트 설정은 글로벌 설정을 override한다. 런타임은 기존 코어 로직 호환을 위해 필요 시 레거시 설정 파일을 생성해 bridge 한다.
@@ -75,7 +75,7 @@ bash install.sh
 흐름 예시 — 팀 통합 브랜치를 `main`에서 `develop`으로 옮기고, `bmad-bmm-quick-dev`를 강제 브랜치/커밋으로 묶고 싶다면:
 
 ```jsonc
-// {project-root}/.opencode/devai-aidd-guard.project.jsonc
+// {project-root}/.opencode/devai-aidd-plugin.project.jsonc
 {
   "branch": {
     "defaultMergeTarget": "develop",
@@ -127,32 +127,34 @@ bash install.sh
 
 ## 레거시 구성 호환성
 
-이전 버전의 플러그인은 `.opencode/opencode-aidd-plugin.json`과 `.opencode/devai-git-workflow.json` 파일을 직접 읽었다. 본 플러그인은 모던 경로(`.opencode/devai-aidd-guard.project.jsonc`)를 단일 진실로 사용하면서, 구버전 reader가 같은 디렉터리에 함께 살아 있어도 동작이 깨지지 않도록 호환 브리지(mirror) 파일을 자동으로 관리한다.
+이전 버전의 플러그인은 `.opencode/opencode-aidd-plugin.json`과 `.opencode/devai-git-workflow.json` 파일을 직접 읽었다. 본 플러그인은 모던 경로(`.opencode/devai-aidd-plugin.project.jsonc`)를 단일 진실로 사용하면서, 구버전 reader가 같은 디렉터리에 함께 살아 있어도 동작이 깨지지 않도록 호환 브리지(mirror) 파일을 자동으로 관리한다.
 
 ### 경로 매핑
 
-| 역할 | 모던 경로 | 레거시 경로(브리지) |
+| 역할 | 모던 경로 | 호환 경로(자동 읽기) |
 |---|---|---|
-| 글로벌 설정 | `~/.config/opencode/devai-aidd-guard.global.jsonc` | (없음) |
-| 프로젝트 설정 | `{project}/.opencode/devai-aidd-guard.project.jsonc` | `{project}/.opencode/opencode-aidd-plugin.json` |
-| 워크플로 정책(레거시 reader 호환) | (모던에서 동일 파일에 통합) | `{project}/.opencode/devai-git-workflow.json` |
-| 호환 브리지 marker | (없음) | `{project}/.opencode/.devai-aidd-guard.compat.generated` |
+| 글로벌 설정 | `~/.config/opencode/devai-aidd-plugin.global.jsonc` | `~/.config/opencode/devai-aidd-guard.global.jsonc` (이전 이름, 자동 읽기) |
+| 프로젝트 설정 | `{project}/.opencode/devai-aidd-plugin.project.jsonc` | `{project}/.opencode/devai-aidd-guard.project.jsonc` (이전 이름, 자동 읽기) · `{project}/.opencode/opencode-aidd-plugin.json` (오래된 레거시, 브리지 미러) |
+| 워크플로 정책(레거시 reader 호환) | (모던에서 동일 파일에 통합) | `{project}/.opencode/devai-git-workflow.json` (오래된 레거시, 브리지 미러) |
+| 호환 브리지 marker | (없음) | `{project}/.opencode/.devai-aidd-plugin.compat.generated` |
 
 ### 우선순위
 
 설정 layer는 아래 순서로 머지된다(같은 키는 위쪽이 덮어쓴다).
 
 1. `DEFAULT_PLUGIN_CONFIG` (플러그인 내장)
-2. `globalConfig` — 글로벌 jsonc
-3. `legacyProjectConfig` — `opencode-aidd-plugin.json`
-4. `legacyWorkflowProjectConfig` — `devai-git-workflow.json`
-5. `projectConfig` — 모던 jsonc (가장 강함)
+2. `guardLegacyGlobalConfig` — `devai-aidd-guard.global.jsonc` (이전 이름, 자동 읽기)
+3. `globalConfig` — `devai-aidd-plugin.global.jsonc`
+4. `legacyProjectConfig` — `opencode-aidd-plugin.json`
+5. `legacyWorkflowProjectConfig` — `devai-git-workflow.json`
+6. `guardLegacyProjectConfig` — `devai-aidd-guard.project.jsonc` (이전 이름, 자동 읽기)
+7. `projectConfig` — `devai-aidd-plugin.project.jsonc` (가장 강함)
 
-이 순서는 모든 호출에서 결정적이며, 호환 브리지가 modern projectConfig를 “조용히 덮어쓰는” 일은 발생하지 않는다.
+이 순서는 모든 호출에서 결정적이며, 호환 브리지가 modern projectConfig를 “조용히 덮어쓰는” 일은 발생하지 않는다. `devai-aidd-guard.*` 파일은 read-only 호환 layer로 참여하므로, 신규 이름으로 같은 키를 덮어쓰면 그 키만 신규 값이 적용되고 미설정 키는 이전 파일에서 계속 읽힌다.
 
 ### marker 파일의 의미
 
-`.opencode/.devai-aidd-guard.compat.generated`는 “플러그인이 자동 생성한 mirror”라는 표지다. marker가 **존재하지 않는** 레거시 파일은 사용자 자산으로 간주되며, 플러그인은 이를 절대 덮어쓰지 않는다. 사용자가 손으로 작성한 `opencode-aidd-plugin.json`을 그대로 유지하고 싶다면 marker 파일을 만들지 않으면 된다.
+`.opencode/.devai-aidd-plugin.compat.generated`는 “플러그인이 자동 생성한 mirror”라는 표지다. marker가 **존재하지 않는** 레거시 파일은 사용자 자산으로 간주되며, 플러그인은 이를 절대 덮어쓰지 않는다. 사용자가 손으로 작성한 `opencode-aidd-plugin.json`을 그대로 유지하고 싶다면 marker 파일을 만들지 않으면 된다.
 
 이 보호 정책은 **두 레거시 파일(`opencode-aidd-plugin.json`, `devai-git-workflow.json`) 모두에 동일하게 적용된다**. 둘 중 하나라도 marker 없이 존재하면 사용자 자산으로 간주되어 mirror 갱신 사이클이 멈춘다.
 
@@ -175,8 +177,8 @@ bash install.sh
 ## 빌드와 릴리스
 
 ```bash
-npm run build       # esbuild → dist/devai-aidd-guard.js (ESM, --target=node22)
-npm run release     # release/devai-aidd-guard/{latest,versions/<version>}/ 채움
+npm run build       # esbuild → dist/devai-aidd-plugin.js (ESM, --target=node22)
+npm run release     # release/devai-aidd-plugin/{latest,versions/<version>}/ 채움
 npm run pack        # build + release 체인 (메인테이너 배포 흐름 한 번에)
 ```
 
@@ -186,33 +188,33 @@ npm run pack        # build + release 체인 (메인테이너 배포 흐름 한 
 
 1. `package.json.version` 올림 (semver)
 2. `npm run pack` — 번들 + 릴리스 산출물 + 매니페스트 + 체크섬 일괄 생성
-3. `release/devai-aidd-guard/latest/` 및 `release/devai-aidd-guard/versions/<version>/` 양쪽 산출물 점검
+3. `release/devai-aidd-plugin/latest/` 및 `release/devai-aidd-plugin/versions/<version>/` 양쪽 산출물 점검
 4. (선택) 설치기 dry-run 무결성 검증. `npm test`가 동일한 검증을 자동으로 돌리지만 (회귀: `verifyStory44ReleaseChecksumLinesMatchInstallerParsers`), 수동으로 확인하려면 다음과 같이 한다.
 
    ```bash
    # bash (install.sh 파서와 동일)
-   cd release/devai-aidd-guard/latest
-   for f in devai-aidd-guard.js devai-aidd-guard.global.jsonc devai-aidd-guard.project.jsonc manifest.json; do
+   cd release/devai-aidd-plugin/latest
+   for f in devai-aidd-plugin.js devai-aidd-plugin.global.jsonc devai-aidd-plugin.project.jsonc manifest.json; do
      exp=$(awk -v n="$f" '$2==n{print $1}' checksums.txt)
      act=$(sha256sum "$f" | awk '{print $1}')
      [ "$exp" = "$act" ] && echo "OK   $f" || echo "FAIL $f exp=$exp act=$act"
    done
    ```
 
-   설치기는 `devai-aidd-guard.js`, `devai-aidd-guard.global.jsonc`, `devai-aidd-guard.project.jsonc`, `manifest.json` 4개 파일을 `checksums.txt`로 검증하므로, 이 4개 파일 모두에 대해 `OK`가 출력되어야 정상이다.
+   설치기는 `devai-aidd-plugin.js`, `devai-aidd-plugin.global.jsonc`, `devai-aidd-plugin.project.jsonc`, `manifest.json` 4개 파일을 `checksums.txt`로 검증하므로, 이 4개 파일 모두에 대해 `OK`가 출력되어야 정상이다.
 
-`scripts/build.js`는 `src/index.js`를 esbuild(`--bundle --platform=node --format=esm --target=node22`)로 묶어 `dist/devai-aidd-guard.js` 단일 파일로 출력한다. 출력 경로/타깃/포맷은 회귀 테스트와 설치기 양쪽이 의존하는 계약이므로 변경하지 않는다.
+`scripts/build.js`는 `src/index.js`를 esbuild(`--bundle --platform=node --format=esm --target=node22`)로 묶어 `dist/devai-aidd-plugin.js` 단일 파일로 출력한다. 출력 경로/타깃/포맷은 회귀 테스트와 설치기 양쪽이 의존하는 계약이므로 변경하지 않는다.
 
-`scripts/make-release.js`는 다음 7종의 게시 파일을 두 디렉터리(`release/devai-aidd-guard/latest/`와 `release/devai-aidd-guard/versions/<version>/`)에 동일한 SHA-256으로 채운다.
+`scripts/make-release.js`는 다음 7종의 게시 파일을 두 디렉터리(`release/devai-aidd-plugin/latest/`와 `release/devai-aidd-plugin/versions/<version>/`)에 동일한 SHA-256으로 채운다.
 
 | # | 파일 | 출처 |
 |---|---|---|
-| 1 | `devai-aidd-guard.js` | `dist/devai-aidd-guard.js` (번들) |
+| 1 | `devai-aidd-plugin.js` | `dist/devai-aidd-plugin.js` (번들) |
 | 2 | `install.ps1` | `installer/install.ps1` |
 | 3 | `install.sh` | `installer/install.sh` |
 | 4 | `uninstall.ps1` | `installer/uninstall.ps1` |
-| 5 | `devai-aidd-guard.global.jsonc` | `templates/devai-aidd-guard.global.jsonc` |
-| 6 | `devai-aidd-guard.project.jsonc` | `templates/devai-aidd-guard.project.jsonc` |
+| 5 | `devai-aidd-plugin.global.jsonc` | `templates/devai-aidd-plugin.global.jsonc` |
+| 6 | `devai-aidd-plugin.project.jsonc` | `templates/devai-aidd-plugin.project.jsonc` |
 | 7 | `opencode.jsonc.example` | `templates/opencode.jsonc.example` |
 
 추가로 두 디렉터리에는 다음 메타데이터가 자동 생성된다.
@@ -234,11 +236,11 @@ npm run pack        # build + release 체인 (메인테이너 배포 흐름 한 
 - finalization prompt 및 상태 저장
 - session 이벤트에서 질문/응답/idle/deleted 처리
 
-실제 workflow 판단 로직은 기존 단일 파일을 `src/policies/legacy/devai-aidd-guard-core.js`로 옮겨 최대한 그대로 유지했다.
+실제 workflow 판단 로직은 기존 단일 파일을 `src/policies/legacy/devai-aidd-plugin-core.js`로 옮겨 최대한 그대로 유지했다.
 
 ## 표준 Git 도구로 워크플로 산출물 추적하기
 
-DevAI AIDD Guard는 워크플로 최종화 시 코드와 문서를 단일 커밋으로 묶어 일반 Git 이력에 기록한다. 별도 전용 리뷰 시스템 없이도 표준 Git 도구만으로 책임 추적이 가능하도록 설계되었다.
+DevAI AIDD Plugin은 워크플로 최종화 시 코드와 문서를 단일 커밋으로 묶어 일반 Git 이력에 기록한다. 별도 전용 리뷰 시스템 없이도 표준 Git 도구만으로 책임 추적이 가능하도록 설계되었다.
 
 리뷰어가 사용할 기본 검증 흐름은 아래와 같다.
 
@@ -262,6 +264,6 @@ git log --grep "워크플로우 완료"
 
 ## 롤백
 
-- 최신 버전에서 이전 버전으로 되돌리려면 `release/devai-aidd-guard/versions/<version>/install.ps1` 또는 `install.sh`를 사용한다.
+- 최신 버전에서 이전 버전으로 되돌리려면 `release/devai-aidd-plugin/versions/<version>/install.ps1` 또는 `install.sh`를 사용한다.
 - 제거는 Windows에서 `installer/uninstall.ps1`로 가능하다.
 - 설정 파일은 uninstall 시 삭제하지 않으므로, 필요하면 수동으로 정리한다.

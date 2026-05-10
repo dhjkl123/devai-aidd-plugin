@@ -6,8 +6,8 @@ npm-debug.log*
 dist/*
 !dist/.gitkeep
 
-release/devai-aidd-guard/latest/*
-!release/devai-aidd-guard/latest/.gitkeep
+release/devai-aidd-plugin/latest/*
+!release/devai-aidd-plugin/latest/.gitkeep
 
-release/devai-aidd-guard/versions/*
-!release/devai-aidd-guard/versions/.gitkeep
+release/devai-aidd-plugin/versions/*
+!release/devai-aidd-plugin/versions/.gitkeep
