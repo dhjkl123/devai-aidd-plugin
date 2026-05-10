@@ -3,10 +3,10 @@ import { createFileSystemAdapter } from "./adapters/fs.js";
 import { createConsoleAdapter } from "./adapters/console.js";
 import { createHttpAdapter } from "./adapters/http.js";
 import {
-  ensureLegacyProjectConfigCompatibility,
   loadRuntimeConfig,
   loadWorkflowCommands,
 } from "./config/load-config.js";
+import { ensureLegacyProjectConfigCompatibility } from "./services/compat/legacy-bridge-service.js";
 import { createAuditLogger } from "./audit/logger.js";
 import { createWorkflowStateStore } from "./services/workflow/workflow-state.js";
 import { createCommandExecuteBeforeHook } from "./hooks/command-execute-before.js";
@@ -89,7 +89,65 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       }
     }
 
-    ensureLegacyProjectConfigCompatibility(directory, fsAdapter, runtimeConfig);
+    // Story 4.2: emit the bridge lifecycle decision via best-effort audit so
+    // operators can see exactly which decision-table branch fired (e.g.
+    // `preserve-user-legacy` proves AC2 is enforced; `no-content-change`
+    // confirms idempotent skip). Mirrors the Story 1.3 pattern for
+    // `config.validation.failed` — a throwing audit sink must not crash
+    // bootstrap (NFR7/NFR8).
+    //
+    // R2 (M-2): `ensureLegacyProjectConfigCompatibility` itself is now
+    // best-effort and converts disk-write failures into
+    // `{ written: false, reason: "write-failed", error }`. We additionally
+    // wrap the call in try/catch as belt-and-suspenders so any future
+    // contract change (e.g. an unexpected throw before the internal try)
+    // still cannot crash bootstrap.
+    let bridgeOutcome;
+    try {
+      bridgeOutcome = ensureLegacyProjectConfigCompatibility(
+        directory,
+        fsAdapter,
+        runtimeConfig,
+      );
+    } catch (bridgeError) {
+      const message =
+        bridgeError && typeof bridgeError.message === "string"
+          ? bridgeError.message
+          : String(bridgeError);
+      bridgeOutcome = {
+        written: false,
+        reason: "bridge-threw",
+        error: message,
+        sources: {
+          hasGlobalConfig: Boolean(runtimeConfig.sources?.hasGlobalConfig),
+          hasProjectConfig: Boolean(runtimeConfig.sources?.hasProjectConfig),
+          hasLegacyProjectConfig: Boolean(runtimeConfig.sources?.hasLegacyProjectConfig),
+          hasLegacyWorkflowProjectConfig: Boolean(
+            runtimeConfig.sources?.hasLegacyWorkflowProjectConfig,
+          ),
+        },
+        markerPresent: false,
+      };
+    }
+    try {
+      const bridgeAuditPayload = {
+        event: "compat.bridge.evaluated",
+        timestamp: new Date().toISOString(),
+        workflow: null,
+        command: null,
+        details: {
+          written: bridgeOutcome.written,
+          reason: bridgeOutcome.reason,
+          sources: bridgeOutcome.sources,
+          markerPresent: bridgeOutcome.markerPresent,
+          ...(bridgeOutcome.paths ? { bridgePaths: bridgeOutcome.paths } : {}),
+          ...(bridgeOutcome.error ? { error: bridgeOutcome.error } : {}),
+        },
+      };
+      await audit.info("compat.bridge.evaluated", bridgeAuditPayload);
+    } catch {
+      // best-effort
+    }
 
     try {
       await audit.info("plugin bootstrap", {

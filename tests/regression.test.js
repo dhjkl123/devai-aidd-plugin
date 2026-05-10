@@ -82,6 +82,9 @@ const buildRecoveryOptionsModuleUrl = pathToFileURL(
 const recoveryOrchestratorModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "approval", "recovery-orchestrator.js"),
 ).href;
+const legacyBridgeServiceModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "compat", "legacy-bridge-service.js"),
+).href;
 const builtModulePath = path.join(projectRoot, "dist", "devai-aidd-guard.js");
 const builtModuleUrl = pathToFileURL(builtModulePath).href;
 const legacyModulePath = path.join(
@@ -10428,6 +10431,897 @@ async function verifyStory35PlanningArtifactPathRemainsInScope() {
   );
 }
 
+/**
+ * Story 4.2 helper — build a sandboxed plugin workspace with a homedir-aware
+ * fs adapter. Mirrors the Story 1.3 `verifyConfigMergePrecedence` pattern so
+ * each Story 4.2 test creates an isolated tmp tree that maps the plugin's
+ * `~/.config/opencode/...` lookups onto a captured fake home directory.
+ *
+ * Returns:
+ *   { tempRoot, projectDir, projectConfigDir, globalConfigDir, fsAdapter }
+ *
+ * Caller is responsible for `fs.rmSync(tempRoot, { recursive, force })` in
+ * a finally block.
+ */
+function createStory42Sandbox(prefix) {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), `devai-aidd-${prefix}-`));
+  const projectDir = path.join(tempRoot, "project");
+  const projectConfigDir = path.join(projectDir, ".opencode");
+  const globalConfigDir = path.join(tempRoot, "global-home", ".config", "opencode");
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+  fs.mkdirSync(globalConfigDir, { recursive: true });
+
+  const fakeHomedir = path.join(tempRoot, "global-home");
+  const fsAdapter = {
+    existsSync: fs.existsSync.bind(fs),
+    readFileSync: fs.readFileSync.bind(fs),
+    readdirSync: fs.readdirSync.bind(fs),
+    mkdirSync: fs.mkdirSync.bind(fs),
+    writeFileSync: fs.writeFileSync.bind(fs),
+    dirname: path.dirname.bind(path),
+    homedir: () => fakeHomedir,
+  };
+
+  return { tempRoot, projectDir, projectConfigDir, globalConfigDir, fsAdapter };
+}
+
+/**
+ * Story 4.2 (Case A): empty workspace must produce a noop envelope and must
+ * NOT create any mirror or marker files.
+ */
+async function verifyStory42BridgeNoOpOnEmptyWorkspace() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-a=${Date.now()}`);
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-a=${Date.now()}`
+  );
+
+  const sandbox = createStory42Sandbox("s42-empty");
+  try {
+    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
+    const result = ensureLegacyProjectConfigCompatibility(
+      sandbox.projectDir,
+      sandbox.fsAdapter,
+      runtimeConfig,
+    );
+
+    assert.equal(
+      result.written,
+      false,
+      "verifyStory42BridgeNoOpOnEmptyWorkspace: empty workspace must not write mirrors",
+    );
+    assert.equal(
+      result.reason,
+      "no-config-sources",
+      "verifyStory42BridgeNoOpOnEmptyWorkspace: reason must be no-config-sources",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyCompatMarkerPath),
+      false,
+      "verifyStory42BridgeNoOpOnEmptyWorkspace: marker must not be created",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyProjectConfigPath),
+      false,
+      "verifyStory42BridgeNoOpOnEmptyWorkspace: legacy project mirror must not be created",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyWorkflowProjectConfigPath),
+      false,
+      "verifyStory42BridgeNoOpOnEmptyWorkspace: legacy workflow mirror must not be created",
+    );
+  } finally {
+    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.2 (Cases B + F): user-authored legacy file (no marker) must be
+ * preserved verbatim regardless of whether a modern project config also
+ * exists. Locks in AC2 — compatibility support does not silently override
+ * newer project-intended settings.
+ */
+async function verifyStory42BridgePreservesUserLegacyWithoutMarker() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-bf=${Date.now()}`);
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-bf=${Date.now()}`
+  );
+
+  // --- Case B: legacy only, no marker -----------------------------------
+  const sandboxB = createStory42Sandbox("s42-case-b");
+  try {
+    const userLegacyContent = JSON.stringify(
+      { branch: { defaultType: "refactor" } },
+      null,
+      2,
+    );
+    const userLegacyPath = path.join(sandboxB.projectConfigDir, "opencode-aidd-plugin.json");
+    fs.writeFileSync(userLegacyPath, userLegacyContent, "utf8");
+
+    const runtimeConfig = loadRuntimeConfig(sandboxB.projectDir, sandboxB.fsAdapter);
+    const result = ensureLegacyProjectConfigCompatibility(
+      sandboxB.projectDir,
+      sandboxB.fsAdapter,
+      runtimeConfig,
+    );
+
+    assert.equal(
+      result.written,
+      false,
+      "verifyStory42BridgePreservesUserLegacyWithoutMarker[B]: must not write when marker absent",
+    );
+    assert.equal(
+      result.reason,
+      "preserve-existing-legacy",
+      "verifyStory42BridgePreservesUserLegacyWithoutMarker[B]: reason must be preserve-existing-legacy",
+    );
+    assert.equal(
+      fs.readFileSync(userLegacyPath, "utf8"),
+      userLegacyContent,
+      "verifyStory42BridgePreservesUserLegacyWithoutMarker[B]: user legacy file must be preserved byte-for-byte",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyCompatMarkerPath),
+      false,
+      "verifyStory42BridgePreservesUserLegacyWithoutMarker[B]: marker must not appear",
+    );
+  } finally {
+    fs.rmSync(sandboxB.tempRoot, { recursive: true, force: true });
+  }
+
+  // --- Case F: modern + user legacy, no marker --------------------------
+  const sandboxF = createStory42Sandbox("s42-case-f");
+  try {
+    const projectConfigContent = JSON.stringify({ branch: { defaultType: "feat" } }, null, 2);
+    fs.writeFileSync(
+      path.join(sandboxF.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      projectConfigContent,
+      "utf8",
+    );
+    const userLegacyContent = JSON.stringify(
+      { branch: { defaultType: "refactor" } },
+      null,
+      2,
+    );
+    const userLegacyPath = path.join(sandboxF.projectConfigDir, "opencode-aidd-plugin.json");
+    fs.writeFileSync(userLegacyPath, userLegacyContent, "utf8");
+
+    const runtimeConfig = loadRuntimeConfig(sandboxF.projectDir, sandboxF.fsAdapter);
+    const result = ensureLegacyProjectConfigCompatibility(
+      sandboxF.projectDir,
+      sandboxF.fsAdapter,
+      runtimeConfig,
+    );
+
+    assert.equal(
+      result.written,
+      false,
+      "verifyStory42BridgePreservesUserLegacyWithoutMarker[F]: must NOT silently overwrite user legacy",
+    );
+    assert.equal(
+      result.reason,
+      "preserve-user-legacy",
+      "verifyStory42BridgePreservesUserLegacyWithoutMarker[F]: reason must be preserve-user-legacy",
+    );
+    assert.equal(
+      fs.readFileSync(userLegacyPath, "utf8"),
+      userLegacyContent,
+      "verifyStory42BridgePreservesUserLegacyWithoutMarker[F]: user legacy file must remain untouched",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyCompatMarkerPath),
+      false,
+      "verifyStory42BridgePreservesUserLegacyWithoutMarker[F]: marker must not be created without ownership",
+    );
+  } finally {
+    fs.rmSync(sandboxF.tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.2 (Cases C + E): once we own the bridge (marker present), the
+ * mirror MUST be refreshed from the current effective config — both when
+ * only a legacy file exists and when the modern + legacy pair coexist.
+ */
+async function verifyStory42BridgeRefreshWhenMarkerPresent() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-ce=${Date.now()}`);
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-ce=${Date.now()}`
+  );
+
+  // --- Case C: legacy only, marker present (we own it) ------------------
+  const sandboxC = createStory42Sandbox("s42-case-c");
+  try {
+    const legacyPath = path.join(sandboxC.projectConfigDir, "opencode-aidd-plugin.json");
+    const markerPath = path.join(sandboxC.projectConfigDir, ".devai-aidd-guard.compat.generated");
+    // Pre-existing legacy mirror (from a previous run) + marker — content
+    // intentionally stale so refresh has something to do.
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify({ branch: { defaultType: "stale-old-value" } }, null, 2),
+      "utf8",
+    );
+    fs.writeFileSync(markerPath, "legacy marker", "utf8");
+
+    const runtimeConfig = loadRuntimeConfig(sandboxC.projectDir, sandboxC.fsAdapter);
+    const result = ensureLegacyProjectConfigCompatibility(
+      sandboxC.projectDir,
+      sandboxC.fsAdapter,
+      runtimeConfig,
+    );
+
+    assert.equal(
+      result.written,
+      true,
+      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: must refresh when we own the marker",
+    );
+    assert.equal(
+      result.reason,
+      "refresh-bridge",
+      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: reason must be refresh-bridge",
+    );
+    const refreshed = JSON.parse(fs.readFileSync(legacyPath, "utf8"));
+    // Refresh must canonicalize the mirror to the legacy reader shape:
+    // branch + workflowPolicy, derived from the resolved effective config.
+    // Even though `branch.defaultType` keeps the value the user authored
+    // ("stale-old-value" — the only signal in this test), the refresh fills
+    // in the canonical neighbours (longLivedBranches/pattern/...) and adds
+    // the workflowPolicy section the legacy reader expects.
+    assert.ok(
+      refreshed.branch && refreshed.workflowPolicy,
+      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: mirror must contain branch + workflowPolicy",
+    );
+    assert.ok(
+      Array.isArray(refreshed.branch.longLivedBranches),
+      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: mirror branch must include canonical longLivedBranches",
+    );
+    assert.equal(
+      typeof refreshed.branch.pattern,
+      "string",
+      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: mirror branch must include canonical pattern",
+    );
+    // Verify the marker file remains intact (we own it; do not delete it).
+    assert.equal(
+      fs.existsSync(markerPath),
+      true,
+      "verifyStory42BridgeRefreshWhenMarkerPresent[C]: marker must remain after refresh",
+    );
+  } finally {
+    fs.rmSync(sandboxC.tempRoot, { recursive: true, force: true });
+  }
+
+  // --- Case E: modern + legacy + marker (refresh from modern) ------------
+  const sandboxE = createStory42Sandbox("s42-case-e");
+  try {
+    fs.writeFileSync(
+      path.join(sandboxE.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
+      "utf8",
+    );
+    const legacyPath = path.join(sandboxE.projectConfigDir, "opencode-aidd-plugin.json");
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify({ branch: { defaultType: "stale" } }, null, 2),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(sandboxE.projectConfigDir, ".devai-aidd-guard.compat.generated"),
+      "legacy marker",
+      "utf8",
+    );
+
+    const runtimeConfig = loadRuntimeConfig(sandboxE.projectDir, sandboxE.fsAdapter);
+    const result = ensureLegacyProjectConfigCompatibility(
+      sandboxE.projectDir,
+      sandboxE.fsAdapter,
+      runtimeConfig,
+    );
+
+    assert.equal(
+      result.written,
+      true,
+      "verifyStory42BridgeRefreshWhenMarkerPresent[E]: must refresh when modern + marker present",
+    );
+    assert.equal(
+      result.reason,
+      "refresh-bridge",
+      "verifyStory42BridgeRefreshWhenMarkerPresent[E]: reason must be refresh-bridge",
+    );
+    const refreshed = JSON.parse(fs.readFileSync(legacyPath, "utf8"));
+    assert.equal(
+      refreshed.branch.defaultType,
+      "feat",
+      "verifyStory42BridgeRefreshWhenMarkerPresent[E]: mirror must reflect modern projectConfig (feat)",
+    );
+  } finally {
+    fs.rmSync(sandboxE.tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.2 (Case D): modern-only workspace must bootstrap both mirror
+ * files plus the ownership marker on the first run.
+ */
+async function verifyStory42BridgeCreatesMirrorForModernOnly() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-d=${Date.now()}`);
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-d=${Date.now()}`
+  );
+
+  const sandbox = createStory42Sandbox("s42-case-d");
+  try {
+    fs.writeFileSync(
+      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
+      "utf8",
+    );
+
+    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
+    const result = ensureLegacyProjectConfigCompatibility(
+      sandbox.projectDir,
+      sandbox.fsAdapter,
+      runtimeConfig,
+    );
+
+    assert.equal(
+      result.written,
+      true,
+      "verifyStory42BridgeCreatesMirrorForModernOnly: must bootstrap mirror on first run",
+    );
+    assert.equal(
+      result.reason,
+      "create-bridge",
+      "verifyStory42BridgeCreatesMirrorForModernOnly: reason must be create-bridge",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyProjectConfigPath),
+      true,
+      "verifyStory42BridgeCreatesMirrorForModernOnly: legacy project mirror must be created",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyWorkflowProjectConfigPath),
+      true,
+      "verifyStory42BridgeCreatesMirrorForModernOnly: legacy workflow mirror must be created",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyCompatMarkerPath),
+      true,
+      "verifyStory42BridgeCreatesMirrorForModernOnly: marker must be created",
+    );
+  } finally {
+    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.2: a second invocation with identical effective config must skip
+ * the actual `writeFileSync` calls. Envelope reports
+ * `written: false, reason: "no-content-change"` so audit can distinguish a
+ * "nothing to do" cycle from a true write.
+ */
+async function verifyStory42BridgeWriteIsIdempotent() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-idem=${Date.now()}`);
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-idem=${Date.now()}`
+  );
+
+  const sandbox = createStory42Sandbox("s42-idem");
+  try {
+    fs.writeFileSync(
+      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
+      "utf8",
+    );
+
+    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
+
+    // First call — must create.
+    const first = ensureLegacyProjectConfigCompatibility(
+      sandbox.projectDir,
+      sandbox.fsAdapter,
+      runtimeConfig,
+    );
+    assert.equal(
+      first.written,
+      true,
+      "verifyStory42BridgeWriteIsIdempotent: first call must write",
+    );
+    assert.equal(
+      first.reason,
+      "create-bridge",
+      "verifyStory42BridgeWriteIsIdempotent: first call reason must be create-bridge",
+    );
+
+    // Capture mtime to assert idempotent skip preserves it on the second run.
+    const mirrorPath = runtimeConfig.paths.legacyProjectConfigPath;
+    const mtimeAfterFirst = fs.statSync(mirrorPath).mtimeMs;
+
+    // Second call with no change — must report no-content-change and not
+    // bump mtime. Re-read runtimeConfig to mirror the bootstrap reality
+    // where the marker was created in the first call.
+    const runtimeConfig2 = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
+    const second = ensureLegacyProjectConfigCompatibility(
+      sandbox.projectDir,
+      sandbox.fsAdapter,
+      runtimeConfig2,
+    );
+    assert.equal(
+      second.written,
+      false,
+      "verifyStory42BridgeWriteIsIdempotent: second call must skip identical content",
+    );
+    assert.equal(
+      second.reason,
+      "no-content-change",
+      "verifyStory42BridgeWriteIsIdempotent: second call reason must be no-content-change",
+    );
+    const mtimeAfterSecond = fs.statSync(mirrorPath).mtimeMs;
+    assert.equal(
+      mtimeAfterSecond,
+      mtimeAfterFirst,
+      "verifyStory42BridgeWriteIsIdempotent: mtime must be unchanged when content identical",
+    );
+  } finally {
+    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.2 (AC2): the modern projectConfig's value MUST survive a mirror
+ * refresh. Re-running `loadRuntimeConfig` after the bridge fires must yield
+ * the same effective config. This is the core "no silent override" gate.
+ */
+async function verifyStory42BridgePrecedenceProjectOverridesLegacy() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-prec=${Date.now()}`);
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-prec=${Date.now()}`
+  );
+
+  const sandbox = createStory42Sandbox("s42-prec");
+  try {
+    fs.writeFileSync(
+      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
+      "utf8",
+    );
+
+    // First load + bridge create — modern projectConfig wins.
+    const first = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
+    assert.equal(
+      first.config.branch.defaultType,
+      "feat",
+      "verifyStory42BridgePrecedenceProjectOverridesLegacy: modern wins on first load",
+    );
+    ensureLegacyProjectConfigCompatibility(
+      sandbox.projectDir,
+      sandbox.fsAdapter,
+      first,
+    );
+
+    // After the bridge runs, both legacy mirror files now exist with the
+    // value derived from `feat`. Re-load: the merge precedence
+    //   default → global → legacyProject → legacyWorkflow → projectConfig
+    // means projectConfig (still `feat`) MUST again win.
+    const second = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
+    assert.equal(
+      second.config.branch.defaultType,
+      "feat",
+      "verifyStory42BridgePrecedenceProjectOverridesLegacy: modern projectConfig MUST still override legacy mirrors after bridge refresh",
+    );
+
+    // Stronger guarantee: mirror values are derived FROM modern, so they are
+    // identical — but even if a hypothetical mirror were stale or mutated,
+    // projectConfig sits at the highest priority and would still win.
+    assert.equal(
+      JSON.stringify(first.config.branch),
+      JSON.stringify(second.config.branch),
+      "verifyStory42BridgePrecedenceProjectOverridesLegacy: branch config MUST be byte-identical across reloads",
+    );
+  } finally {
+    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.2: the bridge service exposes the data the bootstrap needs to
+ * build a `compat.bridge.evaluated` audit payload — `event`, `timestamp`,
+ * `details.written`, `details.reason`, `details.sources`. The audit shape
+ * is constructed in `src/index.js`; this test asserts the envelope from the
+ * service contains everything the audit caller needs (so bootstrap is the
+ * only place that owns the event name + timestamp).
+ */
+async function verifyStory42BridgeAuditEventShape() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?s42-audit=${Date.now()}`);
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-audit=${Date.now()}`
+  );
+
+  const sandbox = createStory42Sandbox("s42-audit");
+  try {
+    fs.writeFileSync(
+      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
+      "utf8",
+    );
+
+    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
+    const envelope = ensureLegacyProjectConfigCompatibility(
+      sandbox.projectDir,
+      sandbox.fsAdapter,
+      runtimeConfig,
+    );
+
+    // Build the audit payload exactly as `src/index.js` would.
+    const auditPayload = {
+      event: "compat.bridge.evaluated",
+      timestamp: new Date().toISOString(),
+      workflow: null,
+      command: null,
+      details: {
+        written: envelope.written,
+        reason: envelope.reason,
+        sources: envelope.sources,
+        markerPresent: envelope.markerPresent,
+        ...(envelope.paths ? { bridgePaths: envelope.paths } : {}),
+      },
+    };
+
+    assert.equal(
+      auditPayload.event,
+      "compat.bridge.evaluated",
+      "verifyStory42BridgeAuditEventShape: event name must be compat.bridge.evaluated",
+    );
+    assert.ok(
+      typeof auditPayload.timestamp === "string" && auditPayload.timestamp.length > 0,
+      "verifyStory42BridgeAuditEventShape: timestamp must be non-empty ISO string",
+    );
+    assert.equal(
+      typeof auditPayload.details.written,
+      "boolean",
+      "verifyStory42BridgeAuditEventShape: details.written must be boolean",
+    );
+    assert.equal(
+      typeof auditPayload.details.reason,
+      "string",
+      "verifyStory42BridgeAuditEventShape: details.reason must be string",
+    );
+    assert.ok(
+      auditPayload.details.sources &&
+        typeof auditPayload.details.sources.hasGlobalConfig === "boolean" &&
+        typeof auditPayload.details.sources.hasProjectConfig === "boolean" &&
+        typeof auditPayload.details.sources.hasLegacyProjectConfig === "boolean" &&
+        typeof auditPayload.details.sources.hasLegacyWorkflowProjectConfig === "boolean",
+      "verifyStory42BridgeAuditEventShape: details.sources must carry all four boolean flags",
+    );
+    assert.equal(
+      typeof auditPayload.details.markerPresent,
+      "boolean",
+      "verifyStory42BridgeAuditEventShape: details.markerPresent must be boolean",
+    );
+    // For the create-bridge case, paths must be in the envelope.
+    assert.ok(
+      auditPayload.details.bridgePaths &&
+        typeof auditPayload.details.bridgePaths.legacyCompatMarkerPath === "string",
+      "verifyStory42BridgeAuditEventShape: details.bridgePaths must be present on writes",
+    );
+  } finally {
+    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.2: mirror file content MUST omit modern-only sections such as
+ * `audit` so legacy readers never see configuration shapes they do not
+ * understand. Reference shape: `templates/legacy-opencode-aidd-plugin.json`
+ * (branch + workflowPolicy only).
+ */
+async function verifyStory42BridgeMirrorOmitsAuditSection() {
+  const { loadRuntimeConfig } = await import(
+    `${loadConfigModuleUrl}?s42-shape=${Date.now()}`
+  );
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-shape=${Date.now()}`
+  );
+
+  const sandbox = createStory42Sandbox("s42-shape");
+  try {
+    fs.writeFileSync(
+      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify(
+        {
+          branch: { defaultType: "feat" },
+          audit: { logToFile: true, logFilePath: ".opencode/audit.log" },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
+    ensureLegacyProjectConfigCompatibility(
+      sandbox.projectDir,
+      sandbox.fsAdapter,
+      runtimeConfig,
+    );
+
+    const mirror = JSON.parse(
+      fs.readFileSync(runtimeConfig.paths.legacyProjectConfigPath, "utf8"),
+    );
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(mirror, "audit"),
+      false,
+      "verifyStory42BridgeMirrorOmitsAuditSection: mirror must NOT contain `audit` key",
+    );
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(mirror, "branch"),
+      "verifyStory42BridgeMirrorOmitsAuditSection: mirror must contain `branch`",
+    );
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(mirror, "workflowPolicy"),
+      "verifyStory42BridgeMirrorOmitsAuditSection: mirror must contain `workflowPolicy`",
+    );
+    // Symmetrically validate the workflow mirror.
+    const workflowMirror = JSON.parse(
+      fs.readFileSync(runtimeConfig.paths.legacyWorkflowProjectConfigPath, "utf8"),
+    );
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(workflowMirror, "audit"),
+      false,
+      "verifyStory42BridgeMirrorOmitsAuditSection: workflow mirror must NOT contain `audit`",
+    );
+  } finally {
+    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.2 R2 (M-1): the AC2 user-asset preservation guard MUST cover BOTH
+ * legacy file variants symmetrically. The original 7-case decision table only
+ * named `hasLegacyProject`; the workflow-only legacy file (devai-git-workflow.json)
+ * fell into the defensive default and (a) was preserved by accident, (b) was
+ * mis-labeled as `no-config-sources` in audit. This verifier locks in the
+ * R2 fix for both no-modern and modern coexistence variants.
+ */
+async function verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker() {
+  const { loadRuntimeConfig } = await import(
+    `${loadConfigModuleUrl}?s42-r2m1=${Date.now()}`
+  );
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-r2m1=${Date.now()}`
+  );
+
+  // Variant 1: workflow-only legacy file, NO modern, NO marker.
+  const sandbox1 = createStory42Sandbox("s42-r2m1-only");
+  try {
+    const userWorkflowContent = JSON.stringify(
+      { workflowPolicy: { "user-cmd": { category: "implementation" } } },
+      null,
+      2,
+    );
+    const userWorkflowPath = path.join(
+      sandbox1.projectConfigDir,
+      "devai-git-workflow.json",
+    );
+    fs.writeFileSync(userWorkflowPath, userWorkflowContent, "utf8");
+
+    const runtimeConfig = loadRuntimeConfig(sandbox1.projectDir, sandbox1.fsAdapter);
+    const result = ensureLegacyProjectConfigCompatibility(
+      sandbox1.projectDir,
+      sandbox1.fsAdapter,
+      runtimeConfig,
+    );
+
+    assert.equal(
+      result.written,
+      false,
+      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[only]: must not write",
+    );
+    assert.equal(
+      result.reason,
+      "preserve-existing-legacy",
+      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[only]: workflow-only legacy must be classified preserve-existing-legacy (R2 M-1: not no-config-sources)",
+    );
+    assert.equal(
+      fs.readFileSync(userWorkflowPath, "utf8"),
+      userWorkflowContent,
+      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[only]: user workflow legacy must be byte-for-byte preserved",
+    );
+  } finally {
+    fs.rmSync(sandbox1.tempRoot, { recursive: true, force: true });
+  }
+
+  // Variant 2: workflow-only legacy file + modern, NO marker.
+  const sandbox2 = createStory42Sandbox("s42-r2m1-coexist");
+  try {
+    fs.writeFileSync(
+      path.join(sandbox2.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
+      "utf8",
+    );
+    const userWorkflowContent = JSON.stringify(
+      { workflowPolicy: { "user-cmd": { category: "implementation" } } },
+      null,
+      2,
+    );
+    const userWorkflowPath = path.join(
+      sandbox2.projectConfigDir,
+      "devai-git-workflow.json",
+    );
+    fs.writeFileSync(userWorkflowPath, userWorkflowContent, "utf8");
+
+    const runtimeConfig = loadRuntimeConfig(sandbox2.projectDir, sandbox2.fsAdapter);
+    const result = ensureLegacyProjectConfigCompatibility(
+      sandbox2.projectDir,
+      sandbox2.fsAdapter,
+      runtimeConfig,
+    );
+
+    assert.equal(
+      result.written,
+      false,
+      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[coexist]: must NOT silently overwrite user workflow legacy",
+    );
+    assert.equal(
+      result.reason,
+      "preserve-user-legacy",
+      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[coexist]: workflow-only legacy + modern must be classified preserve-user-legacy (R2 M-1)",
+    );
+    assert.equal(
+      fs.readFileSync(userWorkflowPath, "utf8"),
+      userWorkflowContent,
+      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[coexist]: user workflow legacy must be untouched",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyCompatMarkerPath),
+      false,
+      "verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker[coexist]: marker must not appear",
+    );
+  } finally {
+    fs.rmSync(sandbox2.tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.2 R2 (M-3): when the marker survives but BOTH legacy mirror files
+ * have been deleted, the bridge must still produce them — but the audit
+ * reason MUST be `rebuild-bridge`, not `refresh-bridge`. Audit consumers
+ * use this label to distinguish "in-place refresh" from "marker leftover,
+ * files missing" during operational debugging.
+ */
+async function verifyStory42BridgeRebuildLabelOnMarkerLeftover() {
+  const { loadRuntimeConfig } = await import(
+    `${loadConfigModuleUrl}?s42-r2m3=${Date.now()}`
+  );
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-r2m3=${Date.now()}`
+  );
+
+  const sandbox = createStory42Sandbox("s42-r2m3");
+  try {
+    fs.writeFileSync(
+      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
+      "utf8",
+    );
+    // Marker exists but the two mirror files do NOT (user `rm`'d them).
+    fs.writeFileSync(
+      path.join(sandbox.projectConfigDir, ".devai-aidd-guard.compat.generated"),
+      "leftover marker\n",
+      "utf8",
+    );
+
+    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
+    const result = ensureLegacyProjectConfigCompatibility(
+      sandbox.projectDir,
+      sandbox.fsAdapter,
+      runtimeConfig,
+    );
+
+    assert.equal(
+      result.written,
+      true,
+      "verifyStory42BridgeRebuildLabelOnMarkerLeftover: must rebuild the missing mirror files",
+    );
+    assert.equal(
+      result.reason,
+      "rebuild-bridge",
+      "verifyStory42BridgeRebuildLabelOnMarkerLeftover: reason must be rebuild-bridge (R2 M-3 label fix), not refresh-bridge",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyProjectConfigPath),
+      true,
+      "verifyStory42BridgeRebuildLabelOnMarkerLeftover: legacy project mirror must be re-created",
+    );
+    assert.equal(
+      fs.existsSync(runtimeConfig.paths.legacyWorkflowProjectConfigPath),
+      true,
+      "verifyStory42BridgeRebuildLabelOnMarkerLeftover: legacy workflow mirror must be re-created",
+    );
+  } finally {
+    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.2 R2 (M-2): a disk-write failure inside the bridge MUST NOT throw
+ * — it must be surfaced as `{ written: false, reason: "write-failed",
+ * error: <message> }` so bootstrap can continue and audit can record the
+ * failure. Simulates the failure by injecting an `fsAdapter.writeFileSync`
+ * that throws.
+ */
+async function verifyStory42BridgeWriteFailureIsBestEffort() {
+  const { loadRuntimeConfig } = await import(
+    `${loadConfigModuleUrl}?s42-r2m2=${Date.now()}`
+  );
+  const { ensureLegacyProjectConfigCompatibility } = await import(
+    `${legacyBridgeServiceModuleUrl}?s42-r2m2=${Date.now()}`
+  );
+
+  const sandbox = createStory42Sandbox("s42-r2m2");
+  try {
+    fs.writeFileSync(
+      path.join(sandbox.projectConfigDir, "devai-aidd-guard.project.jsonc"),
+      JSON.stringify({ branch: { defaultType: "feat" } }, null, 2),
+      "utf8",
+    );
+
+    const runtimeConfig = loadRuntimeConfig(sandbox.projectDir, sandbox.fsAdapter);
+
+    // Inject a failing writeFileSync to simulate EACCES / ENOSPC / EROFS.
+    const failingFsAdapter = {
+      ...sandbox.fsAdapter,
+      writeFileSync: () => {
+        const err = new Error("simulated EACCES");
+        err.code = "EACCES";
+        throw err;
+      },
+    };
+
+    let envelope;
+    let threw = null;
+    try {
+      envelope = ensureLegacyProjectConfigCompatibility(
+        sandbox.projectDir,
+        failingFsAdapter,
+        runtimeConfig,
+      );
+    } catch (e) {
+      threw = e;
+    }
+
+    assert.equal(
+      threw,
+      null,
+      "verifyStory42BridgeWriteFailureIsBestEffort: bridge MUST NOT throw on write failure (R2 M-2)",
+    );
+    assert.equal(
+      envelope.written,
+      false,
+      "verifyStory42BridgeWriteFailureIsBestEffort: envelope.written must be false on failure",
+    );
+    assert.equal(
+      envelope.reason,
+      "write-failed",
+      "verifyStory42BridgeWriteFailureIsBestEffort: envelope.reason must be write-failed",
+    );
+    assert.equal(
+      typeof envelope.error,
+      "string",
+      "verifyStory42BridgeWriteFailureIsBestEffort: envelope.error must carry the failure message",
+    );
+    assert.ok(
+      envelope.error.includes("EACCES") || envelope.error.includes("simulated"),
+      "verifyStory42BridgeWriteFailureIsBestEffort: envelope.error must be the simulated message",
+    );
+    assert.ok(
+      envelope.paths && envelope.paths.legacyCompatMarkerPath,
+      "verifyStory42BridgeWriteFailureIsBestEffort: envelope.paths must still be present so audit can record context",
+    );
+  } finally {
+    fs.rmSync(sandbox.tempRoot, { recursive: true, force: true });
+  }
+}
+
 main()
   .then(() => verifyBootstrapFailureShape())
   .then(() => verifyMissingLegacyBootstrapDependencyFails())
@@ -10572,6 +11466,19 @@ main()
   .then(() => verifyWorkflowPolicyVocabularySchema())
   .then(() => verifyEffectivePolicyDeterminism())
   .then(() => verifyLatestPolicyChangesReflectedAcrossRuns())
+  // Story 4.2 — preserve legacy configuration compatibility and bridge files
+  .then(() => verifyStory42BridgeNoOpOnEmptyWorkspace())
+  .then(() => verifyStory42BridgePreservesUserLegacyWithoutMarker())
+  .then(() => verifyStory42BridgeRefreshWhenMarkerPresent())
+  .then(() => verifyStory42BridgeCreatesMirrorForModernOnly())
+  .then(() => verifyStory42BridgeWriteIsIdempotent())
+  .then(() => verifyStory42BridgePrecedenceProjectOverridesLegacy())
+  .then(() => verifyStory42BridgeAuditEventShape())
+  .then(() => verifyStory42BridgeMirrorOmitsAuditSection())
+  // Story 4.2 R2 review follow-ups (M-1, M-2, M-3)
+  .then(() => verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker())
+  .then(() => verifyStory42BridgeRebuildLabelOnMarkerLeftover())
+  .then(() => verifyStory42BridgeWriteFailureIsBestEffort())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;

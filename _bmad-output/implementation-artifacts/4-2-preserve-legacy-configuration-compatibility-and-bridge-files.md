@@ -1,6 +1,6 @@
 # Story 4.2: 레거시 구성 호환성 및 브리지 파일 유지
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -23,22 +23,22 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] 호환성 브리지 책임을 service 계층으로 추출하고 결정 규칙을 명문화한다 (AC: 1, 2)
-  - [ ] `src/services/compat/legacy-bridge-service.js`를 신규 생성하고 `ensureLegacyProjectConfigCompatibility` 본체를 이 모듈로 이전한다. `src/config/load-config.js`에는 `loadRuntimeConfig`(read 전용)만 남기고, `src/config/`에서 호환 브리지 쓰기 책임을 제거한다(architecture "Component Boundaries: config/ 설정 병합·검증·마이그레이션만 담당", "services/compat/ 호환 브리지 전담").
-  - [ ] 이전 호출처(`src/index.js:81` `ensureLegacyProjectConfigCompatibility(directory, fsAdapter, runtimeConfig)`)는 새 모듈에서 동일 시그니처로 import 하도록만 갱신한다. Story 4.2는 호출 시점·시그니처를 깨지 않는다(Story 1.3 `Project Structure Notes` 경계).
-  - [ ] 결정 규칙(아래 "브리지 생성 결정 표")을 함수 doc-block에 그대로 옮겨 적고, 코드와 doc-block이 동일 표를 참조하도록 한다.
+- [x] 호환성 브리지 책임을 service 계층으로 추출하고 결정 규칙을 명문화한다 (AC: 1, 2)
+  - [x] `src/services/compat/legacy-bridge-service.js`를 신규 생성하고 `ensureLegacyProjectConfigCompatibility` 본체를 이 모듈로 이전한다. `src/config/load-config.js`에는 `loadRuntimeConfig`(read 전용)만 남기고, `src/config/`에서 호환 브리지 쓰기 책임을 제거한다(architecture "Component Boundaries: config/ 설정 병합·검증·마이그레이션만 담당", "services/compat/ 호환 브리지 전담").
+  - [x] 이전 호출처(`src/index.js:81` `ensureLegacyProjectConfigCompatibility(directory, fsAdapter, runtimeConfig)`)는 새 모듈에서 동일 시그니처로 import 하도록만 갱신한다. Story 4.2는 호출 시점·시그니처를 깨지 않는다(Story 1.3 `Project Structure Notes` 경계).
+  - [x] 결정 규칙(아래 "브리지 생성 결정 표")을 함수 doc-block에 그대로 옮겨 적고, 코드와 doc-block이 동일 표를 참조하도록 한다.
 
-- [ ] 결정적 우선순위 순서를 코드와 문서에 명시 고정한다 (AC: 2)
-  - [ ] `loadRuntimeConfig`의 JSDoc에 이미 박혀 있는 `DEFAULT_PLUGIN_CONFIG → globalConfig → legacyProjectConfig → legacyWorkflowProjectConfig → projectConfig` 순서를 Story 4.2 문서에서도 단일 진실로 고정한다(추가 변경 없이 인용·재진술만).
-  - [ ] 새로운 layer를 도입하지 않는다. Story 1.3이 정의한 4-layer 구조와 `validateAndRecover` 알고리즘을 변경하지 않는다(Story 1.3 review history AI-1: lower-layer invalid 시 upper-layer 보존 invariant 유지).
-  - [ ] `legacyProjectConfig`/`legacyWorkflowProjectConfig`는 정확히 `globalConfig`보다 위, `projectConfig`보다 아래 우선순위를 가진다. 회귀 테스트로 이 순서를 가시화한다(아래 테스트 항목 참조).
+- [x] 결정적 우선순위 순서를 코드와 문서에 명시 고정한다 (AC: 2)
+  - [x] `loadRuntimeConfig`의 JSDoc에 이미 박혀 있는 `DEFAULT_PLUGIN_CONFIG → globalConfig → legacyProjectConfig → legacyWorkflowProjectConfig → projectConfig` 순서를 Story 4.2 문서에서도 단일 진실로 고정한다(추가 변경 없이 인용·재진술만).
+  - [x] 새로운 layer를 도입하지 않는다. Story 1.3이 정의한 4-layer 구조와 `validateAndRecover` 알고리즘을 변경하지 않는다(Story 1.3 review history AI-1: lower-layer invalid 시 upper-layer 보존 invariant 유지).
+  - [x] `legacyProjectConfig`/`legacyWorkflowProjectConfig`는 정확히 `globalConfig`보다 위, `projectConfig`보다 아래 우선순위를 가진다. 회귀 테스트로 이 순서를 가시화한다(아래 테스트 항목 참조).
 
-- [ ] 브리지 파일 생성 트리거를 결정적이고 idempotent 하게 만든다 (AC: 1)
-  - [ ] 현재 동작(2026-05-10 기준 `src/config/load-config.js:361-402`)을 분석한 결과 다음 코너 케이스가 있다.
+- [x] 브리지 파일 생성 트리거를 결정적이고 idempotent 하게 만든다 (AC: 1)
+  - [x] 현재 동작(2026-05-10 기준 `src/config/load-config.js:361-402`)을 분석한 결과 다음 코너 케이스가 있다.
     - 레거시 파일이 이미 존재하지만 marker 파일이 없으면 즉시 false 리턴(레거시 보존). 이 동작은 유지한다.
     - 어떤 sources도 없는 빈 디렉터리에서는 false 리턴. 유지한다.
     - 그 외 모든 경우 mirror 두 개(`opencode-aidd-plugin.json`, `devai-git-workflow.json`)와 marker(`.devai-aidd-guard.compat.generated`)를 항상 덮어쓰기 한다. **이 부분이 NFR4/NFR6 위반 위험**: 사용자가 손으로 편집한 레거시 파일을 "rebridge"가 덮어쓸 수 있다.
-  - [ ] 다음 결정 표를 구현한다. 표 외 케이스는 변경 없이 무동작.
+  - [x] 다음 결정 표를 구현한다. 표 외 케이스는 변경 없이 무동작.
 
     | 입력 상태 | hasGlobal | hasProject | hasLegacyProject | hasLegacyWorkflowProject | marker 존재 | 결과 |
     |---|---|---|---|---|---|---|
@@ -49,12 +49,12 @@ Status: ready-for-dev
     | E. 모던 + 레거시 mirror, marker 있음 | * | true | * | * | true | mirror 갱신(우리 소유), return `{ written: true, reason: "refresh-bridge" }` |
     | F. 모던 + 레거시(사용자 작성), marker 없음 | * | true | true | * | false | **무동작**, return `{ written: false, reason: "preserve-user-legacy" }` (AC2: silent override 금지) |
     | G. 글로벌만 | true | false | false | false | * | 무동작, return `{ written: false, reason: "global-only-no-bridge-needed" }` |
-  - [ ] 함수 반환값을 boolean에서 `{ written, reason, paths? }` envelope으로 확장한다. 호출처 `src/index.js`는 이 envelope을 audit으로 전송할 수 있다(아래 audit 항목). 기존 호출처는 반환값을 무시하므로 backward-compatible 하다.
-  - [ ] 쓰기 직전 파일 내용이 동일하면 `writeFileSync`를 생략한다(idempotent: 동일 컨텐츠 비교 후 skip). NFR1 latency 요구에 맞추되, mtime만 갱신되는 불필요한 파일 변경을 방지한다.
-  - [ ] mirror 파일 내용은 정규화된 effective config 전체가 아니라 **레거시 reader가 실제로 사용하는 키 집합**으로 한정한다. `legacy-opencode-aidd-plugin.json` 템플릿(`templates/legacy-opencode-aidd-plugin.json`)의 키 형태(branch + workflowPolicy)와 동일 shape를 사용한다. `audit` 같은 모던 전용 섹션은 mirror에 포함하지 않는다.
+  - [x] 함수 반환값을 boolean에서 `{ written, reason, paths? }` envelope으로 확장한다. 호출처 `src/index.js`는 이 envelope을 audit으로 전송할 수 있다(아래 audit 항목). 기존 호출처는 반환값을 무시하므로 backward-compatible 하다.
+  - [x] 쓰기 직전 파일 내용이 동일하면 `writeFileSync`를 생략한다(idempotent: 동일 컨텐츠 비교 후 skip). NFR1 latency 요구에 맞추되, mtime만 갱신되는 불필요한 파일 변경을 방지한다.
+  - [x] mirror 파일 내용은 정규화된 effective config 전체가 아니라 **레거시 reader가 실제로 사용하는 키 집합**으로 한정한다. `legacy-opencode-aidd-plugin.json` 템플릿(`templates/legacy-opencode-aidd-plugin.json`)의 키 형태(branch + workflowPolicy)와 동일 shape를 사용한다. `audit` 같은 모던 전용 섹션은 mirror에 포함하지 않는다.
 
-- [ ] 브리지 라이프사이클 audit 이벤트를 추가한다 (AC: 1, 2)
-  - [ ] 새 audit event `compat.bridge.evaluated`를 추가한다. payload shape:
+- [x] 브리지 라이프사이클 audit 이벤트를 추가한다 (AC: 1, 2)
+  - [x] 새 audit event `compat.bridge.evaluated`를 추가한다. payload shape:
     ```js
     {
       event: "compat.bridge.evaluated",
@@ -70,17 +70,17 @@ Status: ready-for-dev
       },
     }
     ```
-  - [ ] `src/index.js`는 `ensureLegacyProjectConfigCompatibility` 호출 후 반환된 envelope을 위 페이로드로 변환해 `audit.info("compat.bridge.evaluated", payload)`를 발산한다. 발산은 best-effort이며 try/catch로 감싼다(Story 1.3 `config.validation.failed`와 동일 패턴, NFR7/NFR8).
-  - [ ] event 이름은 architecture "Communication Patterns → Event System Patterns"의 `dot.case` 규약을 따른다.
-  - [ ] 새 audit event를 도입하므로 architecture/PRD에 등재할 필요 없는 운영 이벤트로 분류한다(Story 1.3의 `config.validation.failed`와 동급).
+  - [x] `src/index.js`는 `ensureLegacyProjectConfigCompatibility` 호출 후 반환된 envelope을 위 페이로드로 변환해 `audit.info("compat.bridge.evaluated", payload)`를 발산한다. 발산은 best-effort이며 try/catch로 감싼다(Story 1.3 `config.validation.failed`와 동일 패턴, NFR7/NFR8).
+  - [x] event 이름은 architecture "Communication Patterns → Event System Patterns"의 `dot.case` 규약을 따른다.
+  - [x] 새 audit event를 도입하므로 architecture/PRD에 등재할 필요 없는 운영 이벤트로 분류한다(Story 1.3의 `config.validation.failed`와 동급).
 
-- [ ] 호환성 정책이 모던 설정을 조용히 재정의하지 않음을 보장한다 (AC: 2)
-  - [ ] mirror 파일 생성/갱신은 `loadRuntimeConfig`의 결과(이미 우선순위가 적용된 effective config)에서 파생되므로, 다음 invariant가 성립한다: **모던 `projectConfig`의 값은 mirror 파일을 거쳐도 절대 다른 값으로 바뀌지 않는다.**
-  - [ ] 이 invariant를 코드 doc-block과 회귀 테스트로 못 박는다. mirror 갱신 후 `loadRuntimeConfig`를 다시 호출했을 때 effective config의 모던 우선 키들이 동일해야 한다.
-  - [ ] **사용자가 손으로 편집한 레거시 파일**(marker 부재)은 위 결정 표의 케이스 B와 F에 따라 보호한다. mirror가 사용자 의도를 덮어쓰면 AC2 "compatibility support does not silently override newer project-intended settings"의 정신을 위반한다.
+- [x] 호환성 정책이 모던 설정을 조용히 재정의하지 않음을 보장한다 (AC: 2)
+  - [x] mirror 파일 생성/갱신은 `loadRuntimeConfig`의 결과(이미 우선순위가 적용된 effective config)에서 파생되므로, 다음 invariant가 성립한다: **모던 `projectConfig`의 값은 mirror 파일을 거쳐도 절대 다른 값으로 바뀌지 않는다.**
+  - [x] 이 invariant를 코드 doc-block과 회귀 테스트로 못 박는다. mirror 갱신 후 `loadRuntimeConfig`를 다시 호출했을 때 effective config의 모던 우선 키들이 동일해야 한다.
+  - [x] **사용자가 손으로 편집한 레거시 파일**(marker 부재)은 위 결정 표의 케이스 B와 F에 따라 보호한다. mirror가 사용자 의도를 덮어쓰면 AC2 "compatibility support does not silently override newer project-intended settings"의 정신을 위반한다.
 
-- [ ] 회귀 테스트를 추가해 결정 표 전체와 invariant를 가드한다 (AC: 1, 2)
-  - [ ] `tests/regression.test.js` main chain 마지막에 다음 검증 함수들을 추가하고 등록한다:
+- [x] 회귀 테스트를 추가해 결정 표 전체와 invariant를 가드한다 (AC: 1, 2)
+  - [x] `tests/regression.test.js` main chain 마지막에 다음 검증 함수들을 추가하고 등록한다:
     - `verifyStory42BridgeNoOpOnEmptyWorkspace` (케이스 A)
     - `verifyStory42BridgePreservesUserLegacyWithoutMarker` (케이스 B, F: marker 없음 + 사용자 레거시 보호)
     - `verifyStory42BridgeRefreshWhenMarkerPresent` (케이스 C, E)
@@ -89,16 +89,16 @@ Status: ready-for-dev
     - `verifyStory42BridgePrecedenceProjectOverridesLegacy` (AC2: legacy mirror가 modern projectConfig를 덮지 않음 — `loadRuntimeConfig` 두 번 호출 후 effective config 비교)
     - `verifyStory42BridgeAuditEventShape` (`compat.bridge.evaluated` payload `event`/`timestamp`/`details.written`/`details.reason` 키 존재)
     - `verifyStory42BridgeMirrorOmitsAuditSection` (mirror 파일에 `audit` 키가 없음)
-  - [ ] 각 테스트는 `os.tmpdir()`로 sandbox 작업공간을 만들고 `homedir()` 어댑터를 가짜로 주입하는 Story 1.3의 `verifyConfigMergePrecedence` 패턴을 그대로 따른다.
-  - [ ] 기존 회귀(`verifyConfigMergePrecedence`, `verifyValidationFallback`, `verifyValidationFallbackLowerLayer` 등)는 손대지 않는다.
+  - [x] 각 테스트는 `os.tmpdir()`로 sandbox 작업공간을 만들고 `homedir()` 어댑터를 가짜로 주입하는 Story 1.3의 `verifyConfigMergePrecedence` 패턴을 그대로 따른다.
+  - [x] 기존 회귀(`verifyConfigMergePrecedence`, `verifyValidationFallback`, `verifyValidationFallbackLowerLayer` 등)는 손대지 않는다.
 
-- [ ] 문서와 운영 안내를 갱신한다 (AC: 1, 2)
-  - [ ] `README.md`에 "레거시 구성 호환성" 섹션을 추가한다. 다음을 포함한다.
+- [x] 문서와 운영 안내를 갱신한다 (AC: 1, 2)
+  - [x] `README.md`에 "레거시 구성 호환성" 섹션을 추가한다. 다음을 포함한다.
     - 모던 경로(`.opencode/devai-aidd-guard.project.jsonc`)와 레거시 경로(`.opencode/opencode-aidd-plugin.json`, `.opencode/devai-git-workflow.json`) 매핑.
     - 우선순위(global → legacyProject → legacyWorkflow → project, 같은 키는 위쪽이 덮어씀).
     - marker 파일(`.opencode/.devai-aidd-guard.compat.generated`)의 의미: "플러그인이 자동 생성한 mirror"라는 표지. marker가 없는 레거시 파일은 사용자 자산으로 간주하고 보존됨.
     - 사용자가 모던 파일과 레거시 파일을 동시에 두는 경우의 결과(modern 우선, legacy mirror는 marker가 있을 때만 갱신).
-  - [ ] sprint-change-proposal Proposal C에 명시된 "install/setup 또는 명시적 migration step에서 bridge 생성"이라는 문구는 본 스토리가 plugin runtime startup에서 책임을 가져가는 형태로 통합한다. 단, 결정 표의 케이스 F가 사용자 자산 보호를 보장하므로 silent migration 우려는 해소된다.
+  - [x] sprint-change-proposal Proposal C에 명시된 "install/setup 또는 명시적 migration step에서 bridge 생성"이라는 문구는 본 스토리가 plugin runtime startup에서 책임을 가져가는 형태로 통합한다. 단, 결정 표의 케이스 F가 사용자 자산 보호를 보장하므로 silent migration 우려는 해소된다.
 
 ## Dev Notes
 
@@ -234,10 +234,66 @@ Story 4.2는 Story 1.3에서 **read-only로 의도적으로 남겨둔 호환 브
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.7 (1M context) — claude-opus-4-7[1m]
 
 ### Debug Log References
 
+- Initial regression run failed `verifyStory42BridgeRefreshWhenMarkerPresent[C]` because the test seeded the legacy mirror with `branch.defaultType: "stale-old-value"` and that value flowed back through `loadRuntimeConfig` (legacy file IS a config layer). Refresh wrote the same value back, so a `notEqual` assertion no longer made sense. Replaced the assertion with a check that the mirror is canonicalized to the legacy reader shape (branch + workflowPolicy with neighbour fields filled in) and that the marker survives. Re-ran `npm test` → exit 0.
+
 ### Completion Notes List
 
+- Extracted `ensureLegacyProjectConfigCompatibility` from `src/config/load-config.js` into `src/services/compat/legacy-bridge-service.js`. The config module is now strictly a read-only resolver, matching the architecture's Component Boundaries.
+- Implemented the seven-case decision matrix from the story Tasks/Subtasks. The function now returns an envelope `{ written, reason, sources, markerPresent, paths? }` instead of a bare boolean. The bootstrap call site in `src/index.js` continues to ignore the return value at the call line (backward compatible), but consumes it immediately to build the `compat.bridge.evaluated` audit payload.
+- AC2 (no silent override) guard implemented as Case F: when modern `projectConfig` and a user-authored legacy file (no marker) coexist, the bridge is a no-op with reason `preserve-user-legacy`. Modern values still win at runtime via Story 1.3's merge precedence, so behaviour is correct without rewriting the user's legacy file.
+- Idempotent writes via `writeIfChanged`: each of the three target files (mirror x2 + marker) is read first, and `writeFileSync` is skipped when the on-disk content already matches. When all three skip, the envelope reports `written: false, reason: "no-content-change"` so audit can distinguish a true no-op cycle from an actual write. Locked in by `verifyStory42BridgeWriteIsIdempotent` (mtime preservation check).
+- Mirror payload narrowed to `{ branch, workflowPolicy }` only — modern-only sections like `audit` are intentionally omitted because legacy readers do not understand them. Reference shape matches `templates/legacy-opencode-aidd-plugin.json`. Locked in by `verifyStory42BridgeMirrorOmitsAuditSection`.
+- Added `compat.bridge.evaluated` audit event in `src/index.js` immediately after the bridge call. Wrapped in try/catch per the Story 1.3 `config.validation.failed` best-effort pattern (NFR7/NFR8). Payload follows the `dot.case` event-name convention and the standard `{ event, timestamp, workflow, command, details }` shape used elsewhere in the codebase.
+- Added 8 regression cases covering decision-table cases A through G, idempotent-skip behaviour, AC2 precedence invariant, audit envelope shape, and mirror-shape narrowing. All re-use the Story 1.3 `homedir()`-injected sandbox pattern. No existing regression case was modified.
+- README "레거시 구성 호환성" section added with path-mapping table, precedence list, marker semantics, and a per-case table for the modern + legacy coexistence matrix.
+- Rebuilt `dist/devai-aidd-guard.js` so the regression suite's `legacy-vs-built` parity check picks up the bootstrap audit change. `npm test` exits 0; full suite (existing + 8 new Story 4.2 cases) passes.
+
 ### File List
+
+- 신규
+  - `src/services/compat/legacy-bridge-service.js`
+- 수정
+  - `src/config/load-config.js` (removed `ensureLegacyProjectConfigCompatibility`; added pointer comment to new owner)
+  - `src/index.js` (import path swap + `compat.bridge.evaluated` audit emission; R2 M-2: bridge call wrapped in try/catch with `bridge-threw` fallback envelope; R2 M-2 audit payload also passes through `details.error`)
+  - `tests/regression.test.js` (+`legacyBridgeServiceModuleUrl`, +`createStory42Sandbox`, +8 Story 4.2 verifiers, +chain registrations; R2: +3 verifiers `verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker`, `verifyStory42BridgeRebuildLabelOnMarkerLeftover`, `verifyStory42BridgeWriteFailureIsBestEffort`)
+  - `README.md` ("레거시 구성 호환성" section; R2 L-4: workflow-only legacy 보호 정책 명시 + R2 M-3 `rebuild-bridge`/M-2 `write-failed` rows)
+  - `dist/devai-aidd-guard.js` (rebuilt via `npm run build`; R2 rebuild: 461.1kb)
+  - `_bmad-output/implementation-artifacts/4-2-preserve-legacy-configuration-compatibility-and-bridge-files.md` (status, tasks, Dev Agent Record, File List; R2: status review → done, R2 review notes)
+  - `_bmad-output/implementation-artifacts/sprint-status.yaml` (4-2 status: ready-for-dev → in-progress → review → done; last_dev/last_review lines)
+  - `_bmad-output/implementation-artifacts/4-2-code-review-action-items.md` (R2 처리 결과 갱신)
+
+### Change Log
+
+- 2026-05-10: Story 4.2 dev-story complete. Moved legacy bridge from `src/config/` to `src/services/compat/legacy-bridge-service.js` with deterministic 7-case decision matrix, idempotent writes, mirror-shape narrowing (branch + workflowPolicy only), AC2 user-asset preservation guard, and `compat.bridge.evaluated` audit emission. +8 regression cases. Status: in-progress → review.
+- 2026-05-10: Story 4.2 code-review round 1 (adversarial): 0 CRITICAL / 0 HIGH / 3 MEDIUM (M-1 결정표 비대칭, M-2 bridge throw → 부트스트랩 보호 미적용, M-3 rebuild label 불일치) / 4 LOW. Conditional approve.
+- 2026-05-10: Story 4.2 code-review round 2 (auto-fix): all 3 MEDIUM + 4 LOW resolved.
+  - M-1: `classifyBridgeDecision`이 `hasLegacyProject || hasLegacyWorkflow` 단일 신호로 사용자 자산을 판별 — workflow-only legacy 파일도 Case B/F로 명시 보호. 결정 표 8 케이스로 확장(A/B/C/D/E/E'/F/G).
+  - M-2: 서비스 함수의 write 블록을 try/catch로 감싸 `{written:false, reason:"write-failed", error}` envelope 반환. `src/index.js`도 belt-and-suspenders로 외부 try/catch + `bridge-threw` fallback envelope 추가. 부트스트랩은 어떤 경우에도 bridge 실패로 죽지 않음.
+  - M-3: marker 잔존 + 레거시 파일 부재 시 reason 라벨을 `rebuild-bridge`로 분리(기존 `refresh-bridge` 의미 보존).
+  - L-1: `void directory;`에 단일 진실(`runtimeConfig.paths`) 정책 코멘트 추가.
+  - L-2: Case A 단축 평가를 `existsSync(marker)` 호출 전에 두어 빈 워크스페이스 hot path에서 syscall 1회 절감.
+  - L-3: `writeIfChanged` doc-block에 byte-for-byte 비교 + 결정성 invariant 명시.
+  - L-4: README "marker 파일의 의미" 절에 두 레거시 파일 모두 동일 보호 정책이 적용된다고 명시 + coexistence 표에 `rebuild-bridge`/`write-failed` 행 추가.
+  - +3 회귀 케이스(`verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker`, `verifyStory42BridgeRebuildLabelOnMarkerLeftover`, `verifyStory42BridgeWriteFailureIsBestEffort`).
+  - `npm test` exit 0(11 Story 4.2 verifiers 포함 전체 통과), `npm run build` exit 0(dist 461.1kb 재빌드).
+  - Status: review → done.
+
+### Senior Developer Review (AI) — Round 1
+
+- **Reviewer**: Claude Opus 4.7 (1M) — bmad-code-review
+- **Date**: 2026-05-10
+- **Outcome**: Conditional Approve — 0 CRITICAL / 0 HIGH / 3 MEDIUM / 4 LOW
+- **Action Items**: `_bmad-output/implementation-artifacts/4-2-code-review-action-items.md`
+- **Summary**: 핵심 동작(7-case 결정 표, idempotent 쓰기, AC2 사용자 자산 보호, audit payload, mirror shape) 모두 통과. MEDIUM/LOW는 결정 표의 워크플로 전용 레거시 보호 비대칭(M-1), bridge write의 부트스트랩 보호 미적용(M-2), rebuild label 불일치(M-3), 그리고 견고성/문서 명시(L-1~L-4). 모두 R2에서 자동 수정.
+
+### Senior Developer Review (AI) — Round 2
+
+- **Reviewer**: Claude Opus 4.7 (1M) — bmad-code-review (auto-fix)
+- **Date**: 2026-05-10
+- **Outcome**: All 3 MEDIUM + 4 LOW resolved; status review → done
+- **Test result**: `npm test` exit 0(전체 회귀 + 신규 R2 회귀 3건 포함), `npm run build` exit 0(dist 461.1kb)
+- **Residual risk**: 없음 — `bridge-threw` 분기는 회귀 테스트 미작성(현재 서비스 구조상 사실상 도달 불가; defensive only). 향후 서비스 시그니처 변경 시 재검토 대상.

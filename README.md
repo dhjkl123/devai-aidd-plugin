@@ -125,6 +125,53 @@ bash install.sh
 
 `params.source === "vocabulary"` 항목만 필터링하면 hard error 없이 오타만 추적할 수 있다.
 
+## 레거시 구성 호환성
+
+이전 버전의 플러그인은 `.opencode/opencode-aidd-plugin.json`과 `.opencode/devai-git-workflow.json` 파일을 직접 읽었다. 본 플러그인은 모던 경로(`.opencode/devai-aidd-guard.project.jsonc`)를 단일 진실로 사용하면서, 구버전 reader가 같은 디렉터리에 함께 살아 있어도 동작이 깨지지 않도록 호환 브리지(mirror) 파일을 자동으로 관리한다.
+
+### 경로 매핑
+
+| 역할 | 모던 경로 | 레거시 경로(브리지) |
+|---|---|---|
+| 글로벌 설정 | `~/.config/opencode/devai-aidd-guard.global.jsonc` | (없음) |
+| 프로젝트 설정 | `{project}/.opencode/devai-aidd-guard.project.jsonc` | `{project}/.opencode/opencode-aidd-plugin.json` |
+| 워크플로 정책(레거시 reader 호환) | (모던에서 동일 파일에 통합) | `{project}/.opencode/devai-git-workflow.json` |
+| 호환 브리지 marker | (없음) | `{project}/.opencode/.devai-aidd-guard.compat.generated` |
+
+### 우선순위
+
+설정 layer는 아래 순서로 머지된다(같은 키는 위쪽이 덮어쓴다).
+
+1. `DEFAULT_PLUGIN_CONFIG` (플러그인 내장)
+2. `globalConfig` — 글로벌 jsonc
+3. `legacyProjectConfig` — `opencode-aidd-plugin.json`
+4. `legacyWorkflowProjectConfig` — `devai-git-workflow.json`
+5. `projectConfig` — 모던 jsonc (가장 강함)
+
+이 순서는 모든 호출에서 결정적이며, 호환 브리지가 modern projectConfig를 “조용히 덮어쓰는” 일은 발생하지 않는다.
+
+### marker 파일의 의미
+
+`.opencode/.devai-aidd-guard.compat.generated`는 “플러그인이 자동 생성한 mirror”라는 표지다. marker가 **존재하지 않는** 레거시 파일은 사용자 자산으로 간주되며, 플러그인은 이를 절대 덮어쓰지 않는다. 사용자가 손으로 작성한 `opencode-aidd-plugin.json`을 그대로 유지하고 싶다면 marker 파일을 만들지 않으면 된다.
+
+이 보호 정책은 **두 레거시 파일(`opencode-aidd-plugin.json`, `devai-git-workflow.json`) 모두에 동일하게 적용된다**. 둘 중 하나라도 marker 없이 존재하면 사용자 자산으로 간주되어 mirror 갱신 사이클이 멈춘다.
+
+### 모던 + 레거시가 동시에 존재할 때
+
+| 상황 | 결과 |
+|---|---|
+| 모던만 존재 | 첫 부트스트랩에 레거시 mirror 2개 + marker를 생성한다(`create-bridge`). |
+| 모던 + 레거시(marker 있음) | 매 부트스트랩에 레거시 mirror를 모던에서 derive 해 갱신한다(`refresh-bridge`). 단 컨텐츠가 동일하면 실제 쓰기를 건너뛴다(`no-content-change`). |
+| 모던 + 레거시(marker 없음) | 두 레거시 파일 중 어느 쪽이든 marker 없이 존재하면 사용자 자산으로 간주해 **갱신하지 않는다**(`preserve-user-legacy`). 모던 projectConfig가 효과적인 우선순위를 가지므로 런타임 동작은 모던 값으로 결정된다. |
+| 모던 + marker만(레거시 파일 없음, R2 M-3) | 사용자가 mirror 파일은 지우고 marker만 남긴 상태. 미러를 다시 생성한다(`rebuild-bridge`). |
+| 레거시만(marker 있음) | 위와 동일하게 mirror 갱신(`refresh-bridge`). |
+| 레거시만(marker 없음) | 사용자 자산으로 간주해 **갱신하지 않는다**(`preserve-existing-legacy`). |
+| 글로벌만 | 프로젝트 디렉터리에는 mirror를 만들지 않는다(`global-only-no-bridge-needed`). |
+| 빈 워크스페이스 | 어떤 파일도 만들지 않는다(`no-config-sources`). |
+| 미러 쓰기 실패 | 디스크 쓰기 예외(EACCES/ENOSPC 등)는 부트스트랩을 막지 않는다. 호출자는 `compat.bridge.evaluated` audit 이벤트의 `details.error`로 사유를 확인할 수 있다(`reason="write-failed"`). |
+
+각 부트스트랩 사이클은 위 결정 결과를 `compat.bridge.evaluated` 감사 이벤트로 기록한다(`details.written`, `details.reason`, `details.sources`, `details.markerPresent`, 쓰기 발생 시 `details.bridgePaths`, 실패 시 `details.error`).
+
 ## 빌드와 릴리스
 
 ```bash
