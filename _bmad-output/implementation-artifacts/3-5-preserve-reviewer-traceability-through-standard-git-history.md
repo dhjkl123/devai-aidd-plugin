@@ -186,6 +186,7 @@ GPT-5 Codex
     - `verifyStory35PlanningArtifactPathRemainsInScope` (planning-artifact-only commit + path bucket)
 - `npm test` 통과 (exit 0). `npm run build` 재실행 (`dist/devai-aidd-guard.js`).
 - Story 3.5는 새 audit event를 도입하지 않았다 (Story 3.4의 이벤트 패밀리 재사용). 새 approval type, 새 dependency, package.json 변경 없음.
+- 2026-05-10 dev-story 재검증: 구현 파일(`finalization-artifacts.js`의 `summarizePathScope`/`PATH_SCOPE_BUCKETS`/`SINGLE_FILE_DOC_BUCKETS`, `commit-proposal.js`의 `pathScopeSummary` 노출, `build-approval-explanation.js`의 한국어 reviewer clause, `approval-policy-service.js`/`classify-git-action.js`/`workflow-state.js`의 reuse 계약 주석, `README.md`의 "표준 Git 도구로 워크플로 산출물 추적하기" 섹션) 모두 반영 확인. 회귀 테스트 7건(`verifyStory35*`) `tests/regression.test.js` main() 체인 등록 확인. `npm run build`, `npm test` 모두 exit 0. sprint-status.yaml의 3-5 항목을 review → done으로 갱신.
 
 ### File List
 
@@ -213,3 +214,15 @@ GPT-5 Codex
 - AC2 (코드+비코드 산출물 함께 추적) 검증: PASS — 단일 commit proposal이 `artifactKinds`와 `pathScopeSummary`를 통해 코드/문서를 같은 commit에 묶고, 회귀 테스트 `verifyStory35CommitProposalMixedScope`가 bucket 순서까지 고정.
 - 신규 audit event/approval type/state 필드/dependency 도입 없음 (Story 3.4의 `git.action.executed` 패밀리, Story 3.2/3.3의 commitProposal/pushProposal, Story 2.5의 recovery gate 그대로 재사용).
 - Story 3.1~3.4 invariant (selectNextPlannedAction priority, audit field shapes, push-after-commit gating)는 그대로 유지됨을 코드 리뷰에서 확인.
+
+#### Round 2 (adversarial review, 2026-05-10)
+
+- 0 Critical, 0 High, 0 Medium, 0 Low 발견. 자동 수정 항목 없음. Round 1 dead-code 제거가 그대로 유지됨을 재확인.
+- 민감정보 누출 재검증: PASS — `summarizePathScope`는 prefix/label/count만 출력하고 basename은 전혀 포함하지 않음. `build-approval-explanation.js`의 `buildCommitExplanation`은 `pathScopeSummary` 항목을 `${entry.prefix} (${entry.count})` 포맷으로만 노출. `proposal.files`는 git pathspec assembly용으로 envelope에 보존되지만, Story Dev Notes line 119가 정의한 leak 정의(절대경로/원격 URL/raw stderr)에는 해당하지 않음. `git-executor.js`의 `git.action.executed` 페이로드(details: actionKind/operation/code/branch/targetBranch/remoteName/recoverable/stderrSummary/correlationId/finalizationMode)에도 path scope이 들어가지 않아 추가 leak surface 없음.
+- 결정성 재검증: PASS — `PATH_SCOPE_BUCKETS`와 `SINGLE_FILE_DOC_BUCKETS`의 prefix가 disjoint(겹치지 않음). `SINGLE_FILE_DOC_BUCKETS.get(filePath)` 정확 일치 → `PATH_SCOPE_BUCKETS.find(startsWith)` → "other" fallback의 우선순위 체인이 결정적. `orderedPrefixes` ordering은 `PATH_SCOPE_BUCKETS` insertion order + `SINGLE_FILE_DOC_BUCKETS.values()` insertion order(JS Map은 insertion order 보장) + "other"로 안정적.
+- vacuous pass 검증: PASS — `verifyStory35RecoveryGateBlocksOnlyFinalizationFollowups`는 `detect-finalizable-outputs.js:96` 실제 분기(`activeRecoveryGate?.blockingScope === "workflow-finalization"`)를 입력 (a)/(b)/(c) 3가지로 모두 트리거. `verifyStory35CommitProposalMixedScope`는 src/tests/_bmad-output 3개 bucket의 상대 순서를 인덱스 비교로 검증. `verifyStory35CommitExplanationSurfacesScopeWithoutSensitiveData`는 `JSON.stringify(explanation)`에 대해 Windows/POSIX 절대경로, `https?://` URL, basename(`permission-asked.js`/`3-5.md`/`index.js`) 4가지 정규식을 모두 negative-match로 가드.
+- invariant 위반 검증: PASS — `classify-git-action.js`의 `ALLOWED_ACTION_TYPES`는 5개(`branch/create`, `branch/switch`, `init`, `commit`, `push`)로 새 항목 없음. `workflow-state.js`도 새 슬롯 없음(주석 line 57이 invariant 명시). `package.json` dependency 변경 없음.
+- Story 3.4 envelope 충돌 검증: PASS — `commitProposal.pathScopeSummary`는 `build-approval-request.js`가 `proposal: proposal`로 그대로 보존하므로 Story 3.4 audit envelope과 같은 슬롯에 추가 필드로 들어감(기존 필드 덮어쓰기/제거 없음). `git.action.executed` payload는 path scope을 surface하지 않아 Story 3.4 audit shape도 변동 없음.
+- edge case 재검증: PASS — 빈 `matchedFiles`는 `buildCommitProposal`이 `null` 리턴(L76)으로 차단해 path scope 단계에 도달 불가. 단일 파일/대량 파일/`README.mdx` 같은 unknown extension/Windows-스타일 비정규화 path는 모두 "other" bucket으로 안전하게 폴백.
+- README 정합성 재검증: PASS — `git log -- src/`/`git log -- _bmad-output/.../`/`git log --follow`/`git blame`/`git log --grep "워크플로우 완료"` 5개 예시 모두 실제 PATH_SCOPE_BUCKETS prefix와 commit-proposal.js의 메시지 포맷(`워크플로우 완료(${commandName}): ${scope} 산출물 업데이트`)과 일치. `pathScopeSummary` 표기 예시(`src/ (2)`)도 explanation builder 출력 형식과 일치.
+- npm run build, npm test 모두 exit 0 재확인.

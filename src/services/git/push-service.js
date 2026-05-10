@@ -43,6 +43,17 @@ export function buildPushAction(input = {}) {
       "buildPushAction requires a non-empty remoteName from the caller",
     );
   }
+  // Story 3.3 review round 2 (Low): reject URL-shaped remoteName values so a
+  // future regression that accidentally feeds a full remote URL through the
+  // executor cannot leak it via `git.action.planned.details.remoteName` /
+  // `git.action.executed.details.remoteName` / `correlationId`. The shape
+  // check mirrors `redactRemoteLabel` (slash, colon, at-sign, or `https?`
+  // schemes are URL-like and never valid short remote names).
+  if (/[/:@]/.test(input.remoteName) || /^https?$/i.test(input.remoteName)) {
+    throw new TypeError(
+      "buildPushAction requires a remote name (e.g. \"origin\"), not a URL or path",
+    );
+  }
   const remoteName = input.remoteName;
   return {
     kind: "push",

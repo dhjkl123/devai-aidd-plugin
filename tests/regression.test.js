@@ -4524,7 +4524,41 @@ async function verifyPermissionAskedPushFailureOpensRecovery() {
         command: "bmad-bmm-quick-dev",
       },
     },
-    approvalHistory: [],
+    // Story 3.3 review round 2 (Medium): seed a commit-success traceability
+    // record (approvalHistory entry with `actionType: "commit"` resolution)
+    // so this test can positively assert that the push failure path does NOT
+    // invalidate the local commit log — the AC2 sub-clause "嫄곕??섍굅???ㅽ뙣
+    // ???몄떆???대? 湲곕줉??濡쒖뺄 而ㅻ컠??臾댄슚?뷀븯吏 ?딆븘???쒕떎" was previously
+    // only asserted by the absence of a clear-commit operation, never by
+    // positive evidence in the post-state.
+    approvalHistory: [
+      {
+        id: "approval:s-push-failure:commit:commit",
+        actionId: "action:commit:commit",
+        sessionID: "s-push-failure",
+        workflow: "bmad-bmm-quick-dev",
+        command: "bmad-bmm-quick-dev",
+        phase: "finish",
+        actionType: "commit",
+        status: "accept",
+        proposal: {
+          kind: "commit",
+          action: "commit",
+          message: "Finish bmad-bmm-quick-dev: update implementation outputs",
+          correlationId: "corr-commit-pre-push",
+        },
+        resolution: {
+          approvalId: "approval:s-push-failure:commit:commit",
+          actionId: "action:commit:commit",
+          actionKind: "commit",
+          status: "accept",
+          continuation: "proceed",
+          resolvedAt: "2026-05-09T12:00:00.000Z",
+          sourceHook: "permission.asked",
+        },
+        resolvedAt: "2026-05-09T12:00:00.000Z",
+      },
+    ],
     pendingActions: [],
     pushProposal: {
       kind: "push",
@@ -4569,6 +4603,26 @@ async function verifyPermissionAskedPushFailureOpensRecovery() {
   assert.equal(state.lastGitResult.code, "push-rejection");
   assert.equal(state.recoveryGate?.actionKind, "push");
   assert.equal(prompts.length, 1, "push failure must open and deliver a recovery gate");
+  // Story 3.3 review round 2 (Medium): the prior commit-success record must
+  // survive the push failure leg untouched so traceability for the local
+  // commit is not silently overwritten by the push outcome.
+  const commitHistoryEntry = state.approvalHistory?.find(
+    (entry) => entry?.actionType === "commit",
+  );
+  assert.ok(
+    commitHistoryEntry,
+    "push failure must NOT erase the prior commit resolution from approvalHistory",
+  );
+  assert.equal(
+    commitHistoryEntry.resolution?.actionKind,
+    "commit",
+    "commit traceability metadata must remain observable after push failure",
+  );
+  assert.equal(
+    commitHistoryEntry.resolution?.status,
+    "accept",
+    "commit success status must remain observable after push failure",
+  );
 }
 
 /**
@@ -9845,6 +9899,88 @@ async function verifyStory34CommitSuccessThenPushDenyPreservesAuditChain() {
   );
 }
 
+/**
+ * Story 3.4 (AC2 R2 mutation guard): every audit emission on the bootstrap
+ * path is best-effort. If `client.app.log` throws on every call, the wrapper
+ * must STILL return a usable hook map (so the runtime can register hooks)
+ * instead of crashing. R1 wrapped the bootstrap audit emissions
+ * (`config.validation.failed`, `plugin bootstrap`, `plugin bootstrap
+ * registered no-op hooks`, `compat.bridge.evaluated`) in try/catch — without
+ * this mutation test, a future regression that drops one of those wrappers
+ * could slip past the existing Story 1.3 / 4.2 happy-path coverage which
+ * only asserts emission shape, not throw-resilience.
+ */
+async function verifyStory34BootstrapAuditFailureDoesNotAbortRegistration() {
+  const wrapperModule = await import(
+    `${wrapperModuleUrl}?s34-bootstrap-audit-throw=${Date.now()}`
+  );
+
+  const tempRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "devai-aidd-bootstrap-audit-throw-"),
+  );
+  const projectConfigDir = path.join(tempRoot, ".opencode");
+  fs.mkdirSync(projectConfigDir, { recursive: true });
+  const commandsDir = path.join(tempRoot, ".opencode", "commands");
+  fs.mkdirSync(commandsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(commandsDir, "bmad-bmm-quick-dev.md"),
+    "# quick dev\n",
+    "utf8",
+  );
+
+  // Force every bootstrap audit emission to throw. The single instrumented
+  // logger covers all bootstrap audit sites — each one must be independently
+  // wrapped or this test fails the registration assertion below.
+  const throwingClient = {
+    app: {
+      async log() {
+        throw new Error("audit sink unavailable during bootstrap");
+      },
+    },
+    session: {
+      async promptAsync() {},
+    },
+  };
+
+  let handlers;
+  let bootstrapError = null;
+  try {
+    try {
+      handlers = await wrapperModule.DevaiAiddGuardPlugin({
+        client: throwingClient,
+        directory: tempRoot,
+      });
+    } catch (err) {
+      bootstrapError = err;
+    }
+
+    assert.equal(
+      bootstrapError,
+      null,
+      "bootstrap must NOT throw when every audit emission fails — Story 3.4 AC2 best-effort applies to bootstrap audit too",
+    );
+    assert.ok(
+      handlers && typeof handlers === "object",
+      "bootstrap must still return a hook map even when audit is unavailable",
+    );
+    // Spot-check the contract surface so a future regression that returns
+    // null/undefined on audit failure is caught here, not at runtime
+    // registration in the host.
+    assert.equal(
+      typeof handlers["command.execute.before"],
+      "function",
+      "command.execute.before hook must be registered despite audit throws",
+    );
+    assert.equal(
+      typeof handlers["permission.asked"],
+      "function",
+      "permission.asked hook must be registered despite audit throws",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────────────── */
 /*           Story 3.5 — preserve reviewer traceability through            */
 /*                       standard Git history                              */
@@ -12723,6 +12859,7 @@ main()
   .then(() => verifyStory34GitActionExecutedCarriesCorrelationAxes())
   .then(() => verifyStory34GitExecutorEnvelopeSurvivesAuditThrow())
   .then(() => verifyStory34CommitSuccessThenPushDenyPreservesAuditChain())
+  .then(() => verifyStory34BootstrapAuditFailureDoesNotAbortRegistration())
   // Story 3.5 — preserve reviewer traceability through standard Git history
   .then(() => verifyStory35CommitProposalCodeOnlyScope())
   .then(() => verifyStory35CommitProposalDocsOnlyScope())

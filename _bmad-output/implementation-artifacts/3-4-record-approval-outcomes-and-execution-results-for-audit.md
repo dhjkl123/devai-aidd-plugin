@@ -189,6 +189,7 @@ GPT-5 Codex
   - 회귀 테스트 5개 추가: approval.requested 최소 필드 검증, approval.resolved + git.action.skipped 의 correlationId/finalizationMode 보존, git.action.executed actionId/finalizationMode 보존, audit throw 시 envelope 보존, 그리고 commit-success → push-deny 시 양쪽 이벤트가 동일한 workflow + sessionID 로 audit log 에 함께 남는지 검증.
   - Story 2.5 의 recovery 이벤트(`git.action.recovery.*`)는 손대지 않았으며 새 이벤트명도 도입하지 않았다. workflowState 의 `lastGitAction`/`lastGitResult`/`lastGitFailure`/`pendingRecoveryContext` 는 그대로 재사용했다.
   - `npm run build` 후 `npm test` 통과 (exit code 0) 확인.
+- (2026-05-10 dev verify) Story 3.4 최종 검증: File List 명시 9개 구현 파일에서 audit 계약 일관성(top-level workflow/command/sessionID/outcome/timestamp + details.actionKind/correlationId/phase/finalizationMode/actionId) 재확인, regression.test.js main() 체인에 5개 Story 3.4 verifier 등록 확인, npm run build / npm test 모두 exit 0; sprint-status.yaml 의 3-4 항목만 review → done 으로 갱신.
 
 ### File List
 
@@ -214,3 +215,9 @@ GPT-5 Codex
 - [x] [AI-Review][Low] `recovery.prompt.delivery.failed`가 top-level `sessionID`를 안 가짐 — 다른 finalization 이벤트와 컨벤션 불일치. top-level `sessionID` 추가. [src/hooks/permission-asked.js]
 - [x] [AI-Review][Low] bootstrap 경로 `audit.info` 호출 3곳(`config.validation.failed`, `plugin bootstrap`, `plugin bootstrap registered no-op hooks`)이 try/catch 미적용 — AC2 best-effort 원칙 위반. 모두 try/catch로 감쌌다. [src/index.js]
 - [드롭] [AI-Review][Low] 브랜치 `approval.requested`가 `correlationId: null` — Story 3.4 범위(commit/push) 외이며 의도적 동작이라 이번 라운드 작업 범위에서 제외.
+
+#### Round 2 (resolved in this session)
+
+- [x] [AI-Review][Medium] R1에서 `src/index.js` 의 4개 부트스트랩 감사 emission(`config.validation.failed`, `compat.bridge.evaluated`, `plugin bootstrap`, `plugin bootstrap registered no-op hooks`)에 try/catch 를 둘렀지만, 어느 하나라도 try/catch 가 누락되어도 기존 happy-path 회귀 테스트(Story 1.3 emission shape, Story 4.2 bridge outcome)는 통과해 버린다 — AC2 best-effort 가 부트스트랩 경로에서 깨져도 회귀 테스트가 못 잡는 mutation 사각지대. → tests/regression.test.js 에 `verifyStory34BootstrapAuditFailureDoesNotAbortRegistration` 추가: `client.app.log` 가 모든 호출에서 throw 하도록 stub 한 뒤 `DevaiAiddGuardPlugin` 이 throw 없이 hook map 을 반환하고 `command.execute.before` / `permission.asked` 핸들러가 등록되는지 검증. main() 체인에 등록. [tests/regression.test.js]
+- [드롭] [AI-Review][Low] `executeApprovedAction` 의 unsupported-actionType skip 이벤트가 `actionKind: approvalRequest?.proposal?.kind` 를 쓰는 반면 `build-approval-resolution.js` 의 정규 skip 이벤트는 `deriveActionKind(actionType)` 을 쓴다 — 결과 동치(commit/push)지만 출처가 다름. 다만 unsupported-actionType 경로는 의도적으로 가장 구체적인 fallback 정보(proposal.kind)를 노출하기 위한 설계이므로 유지.
+- [드롭] [AI-Review][Low] `recovery.prompt.delivery.failed` 가 `details.phase` 미보유 — Story 2.5 namespace 이벤트이며 Story 3.4 가 가져야 하는 finalization 축이 아니므로 범위 외. R1 의 `sessionID` top-level 추가만으로 충분.

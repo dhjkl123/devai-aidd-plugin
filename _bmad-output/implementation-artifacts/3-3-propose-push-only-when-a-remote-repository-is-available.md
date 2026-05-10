@@ -64,6 +64,11 @@ Status: done
 - [x] [AI-Review][Low] `executeApprovedAction`의 actionType dispatch가 if/else if/else 체인 — 미지원 케이스에서 `git.action.skipped` (`reason: "unsupported-action-type"`) audit 이벤트 emit 추가. [src/services/git/execute-approved-action.js]
 - [x] [AI-Review][Low] `git.action.planned` push payload가 `actionId / correlationId / sessionID / phase / finalizationMode` 결여 — Story 2.x audit 컨벤션에 맞춰 추가. [src/services/git/execute-approved-action.js]
 
+#### Round 2 (resolved in this session)
+
+- [x] [AI-Review][Medium] `verifyPermissionAskedPushFailureOpensRecovery`가 AC2의 "push 거부/실패 시에도 커밋 기록은 무효화되지 않는다" 조항을 음성 단언(없음)만으로 통과하고 있어 mutation 회귀에 약함 — fixture에 `actionType: "commit"` 승인 이력 항목을 시드하고, 푸시 실패 후 `state.approvalHistory`에서 동일 항목과 `resolution.actionKind === "commit"`, `resolution.status === "accept"`이 그대로 보존되는지 양성 단언을 추가했다. [tests/regression.test.js]
+- [x] [AI-Review][Low] `buildPushAction`이 빈 문자열만 거절하고 URL 형태(`https://...`, `git@...`)는 통과시켜 `git.action.planned.details.remoteName` / `git.action.executed.details.remoteName` / `correlationId` 경로의 redaction 방어선이 한 겹뿐임 — `redactRemoteLabel`과 동일한 규칙(`/[/:@]/` 또는 `^https?$`)을 적용해 URL/경로형 remoteName을 `TypeError`로 거절했다. [src/services/git/push-service.js]
+
 ## Dev Notes
 
 - Story 3.3???듭떖? "push ?ㅽ뻾" ?먯껜蹂대떎 "push瑜??쒖븞?대룄 ?섎뒗 ?쒖젏怨?議곌굔"???뺥솗???뺤쓽?섎뒗 寃껋씠?? commit???깃났?섍린 ?꾩뿉??push瑜?怨꾪쉷?섎㈃ ???섍퀬, ?먭꺽???녾굅???뺤콉???덉슜?섏? ?딆쑝硫??뱀씤 ?꾨＼?꾪듃??留뚮뱾硫????쒕떎.
@@ -167,6 +172,7 @@ GPT-5 Codex
 - 2026-05-09: commit 승인 성공 뒤에만 remote 존재 여부와 finalization 정책을 검사해 별도 push proposal/approval을 생성하도록 execute-approved-action.js, push-service.js, approval-policy-service.js를 연결했다.
 - 2026-05-09: push 승인 요청 fingerprint와 설명 필드가 remoteName/branchName 기반으로 안정적으로 생성되고, full remote URL은 redaction 규칙을 계속 통과하도록 build-approval-request.js, build-approval-explanation.js, workflow-state.js를 보강했다.
 - 2026-05-09: permission-asked.js에서 push 승인 accept도 실행 경로로 연결하고, push 실패 시 push-rejection recovery gate가 열리며 commit 성공 상태와 분리되어 유지되는지 회귀 테스트로 검증했다.
+- 2026-05-10: dev-story 검증 — File List의 8개 파일 모두 Review Follow-ups round 1 수정사항이 반영되어 있음을 확인했고, regression.test.js의 4개 Story 3.3 verifier(verifyPermissionAskedAcceptCommitPublishesPushApproval / SuppressesPushWithoutRemote / ExecutesPushProposal / PushFailureOpensRecovery) 모두 main() then-체인에 등록되어 있음을 확인했다. npm run build (exit 0) 및 npm test (exit 0) 통과 확인 후 sprint-status.yaml의 3-3 상태를 in-progress → done으로 갱신했다.
 
 ### File List
 
