@@ -1,6 +1,6 @@
 # Story 4.4: 빌드와 릴리스 아티팩트를 신뢰성 있게 패키징하기
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -23,40 +23,40 @@ Status: ready-for-dev
 
 ## Tasks / Subtasks
 
-- [ ] 빌드 산출물의 런타임 타깃과 진입점 동작 계약을 명문화한다 (AC: 2)
-  - [ ] `scripts/build.js`의 esbuild 설정(`--bundle --platform=node --format=esm --target=node22`, 단일 출력 `dist/devai-aidd-guard.js`)을 그대로 유지하고, 새 번들러나 새 출력 경로를 도입하지 않는다.
-  - [ ] 번들 결과가 ESM 형식과 `node22` 타깃을 유지하는지, 그리고 `tests/regression.test.js`가 이미 사용하는 `dist/devai-aidd-guard.js` 경로(`builtModulePath`) 가정을 깨지 않는지 확인한다.
-  - [ ] 빌드 후 산출물이 플러그인 진입점(`src/index.js`에서 노출되는 hook map과 동일한 export shape)을 보존하는지 회귀 테스트가 검증하도록 한다. 신규 회귀가 필요하면 기존 `verifyBuiltArtifactExists` 패턴을 재사용한다.
-  - [ ] `package.json` 의 `type: "module"`, `dependencies` (현재 `ajv@8.17.1` 만 존재), `scripts.build/release/pack` 계약을 임의로 변경하지 않는다.
+- [x] 빌드 산출물의 런타임 타깃과 진입점 동작 계약을 명문화한다 (AC: 2)
+  - [x] `scripts/build.js`의 esbuild 설정(`--bundle --platform=node --format=esm --target=node22`, 단일 출력 `dist/devai-aidd-guard.js`)을 그대로 유지하고, 새 번들러나 새 출력 경로를 도입하지 않는다.
+  - [x] 번들 결과가 ESM 형식과 `node22` 타깃을 유지하는지, 그리고 `tests/regression.test.js`가 이미 사용하는 `dist/devai-aidd-guard.js` 경로(`builtModulePath`) 가정을 깨지 않는지 확인한다.
+  - [x] 빌드 후 산출물이 플러그인 진입점(`src/index.js`에서 노출되는 hook map과 동일한 export shape)을 보존하는지 회귀 테스트가 검증하도록 한다. 신규 회귀가 필요하면 기존 `verifyBuiltArtifactExists` 패턴을 재사용한다.
+  - [x] `package.json` 의 `type: "module"`, `dependencies` (현재 `ajv@8.17.1` 만 존재), `scripts.build/release/pack` 계약을 임의로 변경하지 않는다.
 
-- [ ] 릴리스 패키징 파일 집합의 완결성을 보장한다 (AC: 1)
-  - [ ] `scripts/make-release.js`의 `filesToPublish`가 다음 7종을 모두 포함하는지 검증한다: `dist/devai-aidd-guard.js`, `installer/install.ps1`, `installer/install.sh`, `installer/uninstall.ps1`, `templates/devai-aidd-guard.global.jsonc`, `templates/devai-aidd-guard.project.jsonc`, `templates/opencode.jsonc.example`.
-  - [ ] 릴리스 실행 전에 누락된 source 파일이 있으면 의미 있는 오류 메시지와 함께 즉시 실패시키도록 사전 검증을 추가한다 (현재는 `fs.copyFileSync`가 ENOENT로 던지지만 메인테이너 관점에서 “어떤 산출물이 누락됐는지”를 명확히 알리는 사전 체크가 더 안전하다).
-  - [ ] `templates/legacy-opencode-aidd-plugin.json`은 의도적으로 릴리스 산출물에서 제외된 상태이며(런타임에서 동적으로 bridge), Story 4.4 범위에서 새로 포함시키지 않는다 — 다만 이 결정을 README 또는 코드 주석으로 명시한다.
-  - [ ] 릴리스 디렉터리의 사전 정리 정책을 합의한다: `latest`에 이전 버전의 잔재 파일이 남지 않도록 `copyPublishFiles(targetRoot)`가 디렉터리를 재생성하거나, 적어도 게시 대상 외 파일이 함께 남지 않는지 검증한다. `.gitkeep`(현재 release 하위에 두 개 존재)은 의도적 placeholder이므로 보존한다.
+- [x] 릴리스 패키징 파일 집합의 완결성을 보장한다 (AC: 1)
+  - [x] `scripts/make-release.js`의 `filesToPublish`가 다음 7종을 모두 포함하는지 검증한다: `dist/devai-aidd-guard.js`, `installer/install.ps1`, `installer/install.sh`, `installer/uninstall.ps1`, `templates/devai-aidd-guard.global.jsonc`, `templates/devai-aidd-guard.project.jsonc`, `templates/opencode.jsonc.example`.
+  - [x] 릴리스 실행 전에 누락된 source 파일이 있으면 의미 있는 오류 메시지와 함께 즉시 실패시키도록 사전 검증을 추가한다 — `validatePublishSources()`가 모든 누락 파일을 한 번에 수집해 파일명 + 기대 절대 경로를 메시지에 포함시킨다(verify-first / mutate-release-tree-only-after-validation 원칙).
+  - [x] `templates/legacy-opencode-aidd-plugin.json`은 의도적으로 릴리스 산출물에서 제외된 상태이며(런타임에서 동적으로 bridge), Story 4.4 범위에서 새로 포함시키지 않는다 — `scripts/make-release.js` 헤더 JSDoc과 README "빌드와 릴리스" 섹션 양쪽에 결정 근거를 명시했다.
+  - [x] 릴리스 디렉터리의 사전 정리 정책: `cleanReleaseTarget(targetRoot)`이 `.gitkeep`을 제외한 기존 산출물을 제거한 뒤 `copyPublishFiles`가 새 산출물을 채운다. 이 정책으로 이전 버전 잔재 또는 이름이 바뀐 파일이 `latest/`에 silently 남는 일을 막는다.
 
-- [ ] 매니페스트와 체크섬의 정확성과 일관성을 강제한다 (AC: 1, 2)
-  - [ ] `manifest.json`이 `name`, `displayName`, `version`(=package.json), `generatedAt`(ISO-8601), `files[].name/size/sha256` 필드를 정확히 채우는지 확인한다.
-  - [ ] `checksums.txt`의 라인 형식이 `<sha256>  <name>` (해시-공백 2칸-파일명)임을 유지하고, `installer/install.ps1`의 `Get-ChecksumMap`(`-split "\s{2,}"`)과 `installer/install.sh`의 `awk '$2 == name { print $1 }'` 양쪽 파서가 그대로 동작하는지 확인한다.
-  - [ ] `versionRoot`와 `latestRoot` 두 디렉터리에 동일한 `filesToPublish` 집합이 동일 SHA-256으로 들어가는지 검증한다 (현재 `make-release.js`는 동일 함수 호출로 두 번 채우므로 회귀 테스트로 invariant를 고정한다).
-  - [ ] `manifest.json`의 `version` 값과 디렉터리 이름(`versions/<version>`)이 항상 `package.json.version`과 일치하는지 단언한다.
+- [x] 매니페스트와 체크섬의 정확성과 일관성을 강제한다 (AC: 1, 2)
+  - [x] `manifest.json`이 `name`, `displayName`, `version`(=package.json), `generatedAt`(ISO-8601), `files[].name/size/sha256` 필드를 정확히 채우는지 확인한다 — `verifyStory44ReleaseManifestCompleteness` 회귀가 모든 필드와 ISO-8601 패턴을 단언한다.
+  - [x] `checksums.txt`의 라인 형식이 `<sha256>  <name>` (해시-공백 2칸-파일명)임을 유지하고, `installer/install.ps1`의 `Get-ChecksumMap`(`-split "\s{2,}"`)과 `installer/install.sh`의 `awk '$2 == name { print $1 }'` 양쪽 파서가 그대로 동작하는지 확인한다 — `verifyStory44ReleaseChecksumLinesMatchInstallerParsers`가 두 파서 모두로 동일 해시를 복원해 단언하고, `^[0-9a-f]{64} {2}\S` 정규식으로 라인 모양도 강제한다.
+  - [x] `versionRoot`와 `latestRoot` 두 디렉터리에 동일한 `filesToPublish` 집합이 동일 SHA-256으로 들어가는지 검증한다 — `verifyStory44LatestAndVersionedDirsMirrored`가 7종 모두에 대해 두 디렉터리 SHA-256 동일성을 단언한다.
+  - [x] `manifest.json`의 `version` 값과 디렉터리 이름(`versions/<version>`)이 항상 `package.json.version`과 일치하는지 단언한다 — `verifyStory44ReleaseManifestCompleteness`가 latest/versioned 매니페스트 양쪽의 `version === package.json.version`과 `versions/<version>` 디렉터리 존재를 함께 단언한다.
 
-- [ ] 빌드/릴리스 회귀 테스트를 `tests/regression.test.js`에 추가한다 (AC: 1, 2)
-  - [ ] 기존 `verifyBuiltArtifactExists` 패턴을 기준선으로 삼아, Story 4.4용 회귀 함수들을 `main()` 체인에 등록한다 (Story 3.5의 `verifyStory35*` 등록 방식 참조).
-  - [ ] `verifyStory44ReleaseManifestCompleteness`: `release/devai-aidd-guard/latest/manifest.json` 과 `versions/<version>/manifest.json` 양쪽이 동일한 file 집합/해시를 가지고 있고 `version === package.json.version`임을 단언한다.
-  - [ ] `verifyStory44ReleaseChecksumLinesMatchInstallerParsers`: `checksums.txt` 의 각 라인이 PowerShell 설치기와 bash 설치기 양쪽 파서(`-split "\s{2,}"`, `awk '$2 == name'`) 모두에서 같은 결과로 해석되는지 검증한다.
-  - [ ] `verifyStory44LatestAndVersionedDirsMirrored`: `latest`와 `versions/<version>` 디렉터리에 게시되어야 할 7종 파일이 모두 존재하고 SHA-256이 일치함을 단언한다.
-  - [ ] `verifyStory44ReleaseMissingSourceFails`: 임시 작업 공간에서 source 중 하나가 없을 때 `make-release.js`가 명확한 오류로 실패하는지 검증한다 (실제 `release/`를 오염시키지 않도록 `os.tmpdir()` 작업 공간을 사용한다 — Story 3.5 회귀가 이미 사용하는 `createTempWorkspace` 패턴 재사용).
-  - [ ] 회귀 테스트는 best-effort I/O가 아니라 contract-level 단언이므로, 실패 시 메시지가 “어떤 파일/필드가 누락되었거나 불일치하는지”를 명시하도록 작성한다.
+- [x] 빌드/릴리스 회귀 테스트를 `tests/regression.test.js`에 추가한다 (AC: 1, 2)
+  - [x] 기존 `verifyBuiltArtifactExists` 패턴을 기준선으로 삼아, Story 4.4용 회귀 함수들을 `main()` 체인에 등록한다 (Story 3.5의 `verifyStory35*` 등록 방식 참조).
+  - [x] `verifyStory44ReleaseManifestCompleteness`: `release/devai-aidd-guard/latest/manifest.json` 과 `versions/<version>/manifest.json` 양쪽이 동일한 file 집합/해시를 가지고 있고 `version === package.json.version`임을 단언한다.
+  - [x] `verifyStory44ReleaseChecksumLinesMatchInstallerParsers`: `checksums.txt` 의 각 라인이 PowerShell 설치기와 bash 설치기 양쪽 파서(`-split "\s{2,}"`, `awk '$2 == name'`) 모두에서 같은 결과로 해석되는지 검증한다.
+  - [x] `verifyStory44LatestAndVersionedDirsMirrored`: `latest`와 `versions/<version>` 디렉터리에 게시되어야 할 7종 파일이 모두 존재하고 SHA-256이 일치함을 단언한다.
+  - [x] `verifyStory44ReleaseMissingSourceFails`: `os.tmpdir()` 작업 공간에서 `uninstall.ps1` source가 없을 때 `make-release.js`를 자식 프로세스로 실행해 비정상 종료 + stderr가 누락 파일 이름을 포함 + 임시 release 트리가 생성되지 않음을 단언한다.
+  - [x] 회귀 테스트는 best-effort I/O가 아니라 contract-level 단언이므로, 실패 시 메시지가 “어떤 파일/필드가 누락되었거나 불일치하는지”를 명시하도록 작성한다.
 
-- [ ] README와 CHANGELOG가 빌드/릴리스 계약을 정확히 설명하도록 정리한다 (AC: 1, 2)
-  - [ ] `README.md`의 “빌드와 릴리스” 섹션이 현재 산출물 7종(번들 1 + 설치 스크립트 3 + 템플릿 3) + 매니페스트/체크섬 2종을 누락 없이 설명하는지 확인하고 필요한 항목만 보강한다.
-  - [ ] 메인테이너 관점에서 “버전 올림 → 빌드 → 릴리스 → 설치기 검증”의 순서를 짧게 한 곳에 정리한다 (장황한 가이드 신규 작성보다 기존 README 섹션 보강이 우선이다).
-  - [ ] CHANGELOG에 Story 4.4 변경이 있다면 메인테이너 관점에서 의미 있는 한 줄 요약을 추가한다(빌드 출력 변경이 없다면 추가하지 않아도 된다).
+- [x] README와 CHANGELOG가 빌드/릴리스 계약을 정확히 설명하도록 정리한다 (AC: 1, 2)
+  - [x] `README.md`의 “빌드와 릴리스” 섹션이 현재 산출물 7종(번들 1 + 설치 스크립트 3 + 템플릿 3) + 매니페스트/체크섬 2종을 누락 없이 설명한다 — 7종 표 + manifest/checksums 라인 포맷 + legacy 제외 결정 근거를 추가했다.
+  - [x] 메인테이너 관점에서 “버전 올림 → 빌드 → 릴리스 → 설치기 검증”의 순서를 짧게 한 곳에 정리한다 — README "빌드와 릴리스" 섹션 상단에 4단계 흐름을 추가했다.
+  - [x] CHANGELOG에 Story 4.4 변경이 있다면 메인테이너 관점에서 의미 있는 한 줄 요약을 추가한다 — 사전 검증과 매니페스트/체크섬 회귀 고정 한 줄 추가.
 
-- [ ] Story 4.5 회귀 커버리지와의 경계를 명확히 한다 (AC: 1, 2)
-  - [ ] Story 4.4는 “릴리스 산출물의 완결성과 메타데이터 정확성”에 집중하고, “wrapper와 built artifact의 행위 동등성 회귀”는 Story 4.5의 범위라는 경계를 Dev Notes에 명문화한다.
-  - [ ] Story 4.5가 사용할 `dist/devai-aidd-guard.js` 경로 가정을 깨지 않도록 빌드 출력 파일명/위치를 변경하지 않는다.
+- [x] Story 4.5 회귀 커버리지와의 경계를 명확히 한다 (AC: 1, 2)
+  - [x] Story 4.4는 “릴리스 산출물의 완결성과 메타데이터 정확성”에 집중하고, “wrapper와 built artifact의 행위 동등성 회귀”는 Story 4.5의 범위라는 경계를 Dev Notes에 이미 명문화되어 있고 추가 침범하지 않았다.
+  - [x] Story 4.5가 사용할 `dist/devai-aidd-guard.js` 경로 가정을 깨지 않도록 빌드 출력 파일명/위치를 변경하지 않았다 (`scripts/build.js`는 변경 없음, 빌드 산출물 461.4kb로 동일).
 
 ## Dev Notes
 
@@ -211,10 +211,64 @@ Epic 2 retro에서 가져올 학습:
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-opus-4-7[1m] (Opus 4.7, 1M context)
 
 ### Debug Log References
 
+- Baseline (pre-implementation): `npm run build` exit 0, `npm test` exit 0, `dist/devai-aidd-guard.js` 472,450 bytes (461.4kb).
+- Post-implementation: `npm run build` exit 0, `npm test` exit 0, `npm run pack` exit 0. Bundle size unchanged (build script untouched). Both `release/devai-aidd-guard/latest/` and `release/devai-aidd-guard/versions/1.0.0/` populated with 7 published files + `manifest.json` + `checksums.txt`. `.gitkeep` placeholder preserved by `cleanReleaseTarget`.
+- Verified graceful skip: tests pass with exit 0 even when `release/` is empty (regression skips manifest/checksum/mirror assertions when artifacts are absent because they are git-ignored; missing-source assertion always runs since it spawns `make-release.js` in an `os.tmpdir()` workspace).
+- Verified missing-source path: `verifyStory44ReleaseMissingSourceFails` exercises `node scripts/make-release.js` in a temp workspace lacking `uninstall.ps1`; script exits non-zero, stderr contains "uninstall.ps1" and "missing", no `release/` directory created in temp workspace.
+
 ### Completion Notes List
 
+- Implementation philosophy: Story 4.4 locks the existing release packaging flow as a contract rather than redesigning it. The build script (`scripts/build.js`) was left byte-identical because Story 3.5's `verifyBuiltArtifactExists` and Story 4.5's planned regression coverage both depend on the current `dist/devai-aidd-guard.js` output path/format/target. The release script (`scripts/make-release.js`) gained pre-flight validation, target-directory cleanup that preserves `.gitkeep`, and JSDoc that documents every invariant downstream consumers depend on (installer parsers, `latest`-vs-versioned mirror, manifest/version equality, intentional `legacy-opencode-aidd-plugin.json` exclusion).
+- Pre-validation pattern: `validatePublishSources()` collects ALL missing files into a single error message (not just the first) and includes the absolute expected path so a maintainer can immediately see which artifact to rebuild. A targeted hint suggests `npm run build` when the missing file is `dist/devai-aidd-guard.js`.
+- Regression naming/registration follows Story 3.5: 4 functions prefixed `verifyStory44*` registered after the Story 4.2 R2 block in `main()`'s `.then()` chain. Each assertion message identifies what file/field is missing or mismatched (per Story 3.4 invariant-fail-loud pattern).
+- Read-only invariant: 3 of 4 regressions read the maintainer's `release/` tree without mutating it; the missing-source regression isolates its mutation to `os.tmpdir()`. Maintainer's working tree is never silently rewritten by `npm test`.
+- Skip-when-absent: 3 release-tree-reading regressions skip silently if `release/` is empty (artifacts are git-ignored). The missing-source regression always executes because it spawns its own subject script in a temp workspace.
+- Boundary preserved with Story 4.5: no behavior-equivalence assertion between wrapper and built artifact was added. That coverage stays inside the existing legacy-vs-wrapper / legacy-vs-built parity tests in `main()` and Story 4.5's planned scope.
+
 ### File List
+
+- Modified: `scripts/make-release.js` — added `validatePublishSources()` pre-flight, `cleanReleaseTarget()` (`.gitkeep`-preserving cleanup), header JSDoc documenting all invariants and the intentional `legacy-opencode-aidd-plugin.json` exclusion. No change to publish file list, manifest schema, or checksum line format.
+- Modified: `tests/regression.test.js` — added `import crypto from "node:crypto"` (top of file), Story 4.4 regression block with 4 functions (`verifyStory44ReleaseManifestCompleteness`, `verifyStory44ReleaseChecksumLinesMatchInstallerParsers`, `verifyStory44LatestAndVersionedDirsMirrored`, `verifyStory44ReleaseMissingSourceFails`) plus shared helpers (`story44PackageVersion`, `story44VersionRoot`, `story44ReleaseArtifactsExist`, two parser-mirror helpers, `STORY_44_EXPECTED_PUBLISHED_FILES` frozen tuple). Registered all 4 in `main()`'s `.then()` chain.
+- Modified: `README.md` — augmented "빌드와 릴리스" section with the 4-step maintainer flow, the 7-file publish table, manifest/checksums line-format note (with both installer parser excerpts), and an explicit pointer that `templates/legacy-opencode-aidd-plugin.json` is intentionally excluded.
+- Modified: `CHANGELOG.md` — appended one Story 4.4 line summarizing the pre-validation message contract and the manifest/checksum regression coverage.
+- Modified: `_bmad-output/implementation-artifacts/sprint-status.yaml` — `4-4-build-and-package-release-artifacts-reliably`: `ready-for-dev` → `in-progress` → `review` (last transition completes in this story file save). Round 2: `last_dev` updated to summarize all 9 resolved review items.
+- Modified: `_bmad-output/implementation-artifacts/4-4-build-and-package-release-artifacts-reliably.md` — Status `ready-for-dev` → `in-progress` → `review`; all task/subtask checkboxes marked `[x]`; Dev Agent Record + Change Log filled. Round 2: appended R2 follow-up Change Log entry covering CRITICAL-1 + HIGH-1 + 3 MEDIUM + 4 LOW resolutions.
+- Modified: `_bmad-output/implementation-artifacts/4-4-code-review-action-items.md` — Round 2: appended "Round 2 Dev Follow-up (2026-05-10)" section with item-by-item fix records and final verification summary.
+- Build artifact (not git-tracked): `dist/devai-aidd-guard.js` 472,450 bytes (461.4kb) — regenerated by `npm run build`; size unchanged versus baseline (build script untouched).
+- Release artifacts (not git-tracked): `release/devai-aidd-guard/latest/{devai-aidd-guard.js,install.ps1,install.sh,uninstall.ps1,devai-aidd-guard.global.jsonc,devai-aidd-guard.project.jsonc,opencode.jsonc.example,manifest.json,checksums.txt}` and identical set under `release/devai-aidd-guard/versions/1.0.0/` — regenerated by `npm run release`. `.gitkeep` placeholders preserved. Round 2: `checksums.txt` is now 8 lines (7 published files + `manifest.json`).
+
+### Round 2 file changes summary
+
+- `scripts/make-release.js` — gained `RELEASE_TARGET_ROOT` env override (testability for HIGH-1), `manifest.json` checksums.txt entry (CRITICAL-1), Set-based hint logic (MEDIUM-1), wrapped cleanup error reporting (MEDIUM-2), expanded JSDoc (header + `cleanReleaseTarget` LOW-3 + manifest.json line rationale).
+- `tests/regression.test.js` — `story44GenerateFixtureRelease(label)` helper added; 3 contract regressions rewritten to consume fixture instead of skipping; `story44ParseChecksumsPwsh` adds `, 2` limit (MEDIUM-3); `STORY_44_INSTALLER_VERIFIED_FILES` constant added (CRITICAL-1 round-trip); checksums.txt 8-line assertion + per-installer-file hash verification added; `STORY_44_EXPECTED_PUBLISHED_FILES` drift comment (LOW-2); new `verifyStory44ReleaseMissingBundleEmitsBuildHint` (LOW-1) registered after `verifyStory44ReleaseMissingSourceFails` in main() chain.
+- `README.md` — step 4 of maintainer flow expanded with bash dry-run example covering all 4 installer-verified files (LOW-4) and pointer to the equivalent `npm test` regression.
+
+### Round 2 review pass file changes summary (R2-review LOW-5 / LOW-6)
+
+- `tests/regression.test.js` — `verifyStory44ReleaseMissingBundleEmitsBuildHint` now asserts `release/` was NOT created in the temp workspace, mirroring the verify-first invariant already enforced by `verifyStory44ReleaseMissingSourceFails` (LOW-5).
+- `scripts/make-release.js` — success log line includes the absolute `releaseRoot` so a maintainer can immediately see where the release tree was written (relevant when `RELEASE_TARGET_ROOT` is set; LOW-6).
+
+## Change Log
+
+- 2026-05-10 — Story 4.4 dev-story complete. `scripts/make-release.js` gained verify-first pre-flight (`validatePublishSources`) with maintainer-facing missing-file messages and `.gitkeep`-preserving target cleanup; release packaging contract (7 published files + manifest + checksums; `latest/` ↔ `versions/<version>/` mirror; `manifest.version === package.json.version`; checksum line `<sha256>  <name>` parseable by both installer parsers; intentional exclusion of `templates/legacy-opencode-aidd-plugin.json`) is now locked by 4 regression functions in `tests/regression.test.js` (`verifyStory44*`). README "빌드와 릴리스" section augmented with maintainer flow, 7-file table, and parser line-format note; CHANGELOG noted. `npm run build` exit 0; `npm test` exit 0; `npm run pack` exit 0; bundle size 472,450 bytes (461.4kb, unchanged). Status `in-progress` → `review`.
+
+- 2026-05-10 — Story 4.4 dev-story round 2 follow-up (post code-review). Code review identified 1 CRITICAL + 1 HIGH + 3 MEDIUM + 4 LOW; ALL 9 resolved.
+  - **CRITICAL-1**: `checksums.txt` was missing the `manifest.json` line, which would cause both installers to fail integrity check 100% (`installer/install.ps1` line 47, `installer/install.sh` line 36 both verify `manifest.json` against `checksums.txt`). Fixed in `scripts/make-release.js` `writeMetadata()`: manifest is now written first, hashed, and `<sha256>  manifest.json` is appended as the 8th `checksums.txt` line. Header JSDoc explicitly documents that `manifest.files[]` does NOT include manifest.json (avoiding self-reference) — the entry exists only in checksums.txt to support the installer integrity check. Verified by dry-run of both installer parsers (PowerShell `-split "\s{2,}", 2` and bash `awk '$2==name'`): all 4 installer-verified files (`devai-aidd-guard.js`, `devai-aidd-guard.global.jsonc`, `devai-aidd-guard.project.jsonc`, `manifest.json`) now round-trip cleanly. Mutation test: removing the manifest line from `make-release.js` causes `verifyStory44ReleaseChecksumLinesMatchInstallerParsers` to fail immediately with "expected 8, got 7".
+  - **HIGH-1**: 3 contract regressions silently skipped when `release/` was empty. Fixed in two parts: (1) `scripts/make-release.js` accepts `RELEASE_TARGET_ROOT` env override that redirects output to a custom directory while still resolving sources from `projectRoot`; (2) `tests/regression.test.js` introduces `story44GenerateFixtureRelease(label)` which spawns `make-release.js` into an `os.tmpdir()` workspace. The 3 contract regressions (`verifyStory44ReleaseManifestCompleteness`, `verifyStory44ReleaseChecksumLinesMatchInstallerParsers`, `verifyStory44LatestAndVersionedDirsMirrored`) now generate their own fixture per run and assert against it. Verified by renaming `release/devai-aidd-guard/{latest,versions/1.0.0}` to `*.bak` and running `npm test` — exit 0, all contract assertions still execute.
+  - **MEDIUM-1**: `validatePublishSources()` hint logic replaced — now uses a `Set<string> missingNames` and `missingNames.has(BUNDLE_ARTIFACT_NAME)` exact-name check (no substring match, no false-positive risk for future `.map` etc.).
+  - **MEDIUM-2**: `cleanReleaseTarget` wraps both `readdirSync` and per-entry `rmSync` in try/catch, surfacing the failing target path and entry name in the error message so the maintainer knows which directory ended up inconsistent.
+  - **MEDIUM-3**: PowerShell mirror `story44ParseChecksumsPwsh` now applies `, 2` limit (`rawLine.split(/\s{2,}/, 2)`) to match `installer/install.ps1`'s `-split "\s{2,}", 2` behavior exactly.
+  - **LOW-1**: Added `verifyStory44ReleaseMissingBundleEmitsBuildHint` covering the multi-missing scenario (bundle + `install.sh` both missing) and asserting the `npm run build` hint line is emitted.
+  - **LOW-2**: Added drift comment above `STORY_44_EXPECTED_PUBLISHED_FILES`.
+  - **LOW-3**: `cleanReleaseTarget` JSDoc gained "release artifacts are flat-only by design" note.
+  - **LOW-4**: README "빌드와 릴리스" step 4 now contains a bash dry-run example (`awk` + `sha256sum` loop over the 4 installer-verified files) plus a pointer that `npm test` runs the equivalent contract via `verifyStory44ReleaseChecksumLinesMatchInstallerParsers`.
+  - **Verification**: `npm run build` exit 0; `npm test` exit 0 (also passes with `release/` artifacts hidden); `npm run release` exit 0 (`latest/checksums.txt` and `versions/1.0.0/checksums.txt` both have 8 lines with `manifest.json` last); `npm run pack` exit 0; bundle size 472,450 bytes (461.4kb, unchanged). Status remains `review` so code-review can re-verify in next round.
+
+- 2026-05-10 — Story 4.4 round-2 review pass + final clean-up. Adversarial code review of round-2 follow-up (`_bmad-output/implementation-artifacts/4-4-code-review-action-items.md` "Round 2 Adversarial Code Review" section) confirmed all 9 round-1 findings resolved (CRITICAL 0, HIGH 0, MEDIUM 0). Two new LOW findings (LOW-5 verify-first symmetry gap, LOW-6 RELEASE_TARGET_ROOT observability) were addressed inline:
+  - **LOW-5**: `verifyStory44ReleaseMissingBundleEmitsBuildHint` now asserts `release/` is NOT created in the temp workspace when validation fails, mirroring the verify-first invariant already locked by `verifyStory44ReleaseMissingSourceFails`.
+  - **LOW-6**: `scripts/make-release.js` success message now includes the absolute `releaseRoot` (`Release created for version <v> at <releaseRoot>`) so a maintainer who has `RELEASE_TARGET_ROOT` set (intentionally for tests, or accidentally via shell rc) can immediately see where the release tree was written.
+  - Verification: `npm run build` exit 0; `npm run release` exit 0 (stdout: "Release created for version 1.0.0 at C:\...\release\devai-aidd-guard"); `npm test` exit 0; bundle size 472,450 bytes (461.4kb, unchanged). Status `review` → `done`.

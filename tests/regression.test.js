@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11322,6 +11323,582 @@ async function verifyStory42BridgeWriteFailureIsBestEffort() {
   }
 }
 
+// =============================================================================
+// Story 4.4 — Build and package release artifacts reliably
+// =============================================================================
+//
+// These contract-level assertions lock the release packaging invariants
+// described in scripts/make-release.js. The four `verifyStory44*` functions
+// run UNCONDITIONALLY: each one regenerates a fixture release tree into an
+// `os.tmpdir()` workspace by spawning `node scripts/make-release.js` with
+// the `RELEASE_TARGET_ROOT` env override (Story 4.4 R2 HIGH-1 fix). This
+// makes the contract testable from `npm test` alone without depending on
+// the maintainer having run `npm run release`, and without ever touching
+// the real `release/` tree.
+//
+// The "missing source" scenario uses an `os.tmpdir()` workspace too, but
+// inverts the setup: it omits one publish source and asserts make-release
+// fails verify-first.
+
+function story44PackageVersion() {
+  const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf8"));
+  return pkg.version;
+}
+
+/**
+ * Story 4.4 R2 HIGH-1: spawn `node scripts/make-release.js` against the
+ * real project root (so source files come from `dist/`, `installer/`,
+ * `templates/`) but redirect the OUTPUT release tree into a temporary
+ * directory via `RELEASE_TARGET_ROOT`. Returns the tmp roots so callers
+ * can assert against the generated artifacts and clean up afterwards.
+ */
+function story44GenerateFixtureRelease(label) {
+  // Pre-flight: the bundle artifact must exist for make-release to succeed.
+  // `npm test` already runs `npm --check src/index.js && ... && node tests/...`
+  // and Story 3.5's verifyBuiltArtifactExists asserts `dist/devai-aidd-guard.js`
+  // is present. We re-assert here so the failure mode is locally explainable.
+  const bundlePath = path.join(projectRoot, "dist", "devai-aidd-guard.js");
+  assert.equal(
+    fs.existsSync(bundlePath),
+    true,
+    `story44GenerateFixtureRelease[${label}]: dist/devai-aidd-guard.js missing — run \`npm run build\` before \`npm test\``,
+  );
+
+  const tempReleaseRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), `devai-aidd-story44-fixture-${label}-`),
+  );
+  try {
+    execFileSync(process.execPath, ["scripts/make-release.js"], {
+      cwd: projectRoot,
+      env: { ...process.env, RELEASE_TARGET_ROOT: tempReleaseRoot },
+      stdio: "pipe",
+    });
+  } catch (error) {
+    fs.rmSync(tempReleaseRoot, { recursive: true, force: true });
+    const stderr = error?.stderr?.toString?.() || "";
+    throw new Error(
+      `story44GenerateFixtureRelease[${label}]: make-release.js failed: ${stderr || error?.message || error}`,
+    );
+  }
+
+  const releaseRoot = path.join(tempReleaseRoot, "devai-aidd-guard");
+  const latestRoot = path.join(releaseRoot, "latest");
+  const versionRoot = path.join(releaseRoot, "versions", story44PackageVersion());
+  return { tempReleaseRoot, releaseRoot, latestRoot, versionRoot };
+}
+
+function story44ParseChecksumsPosixAwk(text, name) {
+  // Mirror of `awk '$2 == name { print $1 }'` from installer/install.sh.
+  for (const rawLine of text.split(/\r?\n/)) {
+    if (!rawLine) continue;
+    const fields = rawLine.split(/\s+/).filter(Boolean);
+    if (fields.length >= 2 && fields[1] === name) {
+      return fields[0];
+    }
+  }
+  return null;
+}
+
+function story44ParseChecksumsPwsh(text, name) {
+  // Mirror of `Get-ChecksumMap` from installer/install.ps1:
+  //   foreach line: trim; if non-empty, split on `\s{2,}` with limit 2.
+  // Story 4.4 R2 MEDIUM-3: applying the explicit `, 2` limit so this mirror
+  // matches PowerShell's `-split "\s{2,}", 2` exactly. Without the limit the
+  // JS mirror would over-split file names that contain double-spaces, while
+  // PowerShell would stop at the first boundary — divergent behavior would
+  // silently weaken the contract assertion below.
+  for (const rawLine of text.split(/\r?\n/)) {
+    if (!rawLine.trim()) continue;
+    const parts = rawLine.split(/\s{2,}/, 2);
+    if (parts.length >= 2) {
+      const parsedName = parts[1].trim();
+      if (parsedName === name) {
+        return parts[0].trim().toLowerCase();
+      }
+    }
+  }
+  return null;
+}
+
+// Story 4.4 R2 LOW-2: this constant intentionally duplicates the publish
+// list from `scripts/make-release.js` so a future drift in either side is
+// caught by the regression. If `filesToPublish` in scripts/make-release.js
+// changes, update this constant intentionally to confirm the change.
+const STORY_44_EXPECTED_PUBLISHED_FILES = Object.freeze([
+  "devai-aidd-guard.js",
+  "install.ps1",
+  "install.sh",
+  "uninstall.ps1",
+  "devai-aidd-guard.global.jsonc",
+  "devai-aidd-guard.project.jsonc",
+  "opencode.jsonc.example",
+]);
+
+// Story 4.4 R2 CRITICAL-1: the set of files BOTH installer scripts verify
+// against checksums.txt. install.ps1 line 47 and install.sh line 36 hash
+// these 4 files and look up the expected hash via the parser; any name in
+// this list that lacks a checksums.txt line will cause every install
+// attempt to fail at the integrity-check step.
+const STORY_44_INSTALLER_VERIFIED_FILES = Object.freeze([
+  "devai-aidd-guard.js",
+  "devai-aidd-guard.global.jsonc",
+  "devai-aidd-guard.project.jsonc",
+  "manifest.json",
+]);
+
+/**
+ * Story 4.4 (AC1, AC2): the release manifest in both `latest/` and
+ * `versions/<version>/` must agree on file set + SHA-256, and the manifest
+ * version must equal `package.json.version`. This guards against silent
+ * drift between the two publish targets and against shipping a release
+ * whose manifest version does not match the package version.
+ *
+ * Story 4.4 R2 HIGH-1: this regression now generates a fixture release
+ * tree in `os.tmpdir()` and asserts against it, so the contract is
+ * exercised every time `npm test` runs (no longer dependent on an
+ * out-of-band `npm run release`).
+ */
+async function verifyStory44ReleaseManifestCompleteness() {
+  const fixture = story44GenerateFixtureRelease("manifest");
+  try {
+    const expectedVersion = story44PackageVersion();
+    const latestManifest = JSON.parse(
+      fs.readFileSync(path.join(fixture.latestRoot, "manifest.json"), "utf8"),
+    );
+    const versionManifest = JSON.parse(
+      fs.readFileSync(path.join(fixture.versionRoot, "manifest.json"), "utf8"),
+    );
+
+    for (const [label, manifest] of [["latest", latestManifest], ["versioned", versionManifest]]) {
+      assert.equal(
+        manifest.version,
+        expectedVersion,
+        `verifyStory44ReleaseManifestCompleteness: ${label} manifest.version must equal package.json.version (${expectedVersion}); got ${manifest.version}`,
+      );
+      assert.equal(
+        manifest.name,
+        "devai-aidd-guard",
+        `verifyStory44ReleaseManifestCompleteness: ${label} manifest.name must be "devai-aidd-guard"`,
+      );
+      assert.equal(
+        manifest.displayName,
+        "DevAI AIDD Plugin",
+        `verifyStory44ReleaseManifestCompleteness: ${label} manifest.displayName must be "DevAI AIDD Plugin"`,
+      );
+      assert.equal(
+        typeof manifest.generatedAt,
+        "string",
+        `verifyStory44ReleaseManifestCompleteness: ${label} manifest.generatedAt must be ISO-8601 string`,
+      );
+      assert.match(
+        manifest.generatedAt,
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+        `verifyStory44ReleaseManifestCompleteness: ${label} manifest.generatedAt must be ISO-8601 timestamp`,
+      );
+      assert.ok(
+        Array.isArray(manifest.files),
+        `verifyStory44ReleaseManifestCompleteness: ${label} manifest.files must be array`,
+      );
+      const observedNames = manifest.files.map((entry) => entry.name).sort();
+      const expectedNames = [...STORY_44_EXPECTED_PUBLISHED_FILES].sort();
+      assert.deepEqual(
+        observedNames,
+        expectedNames,
+        `verifyStory44ReleaseManifestCompleteness: ${label} manifest must list exactly the 7 published files; missing/extra entries indicate filesToPublish drift`,
+      );
+      for (const entry of manifest.files) {
+        assert.equal(
+          typeof entry.size,
+          "number",
+          `verifyStory44ReleaseManifestCompleteness: ${label} manifest entry ${entry.name}.size must be number`,
+        );
+        assert.match(
+          entry.sha256 || "",
+          /^[0-9a-f]{64}$/,
+          `verifyStory44ReleaseManifestCompleteness: ${label} manifest entry ${entry.name}.sha256 must be lowercase 64-hex`,
+        );
+      }
+    }
+
+    // Verify the directory name `versions/<version>` matches package.json.version.
+    assert.ok(
+      fs.existsSync(fixture.versionRoot),
+      `verifyStory44ReleaseManifestCompleteness: versions/<version> directory must equal package.json.version (${expectedVersion}); expected ${fixture.versionRoot}`,
+    );
+
+    // Cross-mirror: latest and versioned manifests must agree per-file on
+    // sha256 of published files. (manifest.json itself is NOT in manifest.files
+    // — its hash lives in checksums.txt only; see CRITICAL-1 fix below.)
+    const versionByName = new Map(versionManifest.files.map((entry) => [entry.name, entry]));
+    for (const latestEntry of latestManifest.files) {
+      const versionEntry = versionByName.get(latestEntry.name);
+      assert.ok(
+        versionEntry,
+        `verifyStory44ReleaseManifestCompleteness: file ${latestEntry.name} present in latest/ manifest but missing from versions/<version>/ manifest`,
+      );
+      assert.equal(
+        latestEntry.sha256,
+        versionEntry.sha256,
+        `verifyStory44ReleaseManifestCompleteness: sha256 mismatch for ${latestEntry.name} between latest/ (${latestEntry.sha256}) and versions/<version>/ (${versionEntry.sha256})`,
+      );
+      assert.equal(
+        latestEntry.size,
+        versionEntry.size,
+        `verifyStory44ReleaseManifestCompleteness: size mismatch for ${latestEntry.name} between latest/ (${latestEntry.size}) and versions/<version>/ (${versionEntry.size})`,
+      );
+    }
+  } finally {
+    fs.rmSync(fixture.tempReleaseRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.4 (AC1): every line in `checksums.txt` must be parseable by both
+ * the PowerShell installer (`-split "\s{2,}", 2`) and the bash installer
+ * (`awk '$2 == name { print $1 }'`) and must produce the SAME sha256 for
+ * the same file name. This guards the wire contract between
+ * `make-release.js` and the two install scripts so a format change cannot
+ * silently break end-user installs.
+ *
+ * Story 4.4 R2 CRITICAL-1: in addition to per-file parser equivalence,
+ * `checksums.txt` MUST contain a line for `manifest.json` because both
+ * installers (install.ps1 line 47, install.sh line 36) verify the
+ * manifest's integrity. Without that line, every install attempt fails at
+ * the integrity-check step. This regression now asserts:
+ *   - 8 lines total (7 published files + manifest.json).
+ *   - Every file in `STORY_44_INSTALLER_VERIFIED_FILES` has a parser-
+ *     recoverable line whose hash matches the on-disk file hash.
+ *   - The manifest.json line's hash equals the actual sha256 of the
+ *     manifest.json file (round-trip integrity).
+ *
+ * Story 4.4 R2 HIGH-1: regenerated fixture release in `os.tmpdir()` so
+ * `npm test` exercises the contract without a prior `npm run release`.
+ */
+async function verifyStory44ReleaseChecksumLinesMatchInstallerParsers() {
+  const fixture = story44GenerateFixtureRelease("checksums");
+  try {
+    for (const [label, root] of [["latest", fixture.latestRoot], ["versioned", fixture.versionRoot]]) {
+      const checksumsPath = path.join(root, "checksums.txt");
+      assert.ok(
+        fs.existsSync(checksumsPath),
+        `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} checksums.txt must exist`,
+      );
+      const text = fs.readFileSync(checksumsPath, "utf8");
+      assert.ok(
+        text.endsWith("\n"),
+        `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} checksums.txt must end with trailing newline`,
+      );
+
+      // Story 4.4 R2 CRITICAL-1: 8 lines total = 7 published files + manifest.json.
+      const lines = text.split("\n").filter((line) => line.length > 0);
+      assert.equal(
+        lines.length,
+        8,
+        `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} checksums.txt must have exactly 8 lines (7 published files + manifest.json); got ${lines.length}`,
+      );
+
+      const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
+      for (const entry of manifest.files) {
+        const pwshHash = story44ParseChecksumsPwsh(text, entry.name);
+        const awkHash = story44ParseChecksumsPosixAwk(text, entry.name);
+        assert.equal(
+          pwshHash,
+          entry.sha256,
+          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} PowerShell parser must recover sha256 for ${entry.name}; got ${pwshHash}, expected ${entry.sha256}`,
+        );
+        assert.equal(
+          awkHash,
+          entry.sha256,
+          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} bash awk parser must recover sha256 for ${entry.name}; got ${awkHash}, expected ${entry.sha256}`,
+        );
+        assert.equal(
+          pwshHash,
+          awkHash,
+          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} both installer parsers must recover identical sha256 for ${entry.name}; PowerShell=${pwshHash}, awk=${awkHash}`,
+        );
+      }
+
+      // Story 4.4 R2 CRITICAL-1: every file the installer integrity-checks
+      // (install.ps1 line 47 / install.sh line 36) must have a parser-
+      // recoverable checksums line whose hash equals the actual on-disk
+      // sha256. This is the assertion that, when missing, lets a broken
+      // checksums.txt slip through review.
+      for (const name of STORY_44_INSTALLER_VERIFIED_FILES) {
+        const filePath = path.join(root, name);
+        assert.ok(
+          fs.existsSync(filePath),
+          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} ${name} must exist (installer downloads it)`,
+        );
+        const onDiskHash = crypto
+          .createHash("sha256")
+          .update(fs.readFileSync(filePath))
+          .digest("hex");
+
+        const pwshHash = story44ParseChecksumsPwsh(text, name);
+        const awkHash = story44ParseChecksumsPosixAwk(text, name);
+        assert.equal(
+          pwshHash,
+          onDiskHash,
+          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} ${name} — PowerShell installer would fail integrity check; checksums line=${pwshHash}, on-disk=${onDiskHash}`,
+        );
+        assert.equal(
+          awkHash,
+          onDiskHash,
+          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} ${name} — bash installer would fail integrity check; checksums line=${awkHash}, on-disk=${onDiskHash}`,
+        );
+      }
+
+      // Strict line shape: `<64-hex>  <name>` (two ASCII spaces).
+      for (const rawLine of text.split("\n")) {
+        if (!rawLine) continue;
+        assert.match(
+          rawLine,
+          /^[0-9a-f]{64} {2}\S/,
+          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} checksums line must match "<64-hex>  <name>" shape; got: ${JSON.stringify(rawLine)}`,
+        );
+      }
+    }
+  } finally {
+    fs.rmSync(fixture.tempReleaseRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.4 (AC1, AC2): the `latest/` and `versions/<version>/` directories
+ * must contain the SAME 7 published files with byte-identical SHA-256
+ * digests. This locks the make-release contract that "two publish targets
+ * mirror each other" and prevents a future refactor from publishing only
+ * one target.
+ *
+ * Story 4.4 R2 HIGH-1: regenerated fixture release in `os.tmpdir()` so
+ * `npm test` exercises the contract without a prior `npm run release`.
+ *
+ * Note: `manifest.json` is NOT byte-identical between `latest/` and
+ * `versions/<version>/` because each is generated with its own
+ * `generatedAt` timestamp. That is by design — checksums.txt in each
+ * directory references its own manifest's hash, so the installer integrity
+ * check is closed within a single download root. This regression
+ * therefore mirrors only the 7 published files.
+ */
+async function verifyStory44LatestAndVersionedDirsMirrored() {
+  const fixture = story44GenerateFixtureRelease("mirror");
+  try {
+    for (const name of STORY_44_EXPECTED_PUBLISHED_FILES) {
+      const latestPath = path.join(fixture.latestRoot, name);
+      const versionPath = path.join(fixture.versionRoot, name);
+      assert.ok(
+        fs.existsSync(latestPath),
+        `verifyStory44LatestAndVersionedDirsMirrored: ${name} must exist under release/devai-aidd-guard/latest/`,
+      );
+      assert.ok(
+        fs.existsSync(versionPath),
+        `verifyStory44LatestAndVersionedDirsMirrored: ${name} must exist under release/devai-aidd-guard/versions/<version>/`,
+      );
+      const latestHash = crypto
+        .createHash("sha256")
+        .update(fs.readFileSync(latestPath))
+        .digest("hex");
+      const versionHash = crypto
+        .createHash("sha256")
+        .update(fs.readFileSync(versionPath))
+        .digest("hex");
+      assert.equal(
+        latestHash,
+        versionHash,
+        `verifyStory44LatestAndVersionedDirsMirrored: ${name} sha256 differs between latest/ (${latestHash}) and versions/<version>/ (${versionHash})`,
+      );
+    }
+  } finally {
+    fs.rmSync(fixture.tempReleaseRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.4 (AC1): if any `filesToPublish` source is missing,
+ * `make-release.js` must fail BEFORE mutating any release tree, with a
+ * clear maintainer-facing message that names the missing file. We exercise
+ * this in an `os.tmpdir()` workspace so the real `release/` is never
+ * touched.
+ */
+async function verifyStory44ReleaseMissingSourceFails() {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-story44-missing-"));
+  try {
+    // Mirror the project files the script needs (package.json + scripts/) and
+    // intentionally OMIT one publish source (uninstall.ps1).
+    fs.mkdirSync(path.join(tempRoot, "scripts"), { recursive: true });
+    fs.copyFileSync(
+      path.join(projectRoot, "package.json"),
+      path.join(tempRoot, "package.json"),
+    );
+    fs.copyFileSync(
+      path.join(projectRoot, "scripts", "make-release.js"),
+      path.join(tempRoot, "scripts", "make-release.js"),
+    );
+
+    // Provide everything except uninstall.ps1.
+    fs.mkdirSync(path.join(tempRoot, "dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, "dist", "devai-aidd-guard.js"),
+      "// stub bundle\nexport const x = 1;\n",
+      "utf8",
+    );
+    fs.mkdirSync(path.join(tempRoot, "installer"), { recursive: true });
+    fs.writeFileSync(path.join(tempRoot, "installer", "install.ps1"), "stub", "utf8");
+    fs.writeFileSync(path.join(tempRoot, "installer", "install.sh"), "stub", "utf8");
+    // uninstall.ps1 INTENTIONALLY MISSING.
+    fs.mkdirSync(path.join(tempRoot, "templates"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, "templates", "devai-aidd-guard.global.jsonc"),
+      "{}",
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(tempRoot, "templates", "devai-aidd-guard.project.jsonc"),
+      "{}",
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(tempRoot, "templates", "opencode.jsonc.example"),
+      "{}",
+      "utf8",
+    );
+
+    let threw = null;
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, ["scripts/make-release.js"], {
+        cwd: tempRoot,
+        stdio: "pipe",
+      });
+    } catch (error) {
+      threw = error;
+      stderr = error?.stderr?.toString?.() || "";
+    }
+
+    assert.ok(
+      threw,
+      "verifyStory44ReleaseMissingSourceFails: make-release.js must throw when a publish source is missing",
+    );
+    assert.notEqual(
+      threw?.status,
+      0,
+      "verifyStory44ReleaseMissingSourceFails: make-release.js must exit with non-zero status",
+    );
+    assert.match(
+      stderr,
+      /uninstall\.ps1/,
+      `verifyStory44ReleaseMissingSourceFails: error message must name the missing file (uninstall.ps1); got: ${stderr}`,
+    );
+    assert.match(
+      stderr,
+      /missing|cannot package/i,
+      `verifyStory44ReleaseMissingSourceFails: error message must explain why packaging cannot proceed; got: ${stderr}`,
+    );
+
+    // Verify-first invariant: no release tree was created in the temp workspace.
+    const tempReleaseDir = path.join(tempRoot, "release");
+    assert.equal(
+      fs.existsSync(tempReleaseDir),
+      false,
+      "verifyStory44ReleaseMissingSourceFails: make-release.js must not create release/ when validation fails (verify-first invariant)",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Story 4.4 R2 LOW-1: when the bundle artifact (`dist/devai-aidd-guard.js`)
+ * is missing alongside other publish sources, `make-release.js` must (a)
+ * list ALL missing files in a single error message and (b) include the
+ * `npm run build` hint that targets the bundle specifically. This locks
+ * the multi-missing reporting contract from `validatePublishSources()`
+ * (Story task line 34: "ALL missing files in single message").
+ */
+async function verifyStory44ReleaseMissingBundleEmitsBuildHint() {
+  const tempRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "devai-aidd-story44-missing-bundle-"),
+  );
+  try {
+    fs.mkdirSync(path.join(tempRoot, "scripts"), { recursive: true });
+    fs.copyFileSync(
+      path.join(projectRoot, "package.json"),
+      path.join(tempRoot, "package.json"),
+    );
+    fs.copyFileSync(
+      path.join(projectRoot, "scripts", "make-release.js"),
+      path.join(tempRoot, "scripts", "make-release.js"),
+    );
+
+    // Provide installer + templates but OMIT dist/devai-aidd-guard.js AND install.sh.
+    fs.mkdirSync(path.join(tempRoot, "installer"), { recursive: true });
+    fs.writeFileSync(path.join(tempRoot, "installer", "install.ps1"), "stub", "utf8");
+    // install.sh INTENTIONALLY MISSING (second missing file).
+    fs.writeFileSync(path.join(tempRoot, "installer", "uninstall.ps1"), "stub", "utf8");
+    fs.mkdirSync(path.join(tempRoot, "templates"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, "templates", "devai-aidd-guard.global.jsonc"),
+      "{}",
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(tempRoot, "templates", "devai-aidd-guard.project.jsonc"),
+      "{}",
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(tempRoot, "templates", "opencode.jsonc.example"),
+      "{}",
+      "utf8",
+    );
+    // dist/devai-aidd-guard.js INTENTIONALLY MISSING (no `dist/` directory at all).
+
+    let threw = null;
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, ["scripts/make-release.js"], {
+        cwd: tempRoot,
+        stdio: "pipe",
+      });
+    } catch (error) {
+      threw = error;
+      stderr = error?.stderr?.toString?.() || "";
+    }
+
+    assert.ok(
+      threw,
+      "verifyStory44ReleaseMissingBundleEmitsBuildHint: make-release.js must throw when multiple sources are missing",
+    );
+    assert.match(
+      stderr,
+      /devai-aidd-guard\.js/,
+      `verifyStory44ReleaseMissingBundleEmitsBuildHint: error must name the missing bundle (devai-aidd-guard.js); got: ${stderr}`,
+    );
+    assert.match(
+      stderr,
+      /install\.sh/,
+      `verifyStory44ReleaseMissingBundleEmitsBuildHint: error must also name the second missing source (install.sh); got: ${stderr}`,
+    );
+    assert.match(
+      stderr,
+      /npm run build/,
+      `verifyStory44ReleaseMissingBundleEmitsBuildHint: error must include the \`npm run build\` hint when the bundle is missing; got: ${stderr}`,
+    );
+
+    // Story 4.4 R2-review LOW-5: verify-first invariant (symmetry with
+    // verifyStory44ReleaseMissingSourceFails). Multi-missing failure must
+    // also bail out before any release tree mutation.
+    const tempReleaseDir = path.join(tempRoot, "release");
+    assert.equal(
+      fs.existsSync(tempReleaseDir),
+      false,
+      "verifyStory44ReleaseMissingBundleEmitsBuildHint: make-release.js must not create release/ when validation fails (verify-first invariant)",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 main()
   .then(() => verifyBootstrapFailureShape())
   .then(() => verifyMissingLegacyBootstrapDependencyFails())
@@ -11479,6 +12056,13 @@ main()
   .then(() => verifyStory42BridgePreservesUserWorkflowLegacyWithoutMarker())
   .then(() => verifyStory42BridgeRebuildLabelOnMarkerLeftover())
   .then(() => verifyStory42BridgeWriteFailureIsBestEffort())
+  // Story 4.4 — build and package release artifacts reliably
+  .then(() => verifyStory44ReleaseManifestCompleteness())
+  .then(() => verifyStory44ReleaseChecksumLinesMatchInstallerParsers())
+  .then(() => verifyStory44LatestAndVersionedDirsMirrored())
+  .then(() => verifyStory44ReleaseMissingSourceFails())
+  // Story 4.4 R2 LOW-1: multi-missing + bundle hint
+  .then(() => verifyStory44ReleaseMissingBundleEmitsBuildHint())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;
