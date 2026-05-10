@@ -17,9 +17,6 @@
   - [자주 바꾸는 키](#자주-바꾸는-키)
 - [사용법](#사용법)
   - [표준 Git 도구로 워크플로 산출물 추적하기](#표준-git-도구로-워크플로-산출물-추적하기)
-- [디렉터리 개요](#디렉터리-개요)
-- [빌드와 릴리스](#빌드와-릴리스)
-- [롤백](#롤백)
 - [Changelog](#changelog)
 
 ## 주요 기능
@@ -175,18 +172,6 @@ git log --grep "워크플로우 완료"
 ```
 
 승인 프롬프트는 커밋 대상 경로를 `pathScopeSummary` 형태(예: `src/ (2)`, `_bmad-output/implementation-artifacts/ (1)`)로 요약해서 보여주므로, 리뷰어는 동일 prefix를 그대로 `git log -- <prefix>`에 붙여 넣어 변경 이력을 따라갈 수 있다. 절대경로나 원격 URL은 승인·감사 페이로드에 노출되지 않는다.
-
-## 디렉터리 개요
-
-저장소 최상위는 `src/`, `installer/`, `templates/`, `scripts/`, `dist/`, `release/`로 구성된다. 전체 트리와 경로별 역할은 [docs/directory-structure.md](./docs/directory-structure.md)에서 본다.
-
-## 빌드와 릴리스
-
-메인테이너용 번들·릴리스 흐름과 무결성 검증 절차는 [docs/build-and-release.md](./docs/build-and-release.md)에 정리되어 있다.
-
-## 롤백
-
-이전 버전으로 되돌리거나 플러그인을 제거하는 절차는 [docs/rollback.md](./docs/rollback.md)에서 본다.
 
 ## Changelog
 
