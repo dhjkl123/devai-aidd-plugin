@@ -36,6 +36,24 @@ function shouldSkipBranchPlanning(readiness) {
   return readiness?.outcome === "ask" && readiness?.reason === "git-not-initialized";
 }
 
+function buildStartInstructionText({ commandName, readiness }) {
+  const header = `Git workflow guard is active for /${commandName}.`;
+
+  if (readiness?.outcome === "ask" && readiness?.reason === "git-not-initialized") {
+    return [
+      header,
+      `This workflow cannot continue yet because /${commandName} is running in a directory that is not a git repository.`,
+      "Ask the user the `Initialize Git` question with these exact options:",
+      "1. `Initialize Git (Recommended)`",
+      "2. `Cancel`",
+      "If the user chooses Initialize Git, run `git init` only after that approval.",
+      "Do not ask for a branch name or continue implementation before the git-init decision is made.",
+    ].join("\n");
+  }
+
+  return header;
+}
+
 export function createCommandExecuteBeforeHook(
   { workflowCommands, workflowState, audit, pluginContext, branchConfig } = {},
 ) {
@@ -182,15 +200,33 @@ export function createCommandExecuteBeforeHook(
         if (!Array.isArray(output.parts)) {
           output.parts = [];
         }
+        const startInstructionText = buildStartInstructionText({
+          commandName: context.commandName,
+          readiness,
+        });
         output.parts.push({
           type: "text",
-          text: `Git workflow guard is active for /${context.commandName}.`,
+          text: startInstructionText,
           synthetic: true,
           metadata: {
             source: "devai-git-workflow",
             phase: "start",
           },
         });
+        pluginContext?.debug?.log?.(
+          "command-execute-before",
+          "start instruction pushed to output.parts",
+          {
+            sessionID: context.sessionID,
+            commandName: context.commandName,
+            readinessOutcome: readiness?.outcome ?? null,
+            readinessReason: readiness?.reason ?? null,
+            needsGitInit:
+              readiness?.outcome === "ask" && readiness?.reason === "git-not-initialized",
+            textLength: startInstructionText.length,
+            textPreview: startInstructionText.slice(0, 200),
+          },
+        );
       }
     }
   };

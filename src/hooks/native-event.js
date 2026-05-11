@@ -44,6 +44,62 @@ import {
 } from "../services/approval/permission-asked-aliases.js";
 import { isTerminalRecoveryState } from "../services/approval/recovery-state.js";
 
+function summarizeEventProps(type, props) {
+  if (!props || typeof props !== "object") return null;
+
+  switch (type) {
+    case "command.executed": {
+      const args =
+        typeof props.arguments === "string"
+          ? props.arguments
+          : Array.isArray(props.arguments)
+          ? props.arguments.join(" ")
+          : null;
+      return {
+        name: props.name ?? props.command ?? null,
+        argsPreview: args ? args.slice(0, 120) : null,
+      };
+    }
+    case "question.asked": {
+      const questions = Array.isArray(props.questions) ? props.questions : [];
+      const first = questions[0] || {};
+      const optionsRaw = Array.isArray(first.options)
+        ? first.options
+        : Array.isArray(props.options)
+        ? props.options
+        : null;
+      const options = Array.isArray(optionsRaw)
+        ? optionsRaw
+            .map((o) => (typeof o === "string" ? o : o?.label ?? null))
+            .filter((v) => typeof v === "string")
+        : null;
+      return {
+        questionID: props.id ?? first.id ?? null,
+        header: props.header ?? props.title ?? first.header ?? first.title ?? null,
+        options,
+      };
+    }
+    case "question.replied":
+    case "question.rejected": {
+      let answer = null;
+      const answers = props.answers;
+      if (Array.isArray(answers) && answers.length > 0) {
+        const a = answers[0];
+        if (Array.isArray(a) && a.length > 0 && typeof a[0] === "string") answer = a[0];
+        else if (typeof a === "string") answer = a;
+      } else if (typeof props.answer === "string") {
+        answer = props.answer;
+      }
+      return {
+        requestID: props.requestID ?? props.requestId ?? props.id ?? null,
+        answer,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 function readSessionID(props) {
   const candidates = [
     props?.sessionID,
@@ -606,13 +662,7 @@ export function createNativeEventHook(injections = {}) {
 
     deps.pluginContext?.debug?.log?.("native-event", `received event.type=${type}`, {
       sessionID: readSessionID(event?.properties),
-      props: event?.properties
-        ? {
-            name: event.properties.name ?? null,
-            id: event.properties.id ?? null,
-            requestID: event.properties.requestID ?? null,
-          }
-        : null,
+      props: summarizeEventProps(type, event?.properties),
     });
 
     try {
