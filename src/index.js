@@ -23,9 +23,9 @@ import { createWorkflowStateStore } from "./services/workflow/workflow-state.js"
 import { createCommandExecuteBeforeHook } from "./hooks/command-execute-before.js";
 import { createToolExecuteBeforeHook } from "./hooks/tool-execute-before.js";
 import { createToolExecuteAfterHook } from "./hooks/tool-execute-after.js";
-import { createSessionHook } from "./hooks/session.js";
 import { createPermissionAskedHook } from "./hooks/permission-asked.js";
 import { createFileEditedHook } from "./hooks/file-edited.js";
+import { createNativeEventHook } from "./hooks/native-event.js";
 import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-policy.js";
 import { runGitAction, runGitCommand } from "./services/git/run-git-command.js";
 import { buildRecoveryPrompt } from "./services/approval/build-recovery-prompt.js";
@@ -158,13 +158,36 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       // not recompose strings, only forward what the request already contains.
       async requestApproval(request) {
         if (client?.session?.promptAsync) {
-          const promptText =
+          // Native event refactor: prepend a question-tool instruction so the
+          // model asks the user via the native `question` tool with a stable
+          // header (e.g. "Initialize Git") and option labels the native
+          // `question.asked`/`question.replied` router can match.
+          const nativeHeader =
+            request.actionType === "init"
+              ? "Initialize Git"
+              : request.actionType === "branch"
+              ? "Create Branch"
+              : request.actionType === "commit" || request.actionType === "push"
+              ? "Finalize Changes"
+              : "Approval Required";
+          const nativeOptions =
+            request.actionType === "init"
+              ? ["Initialize Git (Recommended)", "Cancel"]
+              : ["Approve (Recommended)", "Deny", "Ignore and continue"];
+          const nativeInstruction = [
+            `Ask the user with the question tool. Header: "${nativeHeader}".`,
+            `Options: ${nativeOptions.map((opt) => `"${opt}"`).join(", ")}.`,
+          ].join(" ");
+
+          const bodyText =
             Array.isArray(request.prompt?.lines) && request.prompt.lines.length > 0
               ? [request.prompt.title, "", ...request.prompt.lines].join("\n")
               : request.prompt?.summary || `Approval required: ${request.actionType}`;
+          const promptText = `${nativeInstruction}\n\n${bodyText}`;
 
           await client.session.promptAsync({
             sessionID: request.sessionID,
+            directory,
             parts: [
               {
                 type: "text",
@@ -179,6 +202,8 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
                   actionType: request.actionType,
                   phase: request.phase,
                   workflow: request.workflow,
+                  questionHeader: nativeHeader,
+                  questionOptions: nativeOptions,
                   explanation: request.metadata?.explanation,
                   sensitivity: request.metadata?.sensitivity,
                   detailLevel: request.metadata?.detailLevel,
@@ -205,13 +230,17 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
           gate.options.length > 0
         ) {
           const prompt = buildRecoveryPrompt(gate);
-          const promptText =
+          const nativeOptions = prompt.choices.map((choice) => `"${choice}"`).join(", ");
+          const nativeInstruction = `Ask the user with the question tool. Header: "${prompt.title}". Options: ${nativeOptions}.`;
+          const bodyText =
             Array.isArray(prompt.lines) && prompt.lines.length > 0
               ? [prompt.title, "", ...prompt.lines].join("\n")
               : prompt.summary;
+          const promptText = `${nativeInstruction}\n\n${bodyText}`;
 
           await client.session.promptAsync({
             sessionID: gate.sessionID,
+            directory,
             parts: [
               {
                 type: "text",
@@ -223,6 +252,8 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
                   attempt: gate.attempt ?? 1,
                   recoverable: gate.recoverable === true,
                   choices: prompt.choices,
+                  questionHeader: prompt.title,
+                  questionOptions: prompt.choices,
                   recommendedChoice: prompt.recommendedChoice,
                   source: gate.source ?? null,
                 },
@@ -234,16 +265,22 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     };
 
     // The hook map below is the external plugin contract surface. Its keys
-    // MUST stay byte-for-byte equal to `SUPPORTED_HOOK_KEYS`; renaming,
-    // dropping, or adding a key is a compatibility break.
+    // MUST stay byte-for-byte equal to `SUPPORTED_HOOK_KEYS`. Under the native
+    // opencode runtime, `event` is the load-bearing native router that handles
+    // `command.executed`, `question.asked`, `question.replied`,
+    // `question.rejected`, `session.idle`, and `session.deleted`. The other
+    // five named handlers remain as compatibility-only ingress points for the
+    // in-process test harness and any non-native invocation path.
+    const commandExecuteBeforeHandler = createCommandExecuteBeforeHook({
+      workflowCommands,
+      workflowState,
+      audit,
+      pluginContext,
+      branchConfig,
+    });
+
     return {
-      "command.execute.before": createCommandExecuteBeforeHook({
-        workflowCommands,
-        workflowState,
-        audit,
-        pluginContext,
-        branchConfig,
-      }),
+      "command.execute.before": commandExecuteBeforeHandler,
       // Story 2.3 (LOW): tool.execute.before / tool.execute.after only consume
       // workflowState today (phase advancement). pluginContext is unused by
       // these factories — keep the injection surface minimal so the contract
@@ -264,7 +301,17 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         pluginContext,
       }),
       "file.edited": createFileEditedHook({ workflowState, pluginContext }),
-      event: createSessionHook({ workflowState }),
+      // Native event router. `command.executed` delegates to the legacy
+      // command-execute-before factory to reuse workflow detection /
+      // readiness / branch / init planning. `session.deleted` still clears
+      // session state — the legacy session hook is now embedded inside the
+      // native router so we keep a single ingress for session lifecycle.
+      event: createNativeEventHook({
+        workflowState,
+        audit,
+        pluginContext,
+        commandExecuteBeforeHandler,
+      }),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

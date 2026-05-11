@@ -11907,6 +11907,165 @@ async function verifySessionDeletedClearsState() {
   }
 }
 
+// =============================================================================
+// Native event contract — opencode native plugin (.opencode/plugins) entrypoint
+// =============================================================================
+//
+// The native event router replaces the legacy `command.execute.before` /
+// `permission.asked` / `file.edited` chain when the plugin is loaded by the
+// opencode native runtime. The named handlers remain as compatibility shims
+// but `handlers.event` must be the load-bearing path: a native flow that
+// only ever calls `handlers.event({ event })` must still publish approvals,
+// match question.replied to the active approval, route deny through
+// recovery, clear session state, and run finalization fallback via
+// session.idle. The two assertions below pin the new contract:
+//
+// 1. `verifyNativeEventHandlerExists` — the bootstrap must expose a callable
+//    `event` handler that accepts the native payload envelope (`{ event:
+//    { type, properties } }`) without throwing on malformed inputs.
+// 2. `verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks` — a full
+//    init approval flow driven exclusively through native events (`command.
+//    executed` → `question.asked` → `question.replied`) must produce the
+//    same approval.requested/resolved audit chain as the legacy path.
+
+async function verifyNativeEventHandlerExists() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?nv1=${Date.now()}`);
+  const tempRoot = createTempWorkspace();
+  try {
+    const mock = createMockClient();
+    const handlers = await wrapperMod.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: tempRoot,
+    });
+    assert.equal(
+      typeof handlers.event,
+      "function",
+      "verifyNativeEventHandlerExists: handlers.event must be a callable function",
+    );
+    // Malformed/unknown events must be silent no-ops (no throw).
+    let threw = null;
+    try {
+      await handlers.event();
+      await handlers.event(null);
+      await handlers.event({});
+      await handlers.event({ event: null });
+      await handlers.event({ event: { type: "totally.unknown" } });
+      await handlers.event({ event: { type: "question.asked", properties: {} } });
+    } catch (error) {
+      threw = error;
+    }
+    assert.equal(
+      threw,
+      null,
+      `verifyNativeEventHandlerExists: native event handler must never throw on malformed input; got ${threw?.message}`,
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks() {
+  const wrapperMod = await import(`${wrapperModuleUrl}?nv2=${Date.now()}`);
+  const tempRoot = createTempWorkspace();
+  try {
+    const mock = createMockClient();
+    const handlers = await wrapperMod.DevaiAiddGuardPlugin({
+      client: mock.client,
+      directory: tempRoot,
+    });
+    const sessionID = "native-event-flow";
+
+    // Drive the entire flow through `handlers.event` only — never call
+    // `command.execute.before` / `permission.asked` / `file.edited`.
+    await handlers.event({
+      event: {
+        type: "command.executed",
+        properties: {
+          sessionID,
+          name: "/bmad-bmm-quick-dev",
+          arguments: "",
+        },
+      },
+    });
+
+    const approvalRequested = mock.logs
+      .map((entry) => entry?.body?.extra)
+      .find((extra) => extra?.event === "approval.requested");
+    assert.ok(
+      approvalRequested,
+      "verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks: native command.executed must publish approval.requested",
+    );
+
+    const approvalPrompt = mock.prompts.find((prompt) => {
+      const md = prompt?.parts?.[0]?.metadata;
+      return md?.requestId || md?.actionId;
+    });
+    assert.ok(
+      approvalPrompt,
+      "verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks: native command.executed must deliver approval prompt",
+    );
+    const md = approvalPrompt.parts[0].metadata;
+    assert.equal(approvalPrompt.directory, tempRoot);
+    assert.ok(md.questionHeader, "approval prompt metadata must include questionHeader");
+
+    // Native question.asked records pending mapping; question.replied resolves it.
+    const questionID = "native-q-1";
+    await handlers.event({
+      event: {
+        type: "question.asked",
+        properties: {
+          sessionID,
+          id: questionID,
+          header: md.questionHeader,
+        },
+      },
+    });
+
+    const denyOptionLabel = "Deny";
+    await handlers.event({
+      event: {
+        type: "question.replied",
+        properties: {
+          sessionID,
+          requestID: questionID,
+          answers: [[denyOptionLabel]],
+        },
+      },
+    });
+
+    const resolved = mock.logs
+      .map((entry) => entry?.body?.extra)
+      .filter((extra) => extra?.event === "approval.resolved");
+    assert.equal(
+      resolved.length,
+      1,
+      `verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks: native question.replied must resolve approval exactly once; got ${resolved.length}`,
+    );
+    assert.equal(resolved[0].outcome, "deny");
+
+    // session.deleted via native event must clear state (mutating tool no longer guards).
+    await handlers.event({
+      event: { type: "session.deleted", properties: { sessionID } },
+    });
+    let mutThrow = null;
+    try {
+      await handlers["tool.execute.before"](
+        { sessionID, tool: "write", args: {} },
+        { args: {} },
+      );
+    } catch (error) {
+      mutThrow = error;
+    }
+    assert.equal(
+      mutThrow,
+      null,
+      "verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks: native session.deleted must clear session state",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
 main()
   .then(() => verifyBootstrapFailureShape())
   .then(() => verifyConfigMergePrecedence())
@@ -12077,6 +12236,9 @@ main()
   .then(() => verifyMutatingToolThrowMessagePreserved())
   .then(() => verifyMutatingToolAdvancesPhase())
   .then(() => verifySessionDeletedClearsState())
+  // Native event contract — opencode native plugin (.opencode/plugins)
+  .then(() => verifyNativeEventHandlerExists())
+  .then(() => verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;

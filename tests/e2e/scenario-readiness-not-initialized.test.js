@@ -70,7 +70,87 @@ async function uninitializedRepositoryProposesInit() {
   }
 }
 
+async function nativeEventGitInitApprovalFlow() {
+  const directory = createTempWorkspace({ initializeGit: false });
+  try {
+    const { handlers, mock } = await bootstrapPlugin(directory);
+    const sessionID = "e2e-native-init";
+
+    // Native command.executed drives workflow detection + init proposal +
+    // approval publish — no legacy command.execute.before call.
+    await handlers.event({
+      event: {
+        type: "command.executed",
+        properties: {
+          sessionID,
+          name: "/bmad-bmm-create-prd",
+          arguments: "",
+        },
+      },
+    });
+
+    const approvalRequested = findFirstAuditEvent(mock.logs, "approval.requested");
+    assert.ok(
+      approvalRequested,
+      "native command.executed must publish approval.requested",
+    );
+    assert.equal(approvalRequested.details.actionKind, "init");
+
+    const prompt = findApprovalPrompt(mock.prompts);
+    assert.ok(prompt, "native command.executed must deliver approval prompt");
+    assert.equal(
+      prompt.directory,
+      directory,
+      "init approval prompt must carry the workflow directory",
+    );
+    const md = prompt.parts[0].metadata;
+    assert.equal(md.actionType, "init");
+    assert.equal(md.questionHeader, "Initialize Git");
+
+    // Simulate the native question.asked → question.replied chain.
+    const questionID = "native-init-question";
+    await handlers.event({
+      event: {
+        type: "question.asked",
+        properties: {
+          sessionID,
+          id: questionID,
+          header: "Initialize Git",
+        },
+      },
+    });
+
+    await handlers.event({
+      event: {
+        type: "question.replied",
+        properties: {
+          sessionID,
+          requestID: questionID,
+          answers: [["Initialize Git (Recommended)"]],
+        },
+      },
+    });
+
+    // The approve answer triggers executeApprovedAction for init? Actually
+    // init is not commit/push so the shared resolver only emits the audit
+    // chain. Verify approval.resolved present with accept outcome.
+    const resolved = findAuditEvents(mock.logs, "approval.resolved");
+    assert.equal(
+      resolved.length,
+      1,
+      `native question.replied must produce exactly one approval.resolved; got ${resolved.length}`,
+    );
+    assert.equal(resolved[0].outcome, "accept");
+  } finally {
+    cleanupTempWorkspace(directory);
+  }
+}
+
 await runScenario(
   "readiness: uninitialized workspace proposes init and skips branch planning",
   uninitializedRepositoryProposesInit,
+);
+await runScenario(
+  "native: git init approval flow via command.executed → question.asked → question.replied",
+  nativeEventGitInitApprovalFlow,
 );

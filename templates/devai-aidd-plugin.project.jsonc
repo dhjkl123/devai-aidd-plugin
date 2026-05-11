@@ -31,11 +31,159 @@
     }
   },
   "workflowPolicy": {
+    "bmad-bmm-check-implementation-readiness": {
+      "category": "review",
+      "identityStrategy": "artifact-or-args",
+      "branchRequired": true,
+      "finalization": "no-forced-finalization"
+    },
+    "bmad-bmm-code-review": {
+      "category": "review",
+      "identityStrategy": "ticket-or-args",
+      "branchRequired": true,
+      "finalization": "no-forced-finalization"
+    },
+    "bmad-bmm-correct-course": {
+      "category": "planning",
+      "identityStrategy": "ticket-or-args",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-create-architecture": {
+      "category": "planning",
+      "identityStrategy": "artifact-singleton",
+      "artifactKey": "architecture",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-create-epics-and-stories": {
+      "category": "planning",
+      "identityStrategy": "artifact-singleton",
+      "artifactKey": "epics",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-create-prd": {
+      "category": "planning",
+      "identityStrategy": "artifact-singleton",
+      "artifactKey": "prd",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-create-product-brief": {
+      "category": "planning",
+      "identityStrategy": "artifact-singleton",
+      "artifactKey": "product-brief",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-create-story": {
+      "category": "implementation",
+      "identityStrategy": "story",
+      "branchRequired": true,
+      "finalization": "commit-and-push"
+    },
+    "bmad-bmm-create-ux-design": {
+      "category": "planning",
+      "identityStrategy": "artifact-singleton",
+      "artifactKey": "ux-design",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-dev-story": {
+      "category": "implementation",
+      "identityStrategy": "story",
+      "branchRequired": true,
+      "finalization": "commit-and-push"
+    },
+    "bmad-bmm-document-project": {
+      "category": "docs",
+      "identityStrategy": "artifact-singleton",
+      "artifactKey": "document-project",
+      "branchRequired": true,
+      "finalization": "no-forced-finalization"
+    },
+    "bmad-bmm-domain-research": {
+      "category": "research",
+      "identityStrategy": "artifact-or-args",
+      "branchRequired": true,
+      "finalization": "no-forced-finalization"
+    },
+    "bmad-bmm-edit-prd": {
+      "category": "planning",
+      "identityStrategy": "artifact-singleton",
+      "artifactKey": "prd",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-generate-project-context": {
+      "category": "docs",
+      "identityStrategy": "artifact-singleton",
+      "artifactKey": "project-context",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-market-research": {
+      "category": "research",
+      "identityStrategy": "artifact-or-args",
+      "branchRequired": true,
+      "finalization": "no-forced-finalization"
+    },
+    "bmad-bmm-qa-generate-e2e-tests": {
+      "category": "implementation",
+      "identityStrategy": "artifact-or-args",
+      "branchRequired": true,
+      "finalization": "commit-and-push"
+    },
     "bmad-bmm-quick-dev": {
       "category": "implementation",
       "identityStrategy": "ticket-or-args",
       "branchRequired": true,
       "finalization": "commit-and-push"
+    },
+    "bmad-bmm-quick-dev-new-preview": {
+      "category": "implementation",
+      "identityStrategy": "ticket-or-args",
+      "branchRequired": true,
+      "finalization": "commit-and-push"
+    },
+    "bmad-bmm-quick-spec": {
+      "category": "planning",
+      "identityStrategy": "artifact-or-args",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-retrospective": {
+      "category": "docs",
+      "identityStrategy": "artifact-or-args",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-sprint-planning": {
+      "category": "planning",
+      "identityStrategy": "artifact-singleton",
+      "artifactKey": "sprint-planning",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
+    "bmad-bmm-sprint-status": {
+      "category": "review",
+      "identityStrategy": "artifact-or-args",
+      "branchRequired": true,
+      "finalization": "no-forced-finalization"
+    },
+    "bmad-bmm-technical-research": {
+      "category": "research",
+      "identityStrategy": "artifact-or-args",
+      "branchRequired": true,
+      "finalization": "no-forced-finalization"
+    },
+    "bmad-bmm-validate-prd": {
+      "category": "review",
+      "identityStrategy": "artifact-singleton",
+      "artifactKey": "prd",
+      "branchRequired": true,
+      "finalization": "no-forced-finalization"
     }
   }
 }

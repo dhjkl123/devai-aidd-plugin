@@ -10,18 +10,21 @@ export const PLUGIN_SERVICE_NAME = "devai-aidd-plugin";
 export const STATE_DIRECTORY_NAME = "devai-aidd-plugin";
 
 // ────────────────────────────────────────────────────────────────────────────
-// BMAD command compatibility contract (single source of truth)
+// Native plugin contract (opencode .opencode/plugins runtime)
 // ────────────────────────────────────────────────────────────────────────────
 //
-// SUPPORTED_HOOK_KEYS — the 6 hook keys returned by `DevaiAiddGuardPlugin`
-//   bootstrap. Names, count, and the `async (input, output?) => any` shape of
-//   these handlers ARE the external plugin contract; renaming, dropping, or
-//   adding a key is a contract break.
+// Under the native opencode plugin runtime, the load-bearing entrypoint is the
+// single `event` handler that routes all session/command/question/recovery
+// signals via `event.type`. The native router (see `src/hooks/native-event.js`)
+// is what makes the plugin work when bundled into `.opencode/plugins`.
 //
-// WRAPPER_ONLY_HOOK_KEYS — exported for traceability so consumers can express
-//   the historical asymmetry between approval/file-tracking hooks and the
-//   command/tool/session lifecycle hooks. The wrapper itself implements all 6
-//   keys directly.
+// `SUPPORTED_HOOK_KEYS` remains a 6-entry list to keep the existing wrapper
+// surface and regression tests (Story 4.5 src/dist parity) intact. The legacy
+// named handlers (`command.execute.before`, `tool.execute.before`,
+// `tool.execute.after`, `permission.asked`, `file.edited`) are now
+// **compatibility-only** ingress points retained for the in-process test
+// harness and any non-native invocation path; they are NOT required for native
+// opencode operation.
 export const SUPPORTED_HOOK_KEYS = Object.freeze([
   "command.execute.before",
   "tool.execute.before",
@@ -31,6 +34,20 @@ export const SUPPORTED_HOOK_KEYS = Object.freeze([
   "event",
 ]);
 
+// Native event types the `event` handler routes. Anything not listed is a
+// silent no-op so unrelated runtime events cannot mutate workflow state.
+export const NATIVE_EVENT_TYPES = Object.freeze([
+  "question.asked",
+  "question.replied",
+  "question.rejected",
+  "command.executed",
+  "session.idle",
+  "session.deleted",
+]);
+
+// Kept for legacy traceability — these named handlers were historically the
+// wrapper-only asymmetry surface relative to the rest of the lifecycle hooks.
+// Under native operation they remain available as compatibility shims.
 export const WRAPPER_ONLY_HOOK_KEYS = Object.freeze([
   "permission.asked",
   "file.edited",
