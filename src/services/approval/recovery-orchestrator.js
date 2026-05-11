@@ -54,7 +54,7 @@
  *     invariant violation and produces `git.action.recovery.blocked`
  *
  * Storage: the gate lives on the existing `workflowState` keyed by sessionID,
- * so `session.deleted` cleanup in `src/hooks/session.js` already disposes it.
+ * so `session.deleted` cleanup in `src/hooks/native-event.js` already disposes it.
  */
 
 import { randomUUID } from "node:crypto";
