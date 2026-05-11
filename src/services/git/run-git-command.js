@@ -5,6 +5,7 @@ const execFileAsync = promisify(execFile);
 
 const ALLOWED_COMMANDS = new Map([
   ["rev-parse-inside-work-tree", ["rev-parse", "--is-inside-work-tree"]],
+  ["rev-parse-head", ["rev-parse", "HEAD"]],
   ["symbolic-ref-short-head", ["symbolic-ref", "--short", "HEAD"]],
   ["remote-verbose", ["remote", "-v"]],
   ["status-porcelain", ["status", "--short", "--untracked-files=all"]],

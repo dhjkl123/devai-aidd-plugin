@@ -37,6 +37,32 @@ export const APPROVAL_OUTCOME_ALIASES = Object.freeze({
   "ignore-and-continue": "ignore-and-continue",
   ignore: "ignore-and-continue",
   skip: "ignore-and-continue",
+  // strengthen-approval-prompt-instructions: native question label
+  // "Create Baseline Commit (Recommended)" normalizes to
+  // "create baseline commit" via normalizeAnswerKey -- map it to ACCEPT
+  // so the alias resolves identically to the legacy "Approve" label.
+  "create baseline commit": "accept",
+  // strengthen-approval-prompt-instructions follow-up: sensitive-files
+  // baseline variant. Both ACCEPT-style options resolve to "accept"; the
+  // executor disambiguates via `approvalCurrent.userAnswer` to decide
+  // whether to append the matched .gitignore rules before committing.
+  // "Skip Baseline Commit" maps to IGNORE_AND_CONTINUE so
+  // consume-approval-outcome.js can clear the commit proposal slot without
+  // opening a recovery gate.
+  // Legacy keys kept for one release so older deployed plugins / tests do
+  // not break if they round-trip these labels.
+  "add to gitignore and commit": "accept",
+  "commit anyway": "accept",
+  "skip baseline commit": "ignore-and-continue",
+  // New unified baseline-commit labels (Cancel -> Skip rename + .gitignore
+  // explicit option). The executor branches on `approvalCurrent.userAnswer`
+  // to distinguish "Setup .gitignore and Commit" from "Commit Without
+  // .gitignore"; both map to ACCEPT here.
+  "setup gitignore and commit": "accept",
+  "commit without gitignore": "accept",
+  // Note: bare "skip" already maps to IGNORE_AND_CONTINUE via
+  // APPROVAL_ANSWER_TOKENS / IGNORE_ANSWER_TOKENS in native-event.js, so no
+  // separate alias entry is needed here for the Skip option.
 });
 
 export const RECOVERY_CHOICE_ALIASES = Object.freeze({

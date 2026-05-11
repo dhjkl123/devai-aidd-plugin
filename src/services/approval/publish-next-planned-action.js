@@ -35,7 +35,21 @@ export async function publishNextPlannedAction({
     hasBranchProposal: currentState?.branchProposal != null,
     hasCommitProposal: currentState?.commitProposal != null,
     hasPushProposal: currentState?.pushProposal != null,
+    baselineSkipped: currentState?.baselineSkipped === true,
+    gitInitSkipped: currentState?.gitInitSkipped === true,
   });
+
+  // strengthen-approval-prompt-instructions follow-up: hard-block publishing
+  // when the session has opted out of git automation. consume-approval-outcome
+  // clears the slots when it sets these flags, but we add a defensive guard
+  // here so any future code path that repopulates a slot still cannot
+  // re-publish a chain prompt the user explicitly declined.
+  if (currentState?.gitInitSkipped === true || currentState?.baselineSkipped === true) {
+    return {
+      outcome: "skip",
+      reason: currentState.gitInitSkipped ? "git-init-skipped" : "baseline-skipped",
+    };
+  }
 
   if (gate.outcome === "allow") {
     const nextProposal = selectNextPlannedAction(currentState);

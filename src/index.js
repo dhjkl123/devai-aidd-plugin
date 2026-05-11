@@ -30,6 +30,7 @@ import { createNativeEventHook } from "./hooks/native-event.js";
 import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-policy.js";
 import { runGitAction, runGitCommand } from "./services/git/run-git-command.js";
 import { buildRecoveryPrompt } from "./services/approval/build-recovery-prompt.js";
+import { buildQuestionInstruction } from "./services/approval/build-question-instruction.js";
 import { parseStatusPorcelainPaths } from "./services/workflow/parse-status-porcelain.js";
 // `SUPPORTED_HOOK_KEYS` is the canonical 6-key contract list referenced by
 // the regression suite. Keep the import live so the SOT anchor cannot be
@@ -183,26 +184,55 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
           hasPromptAsync: typeof client?.session?.promptAsync === "function",
         });
         if (client?.session?.promptAsync) {
-          // Native event refactor: prepend a question-tool instruction so the
-          // model asks the user via the native `question` tool with a stable
-          // header (e.g. "Initialize Git") and option labels the native
-          // `question.asked`/`question.replied` router can match.
-          const nativeHeader =
-            request.actionType === "init"
-              ? "Initialize Git"
-              : request.actionType === "branch"
-              ? "Create Branch"
-              : request.actionType === "commit" || request.actionType === "push"
-              ? "Finalize Changes"
-              : "Approval Required";
-          const nativeOptions =
-            request.actionType === "init"
-              ? ["Initialize Git (Recommended)", "Cancel"]
-              : ["Approve (Recommended)", "Deny", "Ignore and continue"];
-          const nativeInstruction = [
-            `Ask the user with the question tool. Header: "${nativeHeader}".`,
-            `Options: ${nativeOptions.map((opt) => `"${opt}"`).join(", ")}.`,
-          ].join(" ");
+          // strengthen-approval-prompt-instructions: replace the weak
+          // single-line "Ask the user with the question tool..." prompt with
+          // a scenario-specific, multi-line instruction modelled on the
+          // legacy buildXxxQuestionInstruction builders. The builder is the
+          // single chokepoint for header/options/instructionText -- the
+          // adapter only handles try/catch + fallback wiring + debug logging.
+          //
+          // Fallback policy (adversarial F4): per-actionType default header
+          // is preserved so a builder throw does not regress init/commit/
+          // branch/push prompts to a generic "Approval Required" label.
+          const FALLBACK_HEADERS = {
+            init: "Initialize Git",
+            commit: "Finalize Changes",
+            "branch/create": "Create Branch",
+            "branch/switch": "Switch Branch",
+            push: "Push Changes",
+          };
+          let instruction;
+          try {
+            instruction = buildQuestionInstruction({
+              commandName: request.workflow || request.command || null,
+              actionType: request.actionType,
+              proposal: request.proposal == null ? null : request.proposal,
+            });
+          } catch (error) {
+            debugLogger.log(
+              "requestApproval",
+              "buildQuestionInstruction threw -- falling back to per-actionType header",
+              {
+                actionType: request?.actionType,
+                error: error && error.message ? error.message : String(error),
+              },
+            );
+            const fallbackHeader = FALLBACK_HEADERS[request.actionType] || "Approval Required";
+            const fallbackOptions =
+              request.actionType === "init"
+                ? ["Initialize Git (Recommended)", "Cancel"]
+                : ["Approve (Recommended)", "Deny", "Ignore and continue"];
+            instruction = {
+              header: fallbackHeader,
+              options: fallbackOptions,
+              instructionText: `Ask the user with the question tool. Header: "${fallbackHeader}". Options: ${fallbackOptions
+                .map((opt) => `"${opt}"`)
+                .join(", ")}.`,
+            };
+          }
+          const nativeHeader = instruction.header;
+          const nativeOptions = instruction.options;
+          const nativeInstruction = instruction.instructionText;
 
           const bodyText =
             Array.isArray(request.prompt?.lines) && request.prompt.lines.length > 0
@@ -238,9 +268,13 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
           });
           debugLogger.log("requestApproval", "prompt delivered to client.session.promptAsync", {
             actionType: request?.actionType,
+            proposalKind: request?.proposal?.kind ?? null,
+            proposalAction: request?.proposal?.action ?? null,
             requestId: request?.id,
             header: nativeHeader,
             options: nativeOptions,
+            instructionLength: nativeInstruction?.length ?? 0,
+            instructionPreview: nativeInstruction ? nativeInstruction.slice(0, 200) : "",
             promptTextLength: promptText?.length ?? 0,
           });
         } else {

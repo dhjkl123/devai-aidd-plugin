@@ -9,7 +9,7 @@
     "release": "node scripts/make-release.js",
     "pack": "npm run build && npm run release",
     "verify:release-gate": "node scripts/verify-release-gate.js",
-    "test": "node --check src/index.js && node --check scripts/build.js && node --check scripts/make-release.js && node tests/regression.test.js && node tests/e2e/scenario-workflow-detection.test.js && node tests/e2e/scenario-readiness-not-initialized.test.js && node tests/e2e/scenario-approval-deny-recovery.test.js && node tests/e2e/scenario-file-edited-tracking.test.js && node tests/e2e/scenario-init-chain.test.js"
+    "test": "node --check src/index.js && node --check scripts/build.js && node --check scripts/make-release.js && node tests/unit/build-question-instruction.test.js && node tests/regression.test.js && node tests/e2e/scenario-workflow-detection.test.js && node tests/e2e/scenario-readiness-not-initialized.test.js && node tests/e2e/scenario-approval-deny-recovery.test.js && node tests/e2e/scenario-file-edited-tracking.test.js && node tests/e2e/scenario-init-chain.test.js"
   },
   "dependencies": {
     "ajv": "8.17.1"

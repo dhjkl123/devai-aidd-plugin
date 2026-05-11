@@ -489,6 +489,21 @@ async function handleQuestionReplied({ event, deps }) {
 
   const outcome = parseApprovalAnswerOutcome(answer);
   clearPendingApprovalQuestion(deps.workflowState, sessionID);
+
+  // strengthen-approval-prompt-instructions follow-up: preserve the raw
+  // user-facing answer on `approvalCurrent` so the executor can disambiguate
+  // multiple ACCEPT-style options that share the same outcome (e.g.
+  // "Add to .gitignore and Commit" vs "Commit Anyway" both resolve to
+  // "accept" but require different executor branches).
+  if (state?.approvalCurrent && typeof answer === "string" && answer.length > 0) {
+    safeWorkflowStateUpdate(deps.workflowState, sessionID, {
+      approvalCurrent: {
+        ...state.approvalCurrent,
+        userAnswer: answer,
+      },
+    });
+  }
+
   await resolveApprovalOrRecovery({
     workflowState: deps.workflowState,
     audit: deps.audit,

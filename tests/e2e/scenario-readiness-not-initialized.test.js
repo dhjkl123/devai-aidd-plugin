@@ -176,12 +176,33 @@ async function bashGitBlockedWhileInitPending() {
       `bash+git throw message must match canonical; got ${JSON.stringify(thrown.message)}`,
     );
 
-    // Non-git bash command must pass through.
-    await handlers["tool.execute.before"]({
-      sessionID,
-      tool: "bash",
-      args: { command: "ls" },
-    });
+    // Non-git bash command: Layer 1 (BASH_GIT_BLOCK_MESSAGE) must NOT fire
+    // for `ls`. However, Layer 0 (approval-pending block) now blocks every
+    // non-question tool while an approval is active -- so the call still
+    // throws, just with a different message that names "Initialize Git" as
+    // the pending approval rather than the legacy bash-git canonical text.
+    let bashLsError = null;
+    try {
+      await handlers["tool.execute.before"]({
+        sessionID,
+        tool: "bash",
+        args: { command: "ls" },
+      });
+    } catch (error) {
+      bashLsError = error;
+    }
+    if (bashLsError) {
+      assert.doesNotMatch(
+        bashLsError.message,
+        /git repository must be initialized before running git commands/,
+        "non-git bash must NOT trigger the bash+git canonical message (Layer 1)",
+      );
+      assert.match(
+        bashLsError.message,
+        /an approval is pending/,
+        "non-git bash should still be gated by Layer 0 while an approval is active",
+      );
+    }
   } finally {
     cleanupTempWorkspace(directory);
   }
@@ -223,16 +244,18 @@ async function initAcceptCreatesGitDir() {
       true,
       "git init must create .git directory after accept",
     );
-    // .gitignore must exist with the DEFAULT_GITIGNORE_LINES contents.
+    // strengthen-approval-prompt-instructions follow-up: .gitignore is no
+    // longer auto-written at init time. The baseline-commit prompt now asks
+    // the user explicitly ("Setup .gitignore and Commit" option), and the
+    // executor branch in execute-approved-action.js writes the template.
+    // At this point in the scenario (just after init accept, before
+    // baseline-commit reply) the .gitignore should NOT exist yet.
     const gitignorePath = path.join(directory, ".gitignore");
-    assert.equal(fs.existsSync(gitignorePath), true, ".gitignore must be auto-written");
-    const gitignoreBody = fs.readFileSync(gitignorePath, "utf8");
-    for (const line of ["node_modules/", "dist/", ".env", "_bmad-output/", ".claude/"]) {
-      assert.ok(
-        gitignoreBody.includes(line),
-        `default .gitignore must include ${line}; got: ${gitignoreBody}`,
-      );
-    }
+    assert.equal(
+      fs.existsSync(gitignorePath),
+      false,
+      ".gitignore must NOT be auto-written at init time (created at baseline-commit accept instead)",
+    );
   } finally {
     cleanupTempWorkspace(directory);
   }

@@ -137,6 +137,22 @@ function createGitWorkspace({ initialize = false, withRemote = false } = {}) {
       cwd: tempRoot,
       stdio: "pipe",
     });
+    // strengthen-approval-prompt-instructions follow-up: branch planning is
+    // now suppressed when readiness reports hasCommit === false (HEAD-absent
+    // repo). Tests that rely on branch chain behavior need at least one
+    // commit so readiness reports hasCommit === true.
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: tempRoot,
+      stdio: "pipe",
+    });
+    execFileSync("git", ["config", "user.name", "Test"], {
+      cwd: tempRoot,
+      stdio: "pipe",
+    });
+    execFileSync("git", ["commit", "--allow-empty", "-m", "baseline"], {
+      cwd: tempRoot,
+      stdio: "pipe",
+    });
   }
 
   if (withRemote) {
@@ -185,7 +201,17 @@ async function runToolReadBefore(handlers) {
     args: {},
   };
   const output = { args: {} };
-  await handlers["tool.execute.before"](input, output);
+  // strengthen-approval-prompt-instructions follow-up: Layer 0 of the
+  // tool-execute-before guard now blocks ALL non-question tools while an
+  // approval is active (legacy-pattern dead-end). Capture the error so the
+  // parity check still works -- wrapper and built must throw the same thing.
+  let error = null;
+  try {
+    await handlers["tool.execute.before"](input, output);
+  } catch (caught) {
+    error = caught;
+  }
+  return error;
 }
 
 async function runToolMutatingBefore(handlers, options = {}) {
@@ -288,8 +314,13 @@ async function main() {
       "built prompts differ from wrapper (approval prompt parity)",
     );
 
-    await runToolReadBefore(wrapper.handlers);
-    await runToolReadBefore(built.handlers);
+    const wrapperReadError = await runToolReadBefore(wrapper.handlers);
+    const builtReadError = await runToolReadBefore(built.handlers);
+    assert.equal(
+      builtReadError?.message,
+      wrapperReadError?.message,
+      "built tool-read error differs from wrapper (Layer 0 parity)",
+    );
 
     const wrapperError = await runToolMutatingBefore(wrapper.handlers);
     const builtError = await runToolMutatingBefore(built.handlers);
@@ -507,10 +538,17 @@ async function main() {
       { command: "/bmad-bmm-quick-dev", arguments: "first", sessionID: "s-re" },
       { parts: [] },
     );
-    await reWrapper.handlers["tool.execute.before"](
-      { sessionID: "s-re", tool: "read", args: {} },
-      { args: {} },
-    );
+    // Layer 0 (approval-pending block) may throw here because approvalCurrent
+    // is active right after command.execute.before published a proposal. The
+    // throw is by design -- this test only cares about the audit event count.
+    try {
+      await reWrapper.handlers["tool.execute.before"](
+        { sessionID: "s-re", tool: "read", args: {} },
+        { args: {} },
+      );
+    } catch {
+      // expected when Layer 0 fires
+    }
     const reFirstAuditCount = reWrapper.mock.logs.filter(
       (l) => l.body?.message === "workflow.detected",
     ).length;
@@ -11735,6 +11773,12 @@ async function verifyAliasExportRemoved() {
 async function verifyStartInstructionTextSimplified() {
   const wrapperMod = await import(`${wrapperModuleUrl}?ac7=${Date.now()}`);
   const tempRoot = createTempWorkspace();
+  // strengthen-git-init-proposal: when the temp workspace is NOT a git repo,
+  // `buildStartInstructionText` returns a multi-line block including the
+  // init-prompt guidance. This test specifically verifies the simplified
+  // Option B start text (the single-line guard sentence). Initialize git in
+  // the temp dir so readiness === "allow" and the simple form is emitted.
+  execFileSync("git", ["init", "--quiet"], { cwd: tempRoot, stdio: "pipe" });
   try {
     const mock = createMockClient();
     const handlers = await wrapperMod.DevaiAiddGuardPlugin({
@@ -11747,8 +11791,15 @@ async function verifyStartInstructionTextSimplified() {
       output,
     );
 
-    const guardParts = output.parts.filter(
-      (p) => p?.text === "Git workflow guard is active for /bmad-bmm-quick-dev.",
+    // strengthen-approval-prompt-instructions follow-up: the start text may now
+    // be either the short Option B guard line (no active approval, e.g. a
+    // policy without branch requirement) OR a multi-line strong instruction
+    // (active approval present). In both cases the FIRST line is the canonical
+    // `Git workflow guard is active for /<cmd>.` guard sentence -- assert via
+    // startsWith so the test passes for both shapes.
+    const guardParts = output.parts.filter((p) =>
+      typeof p?.text === "string" &&
+      p.text.startsWith("Git workflow guard is active for /bmad-bmm-quick-dev."),
     );
     assert.equal(
       guardParts.length,
@@ -11816,10 +11867,24 @@ async function verifyMutatingToolThrowMessagePreserved() {
       thrown = error;
     }
     assert.ok(thrown, "verifyMutatingToolThrowMessagePreserved: mutating tool must throw");
-    assert.equal(
+    // strengthen-approval-prompt-instructions follow-up: when an approval is
+    // active for this session, Layer 0 (approval-pending block) supersedes
+    // Layer 3 (mutating-tool guard) -- the legacy "create or switch to
+    // branch" message is no longer the first line of defense. Verify the new
+    // Layer 0 contract instead. Layer 3 message remains in source as a
+    // fallback for the "workflow in progress, no active approval" case.
+    assert.match(
       thrown.message,
-      "Git workflow guard: create or switch to branch `workflow` before editing files for /bmad-bmm-quick-dev.",
-      `verifyMutatingToolThrowMessagePreserved: throw message must match byte-for-byte; got ${JSON.stringify(thrown.message)}`,
+      /^Git workflow guard: an approval is pending and you must call the question tool/,
+      `verifyMutatingToolThrowMessagePreserved: Layer 0 must fire first; got ${JSON.stringify(thrown.message)}`,
+    );
+    // createTempWorkspace() does not initialize git, so readiness produces an
+    // init proposal -- not a branch proposal. The active approval header is
+    // therefore `Initialize Git`, not `Create Branch`.
+    assert.match(
+      thrown.message,
+      /header `Initialize Git`/,
+      "verifyMutatingToolThrowMessagePreserved: Layer 0 message must include the canonical header from buildQuestionInstruction",
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -12442,7 +12507,315 @@ main()
   // Native event contract — opencode native plugin (.opencode/plugins)
   .then(() => verifyNativeEventHandlerExists())
   .then(() => verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks())
+  // strengthen-approval-prompt-instructions — promptAsync instruction strengthening
+  .then(() => verifyQuestionInstructionBuilderContract())
+  // question-header guard — force model to use the exact header we staged
+  .then(() => verifyQuestionHeaderGuardMatchesActiveApproval())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;
   });
+
+/**
+ * strengthen-approval-prompt-instructions:
+ *
+ * 1. `src/services/approval/build-question-instruction.js` exports
+ *    `buildQuestionInstruction` and produces the expected header/options for
+ *    each canonical actionType (init, commit+baseline-commit, commit,
+ *    branch/create, branch/switch, push).
+ * 2. `src/index.js` imports the builder so the promptAsync channel actually
+ *    routes through it (static drift guard).
+ * 3. `APPROVAL_OUTCOME_ALIASES["create baseline commit"] === "accept"` so the
+ *    native question label normalizes back to ACCEPT.
+ * 4. The alias-disjointness invariant continues to hold after the new entry.
+ */
+async function verifyQuestionInstructionBuilderContract() {
+  const builderModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "services", "approval", "build-question-instruction.js"),
+  ).href;
+  const aliasesModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "services", "approval", "permission-asked-aliases.js"),
+  ).href;
+  const indexModulePath = path.join(projectRoot, "src", "index.js");
+
+  const indexSource = fs.readFileSync(indexModulePath, "utf8");
+  assert.match(
+    indexSource,
+    /import\s*\{\s*buildQuestionInstruction\s*\}\s*from\s*["'][^"']*build-question-instruction\.js["']/,
+    "verifyQuestionInstructionBuilderContract: src/index.js must import buildQuestionInstruction",
+  );
+
+  const { buildQuestionInstruction } = await import(`${builderModuleUrl}?qi=${Date.now()}`);
+  assert.equal(
+    typeof buildQuestionInstruction,
+    "function",
+    "verifyQuestionInstructionBuilderContract: builder export must be a function",
+  );
+
+  const cases = [
+    {
+      input: { commandName: "x", actionType: "init", proposal: null },
+      header: "Initialize Git",
+      firstOption: "Initialize Git (Recommended)",
+    },
+    {
+      input: {
+        commandName: "x",
+        actionType: "commit",
+        proposal: { kind: "commit", action: "baseline-commit" },
+      },
+      header: "Create Baseline Commit",
+      firstOption: "Setup .gitignore and Commit (Recommended)",
+    },
+    {
+      input: {
+        commandName: "x",
+        actionType: "commit",
+        proposal: { kind: "commit", action: "commit" },
+      },
+      header: "Finalize Changes",
+      firstOption: "Approve (Recommended)",
+    },
+    {
+      input: {
+        commandName: "x",
+        actionType: "branch/create",
+        proposal: { kind: "branch", action: "create", name: "feat/foo" },
+      },
+      header: "Create Branch",
+      firstOption: "Approve (Recommended)",
+    },
+    {
+      input: {
+        commandName: "x",
+        actionType: "branch/switch",
+        proposal: { kind: "branch", action: "switch", name: "feat/bar" },
+      },
+      header: "Switch Branch",
+      firstOption: "Approve (Recommended)",
+    },
+    {
+      input: {
+        commandName: "x",
+        actionType: "push",
+        proposal: { kind: "push", action: "push" },
+      },
+      header: "Push Changes",
+      firstOption: "Approve (Recommended)",
+    },
+  ];
+
+  for (const c of cases) {
+    const r = buildQuestionInstruction(c.input);
+    assert.equal(
+      r.header,
+      c.header,
+      `verifyQuestionInstructionBuilderContract: header mismatch for actionType=${c.input.actionType}`,
+    );
+    assert.equal(
+      r.options[0],
+      c.firstOption,
+      `verifyQuestionInstructionBuilderContract: first option mismatch for actionType=${c.input.actionType}`,
+    );
+    assert.ok(
+      typeof r.instructionText === "string" && r.instructionText.length > 0,
+      `verifyQuestionInstructionBuilderContract: instructionText empty for actionType=${c.input.actionType}`,
+    );
+  }
+
+  // Adversarial F1 regression guard: bare "branch" actionType must NOT match
+  // the slash-segmented branch cases. It falls through to "Approval Required".
+  const bareBranchResult = buildQuestionInstruction({
+    commandName: "x",
+    actionType: "branch",
+    proposal: { kind: "branch", action: "create", name: "feat/foo" },
+  });
+  assert.equal(
+    bareBranchResult.header,
+    "Approval Required",
+    "verifyQuestionInstructionBuilderContract: bare 'branch' actionType must fall through to Approval Required (F1)",
+  );
+
+  // Adversarial F2 regression guard: leading slash in commandName is stripped.
+  const slashCommandResult = buildQuestionInstruction({
+    commandName: "/bmad-bmm-create-prd",
+    actionType: "init",
+    proposal: null,
+  });
+  assert.doesNotMatch(
+    slashCommandResult.instructionText,
+    /\/\/bmad-bmm-create-prd/,
+    "verifyQuestionInstructionBuilderContract: commandName with leading slash must not produce double slash (F2)",
+  );
+
+  const { APPROVAL_OUTCOME_ALIASES } = await import(`${aliasesModuleUrl}?qi=${Date.now()}`);
+  assert.equal(
+    APPROVAL_OUTCOME_ALIASES["create baseline commit"],
+    "accept",
+    "verifyQuestionInstructionBuilderContract: APPROVAL_OUTCOME_ALIASES['create baseline commit'] must be 'accept'",
+  );
+
+  console.log("verifyQuestionInstructionBuilderContract OK");
+}
+
+/**
+ * question-header guard:
+ *
+ * When an approval is pending (workflowState.approvalCurrent set) and the
+ * model calls the native `question` tool, the tool args MUST carry the same
+ * header the builder produces for that approval. If the model paraphrases
+ * (observed in production: "Initialize Git" -> "초기화 확인"), the hook
+ * throws and forces a retry. We verify both the throw path and the
+ * pass-through path here.
+ */
+async function verifyQuestionHeaderGuardMatchesActiveApproval() {
+  const hookModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "hooks", "tool-execute-before.js"),
+  ).href;
+  const workflowStateModuleUrlLocal = pathToFileURL(
+    path.join(projectRoot, "src", "services", "workflow", "workflow-state.js"),
+  ).href;
+
+  const { createToolExecuteBeforeHook } = await import(`${hookModuleUrl}?qhg=${Date.now()}`);
+  const { createWorkflowStateStore } = await import(
+    `${workflowStateModuleUrlLocal}?qhg=${Date.now()}`
+  );
+
+  // Set up workflowState with an active init approval.
+  const workflowState = createWorkflowStateStore();
+  const sessionID = "qhg-session";
+  workflowState.set(sessionID, {
+    sessionID,
+    commandName: "bmad-bmm-create-prd",
+    approvalCurrent: {
+      sessionID,
+      workflow: "bmad-bmm-create-prd",
+      command: "bmad-bmm-create-prd",
+      actionType: "init",
+      proposal: { kind: "init", action: "git-init" },
+      status: "awaitingApproval",
+    },
+    pendingApprovalQuestion: null,
+  });
+
+  // pluginContext.directory points to a real path (existsSync(".git") may be
+  // true or false — irrelevant for this layer since `question` is the tool).
+  const hook = createToolExecuteBeforeHook({
+    workflowState,
+    pluginContext: { directory: projectRoot },
+  });
+
+  // Case 1: wrong header -> throw.
+  let thrown = null;
+  try {
+    await hook({
+      tool: "question",
+      sessionID,
+      args: { header: "초기화 확인", options: ["이대로 진행", "추가 문서 있음"] },
+    });
+  } catch (error) {
+    thrown = error;
+  }
+  assert.ok(
+    thrown,
+    "verifyQuestionHeaderGuardMatchesActiveApproval: hook must throw when question header does not match active approval",
+  );
+  assert.match(
+    thrown.message,
+    /Initialize Git/,
+    "verifyQuestionHeaderGuardMatchesActiveApproval: throw message must name the expected header (`Initialize Git`)",
+  );
+  assert.match(
+    thrown.message,
+    /Initialize Git \(Recommended\)/,
+    "verifyQuestionHeaderGuardMatchesActiveApproval: throw message must include the expected options",
+  );
+
+  // Case 2: correct header -> pass.
+  let secondError = null;
+  try {
+    await hook({
+      tool: "question",
+      sessionID,
+      args: { header: "Initialize Git", options: ["Initialize Git (Recommended)", "Cancel"] },
+    });
+  } catch (error) {
+    secondError = error;
+  }
+  assert.equal(
+    secondError,
+    null,
+    "verifyQuestionHeaderGuardMatchesActiveApproval: hook must pass through when question header matches active approval",
+  );
+
+  // Case 3: pendingApprovalQuestion already recorded (model already asked) -> pass.
+  workflowState.set(sessionID, {
+    ...workflowState.get(sessionID),
+    pendingApprovalQuestion: { questionID: "q-1" },
+  });
+  let thirdError = null;
+  try {
+    await hook({
+      tool: "question",
+      sessionID,
+      args: { header: "follow-up", options: ["yes", "no"] },
+    });
+  } catch (error) {
+    thirdError = error;
+  }
+  assert.equal(
+    thirdError,
+    null,
+    "verifyQuestionHeaderGuardMatchesActiveApproval: hook must NOT block a question once pendingApprovalQuestion is recorded",
+  );
+
+  // Case 4: no active approval -> pass (non-workflow question).
+  const workflowState2 = createWorkflowStateStore();
+  workflowState2.set("other-session", {
+    sessionID: "other-session",
+    commandName: null,
+    approvalCurrent: null,
+  });
+  const hook2 = createToolExecuteBeforeHook({
+    workflowState: workflowState2,
+    pluginContext: { directory: projectRoot },
+  });
+  let fourthError = null;
+  try {
+    await hook2({
+      tool: "question",
+      sessionID: "other-session",
+      args: { header: "anything", options: ["a", "b"] },
+    });
+  } catch (error) {
+    fourthError = error;
+  }
+  assert.equal(
+    fourthError,
+    null,
+    "verifyQuestionHeaderGuardMatchesActiveApproval: hook must NOT block a question when no approval is active",
+  );
+
+  // Case 5: questions[0].header nested form -> matches expected header.
+  workflowState.set(sessionID, {
+    ...workflowState.get(sessionID),
+    pendingApprovalQuestion: null,
+  });
+  let fifthError = null;
+  try {
+    await hook({
+      tool: "question",
+      sessionID,
+      args: { questions: [{ header: "Initialize Git", options: ["Initialize Git (Recommended)", "Cancel"] }] },
+    });
+  } catch (error) {
+    fifthError = error;
+  }
+  assert.equal(
+    fifthError,
+    null,
+    "verifyQuestionHeaderGuardMatchesActiveApproval: hook must accept questions[0].header form when it matches expected",
+  );
+
+  console.log("verifyQuestionHeaderGuardMatchesActiveApproval OK");
+}

@@ -55,13 +55,22 @@ export function buildInitProposal({ directory, reason, correlationId } = {}) {
  * `proposal.reason === "baseline-commit"` is informational and is preserved
  * so audit consumers can recognize the chain origin without parsing `action`.
  *
+ * strengthen-approval-prompt-instructions follow-up: the proposal also
+ * carries a `sensitiveFiles` / `sensitiveRules` pair derived by scanning the
+ * `files` list against `SENSITIVE_FILE_PATTERNS`. Empty arrays mean no
+ * sensitive matches; non-empty arrays drive `buildQuestionInstruction` to
+ * switch to the "Sensitive Files Detected" prompt variant.
+ *
  * @param {{ directory: string, files?: string[]|null, sessionID: string, correlationId?: string|null }} input
  */
+import { detectSensitiveFiles } from "./init-service.js";
+
 export function buildBaselineCommitProposal({ directory, files, sessionID, correlationId } = {}) {
   const dir = typeof directory === "string" ? directory : "";
   const sid = typeof sessionID === "string" && sessionID.length > 0 ? sessionID : "no-session";
   const filesArray = Array.isArray(files) ? [...files] : [];
   const allowEmpty = filesArray.length === 0;
+  const sensitive = detectSensitiveFiles(filesArray);
   return {
     kind: "commit",
     action: "baseline-commit",
@@ -71,6 +80,8 @@ export function buildBaselineCommitProposal({ directory, files, sessionID, corre
     allowEmpty,
     directory: dir,
     requiresApproval: true,
+    sensitiveFiles: sensitive.files,
+    sensitiveRules: sensitive.rules,
     correlationId:
       typeof correlationId === "string" && correlationId.length > 0
         ? correlationId

@@ -74,9 +74,17 @@ async function fullInitChain() {
       },
     });
 
-    // Verify real .git + .gitignore + that no commit exists yet.
+    // Verify real .git exists. .gitignore is NO LONGER auto-written at init
+    // time -- the unified baseline-commit prompt now asks the user explicitly
+    // (Setup .gitignore and Commit / Commit Without .gitignore / Skip) and
+    // the executor writes the template only when the user picks the setup
+    // option.
     assert.equal(fs.existsSync(path.join(directory, ".git")), true, ".git directory must exist");
-    assert.equal(fs.existsSync(path.join(directory, ".gitignore")), true, ".gitignore must be auto-written");
+    assert.equal(
+      fs.existsSync(path.join(directory, ".gitignore")),
+      false,
+      ".gitignore must NOT be auto-written at init time (created at baseline-commit accept instead)",
+    );
     // HEAD has no commits yet → `rev-parse HEAD` fails with code 128.
     const preCommitHead = gitOk(directory, ["rev-parse", "HEAD"]);
     assert.equal(preCommitHead, null, "no commit must exist yet before baseline commit");
@@ -87,6 +95,32 @@ async function fullInitChain() {
     );
     assert.ok(baselinePrompt, "baseline commit approval prompt must follow init accept");
 
+    // strengthen-approval-prompt-instructions (AC11): plugin-emitted metadata
+    // must carry the new "Create Baseline Commit" header and option labels,
+    // and the prompt body must start with the builder's strong instruction
+    // text (not the prior weak "Ask the user with the question tool..." line).
+    const baselineMd = baselinePrompt.parts[0].metadata;
+    assert.equal(
+      baselineMd.questionHeader,
+      "Create Baseline Commit",
+      "baseline commit prompt metadata.questionHeader must be 'Create Baseline Commit'",
+    );
+    assert.deepEqual(
+      baselineMd.questionOptions,
+      [
+        "Setup .gitignore and Commit (Recommended)",
+        "Commit Without .gitignore",
+        "Skip",
+      ],
+      "baseline commit prompt metadata.questionOptions must enumerate the new unified 3-option set",
+    );
+    const baselineText = baselinePrompt.parts[0].text || "";
+    assert.match(
+      baselineText,
+      /Ask the user the `Create Baseline Commit` question with these exact options:/,
+      "baseline commit prompt body must include the strong builder instruction line",
+    );
+
     // Configure git author so commit can land.
     execFileSync("git", ["config", "user.email", "e2e@example.com"], { cwd: directory, stdio: "pipe" });
     execFileSync("git", ["config", "user.name", "E2E Chain"], { cwd: directory, stdio: "pipe" });
@@ -96,7 +130,7 @@ async function fullInitChain() {
     await handlers.event({
       event: {
         type: "question.asked",
-        properties: { sessionID, id: commitQID, header: "Finalize Changes" },
+        properties: { sessionID, id: commitQID, header: "Create Baseline Commit" },
       },
     });
     await handlers.event({
@@ -105,7 +139,9 @@ async function fullInitChain() {
         properties: {
           sessionID,
           requestID: commitQID,
-          answers: [["Approve (Recommended)"]],
+          // Pick "Setup .gitignore and Commit (Recommended)" -- exercises the
+          // new gitignore-writing executor branch end-to-end.
+          answers: [["Setup .gitignore and Commit (Recommended)"]],
         },
       },
     });
