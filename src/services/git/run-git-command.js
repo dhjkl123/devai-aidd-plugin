@@ -5,6 +5,7 @@ const execFileAsync = promisify(execFile);
 
 const ALLOWED_COMMANDS = new Map([
   ["rev-parse-inside-work-tree", ["rev-parse", "--is-inside-work-tree"]],
+  ["rev-parse-head", ["rev-parse", "HEAD"]],
   ["symbolic-ref-short-head", ["symbolic-ref", "--short", "HEAD"]],
   ["remote-verbose", ["remote", "-v"]],
   ["status-porcelain", ["status", "--short", "--untracked-files=all"]],
@@ -75,14 +76,27 @@ export function buildCommitArgs(action) {
   if (!action || typeof action !== "object") {
     throw new Error("A valid commit action is required.");
   }
-  if (!Array.isArray(action.files) || action.files.length === 0) {
-    throw new Error("Commit actions require at least one file.");
-  }
 
   const message =
     typeof action.message === "string" && action.message.length > 0
       ? action.message
       : "Finish workflow outputs";
+
+  // Baseline commit case (post-`git init` with no working tree changes).
+  // `allowEmpty: true` swaps the standard `add + commit -- <pathspec>` for a
+  // single `commit --allow-empty -m <message>` so a fresh repository can land
+  // its first commit and grow a HEAD ref. The pathspec is omitted because
+  // there are no files to scope to.
+  if (action.allowEmpty === true) {
+    return {
+      addArgs: null,
+      commitArgs: ["commit", "--allow-empty", "-m", message],
+    };
+  }
+
+  if (!Array.isArray(action.files) || action.files.length === 0) {
+    throw new Error("Commit actions require at least one file.");
+  }
 
   return {
     addArgs: ["add", "-A", "--", ...action.files],
@@ -131,7 +145,9 @@ export async function runGitAction({ directory, action, timeoutMs = 5000 } = {})
 
   if (action.kind === "commit") {
     const { addArgs, commitArgs } = buildCommitArgs(action);
-    await execGit(directory, addArgs, timeoutMs);
+    if (Array.isArray(addArgs) && addArgs.length > 0) {
+      await execGit(directory, addArgs, timeoutMs);
+    }
     const stdout = await execGit(directory, commitArgs, timeoutMs);
     return { stdout, observedState: null };
   }
@@ -139,6 +155,15 @@ export async function runGitAction({ directory, action, timeoutMs = 5000 } = {})
   if (action.kind === "push") {
     const args = buildPushArgs(action);
     const stdout = await execGit(directory, args, timeoutMs);
+    return { stdout, observedState: null };
+  }
+
+  if (action.kind === "init") {
+    // ALLOWED_COMMANDS is intentionally untouched — that allowlist scopes the
+    // read-only readiness probes invoked via `runGitCommand`. `runGitAction`
+    // dispatches on `action.kind` and is the canonical write path; init joins
+    // commit/push here without traversing the read-only allowlist.
+    const stdout = await execGit(directory, ["init"], timeoutMs);
     return { stdout, observedState: null };
   }
 

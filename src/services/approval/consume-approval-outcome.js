@@ -147,6 +147,48 @@ export function consumeApprovalOutcome({
       proposalCleanup.pushProposal = null;
     } else if (resolution.actionKind === "commit") {
       proposalCleanup.commitProposal = null;
+      // strengthen-approval-prompt-instructions follow-up: when the user
+      // skips a baseline-commit, set a workflow-scope flag so subsequent
+      // command.execute.before passes can short-circuit branch planning.
+      // Without this, the next workflow trigger would re-publish a
+      // branchProposal even though there is no HEAD to branch from.
+      // Detect via request.proposal.action === "baseline-commit" (the
+      // build-init-proposal single-writer discriminator).
+      if (
+        outcome === APPROVAL_OUTCOMES.IGNORE_AND_CONTINUE &&
+        request?.proposal?.action === "baseline-commit"
+      ) {
+        proposalCleanup.baselineSkipped = true;
+        // Also clear any branchProposal / pushProposal slot left over from
+        // the initial command.execute.before pass. Without this, the next
+        // publishNextPlannedAction picks up the stale branchProposal and
+        // publishes a branch prompt even though we opted out of git
+        // automation entirely. shouldSkipBranchPlanning prevents *new* slot
+        // generation; this clears any *existing* slot.
+        proposalCleanup.branchProposal = null;
+        proposalCleanup.pushProposal = null;
+      }
+    } else if (resolution.actionKind === "init") {
+      // strengthen-git-init-proposal Task 6: DENY/IGNORE on init must clear the
+      // proposal slot, otherwise `selectNextPlannedAction` would re-publish the
+      // same init prompt on the next planning pass. ACCEPT clears the slot
+      // inside the executor (`execute-approved-action.js`) only on success;
+      // ACCEPT-with-failure intentionally leaves the slot so the recovery
+      // gate's "Retry" choice can re-publish.
+      proposalCleanup.initProposal = null;
+      // strengthen-approval-prompt-instructions follow-up: when the user
+      // picks "Skip" on the Initialize Git prompt (IGNORE_AND_CONTINUE),
+      // set a workflow-scope flag so the next command.execute.before passes
+      // do NOT re-publish an init proposal and do NOT plan a branch chain.
+      // The workflow continues without any git automation in this session.
+      // Clear every downstream proposal slot too -- once init is skipped,
+      // no baseline/branch/push can ever run for this session.
+      if (outcome === APPROVAL_OUTCOMES.IGNORE_AND_CONTINUE) {
+        proposalCleanup.gitInitSkipped = true;
+        proposalCleanup.branchProposal = null;
+        proposalCleanup.commitProposal = null;
+        proposalCleanup.pushProposal = null;
+      }
     }
   }
 

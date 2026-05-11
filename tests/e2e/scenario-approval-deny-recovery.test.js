@@ -120,6 +120,121 @@ async function permissionAskedNeverThrowsOnUnknownPayload() {
   }
 }
 
+async function nativeQuestionRepliedDenyOpensRecovery() {
+  const directory = createTempWorkspace({ initializeGit: true, withInitialCommit: true });
+  try {
+    const { handlers, mock } = await bootstrapPlugin(directory);
+    const sessionID = "e2e-native-deny";
+
+    await handlers.event({
+      event: {
+        type: "command.executed",
+        properties: {
+          sessionID,
+          name: "/bmad-bmm-quick-dev",
+          arguments: "",
+        },
+      },
+    });
+
+    const approvalPrompt = findApprovalPrompt(mock.prompts);
+    assert.ok(approvalPrompt, "native command.executed must deliver approval prompt");
+    const { requestId } = readApprovalIdentifiers(approvalPrompt);
+    assert.ok(requestId, "approval prompt carries requestId");
+
+    const questionID = "native-deny-q";
+    await handlers.event({
+      event: {
+        type: "question.asked",
+        properties: {
+          sessionID,
+          id: questionID,
+          header: approvalPrompt.parts[0].metadata.questionHeader,
+        },
+      },
+    });
+
+    const promptsBeforeDeny = mock.prompts.length;
+    await handlers.event({
+      event: {
+        type: "question.replied",
+        properties: {
+          sessionID,
+          requestID: questionID,
+          answers: [["Deny"]],
+        },
+      },
+    });
+
+    const resolved = findAuditEvents(mock.logs, "approval.resolved");
+    assert.equal(resolved.length, 1, "approval.resolved fired exactly once");
+    assert.equal(resolved[0].outcome, "deny");
+
+    const gateOffered = findAuditEvents(mock.logs, "git.action.recovery.offered");
+    assert.ok(
+      gateOffered.length >= 1,
+      "native deny must open a recovery gate",
+    );
+
+    assert.ok(
+      mock.prompts.length > promptsBeforeDeny,
+      "native deny must deliver a recovery prompt",
+    );
+  } finally {
+    cleanupTempWorkspace(directory);
+  }
+}
+
+async function nativeQuestionRejectedTreatsAsDeny() {
+  const directory = createTempWorkspace({ initializeGit: true, withInitialCommit: true });
+  try {
+    const { handlers, mock } = await bootstrapPlugin(directory);
+    const sessionID = "e2e-native-rejected";
+
+    await handlers.event({
+      event: {
+        type: "command.executed",
+        properties: {
+          sessionID,
+          name: "/bmad-bmm-quick-dev",
+          arguments: "",
+        },
+      },
+    });
+
+    const approvalPrompt = findApprovalPrompt(mock.prompts);
+    assert.ok(approvalPrompt, "native command.executed must deliver approval prompt");
+
+    const questionID = "native-rejected-q";
+    await handlers.event({
+      event: {
+        type: "question.asked",
+        properties: {
+          sessionID,
+          id: questionID,
+          header: approvalPrompt.parts[0].metadata.questionHeader,
+        },
+      },
+    });
+
+    await handlers.event({
+      event: {
+        type: "question.rejected",
+        properties: {
+          sessionID,
+          requestID: questionID,
+        },
+      },
+    });
+
+    const resolved = findAuditEvents(mock.logs, "approval.resolved");
+    assert.equal(resolved.length, 1, "question.rejected must produce exactly one approval.resolved");
+    assert.equal(resolved[0].outcome, "deny");
+  } finally {
+    cleanupTempWorkspace(directory);
+  }
+}
+
 await runScenario(
   "approval deny: opens recovery gate and delivers recovery prompt",
   denyOpensRecoveryGateAndDeliversRecoveryPrompt,
@@ -127,4 +242,12 @@ await runScenario(
 await runScenario(
   "permission.asked never throws on unknown payload",
   permissionAskedNeverThrowsOnUnknownPayload,
+);
+await runScenario(
+  "native: question.replied deny opens recovery gate",
+  nativeQuestionRepliedDenyOpensRecovery,
+);
+await runScenario(
+  "native: question.rejected is treated as controlled deny",
+  nativeQuestionRejectedTreatsAsDeny,
 );
