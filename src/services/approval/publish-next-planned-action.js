@@ -27,6 +27,16 @@ export async function publishNextPlannedAction({
   const currentState = workflowState.get(workflowContext.sessionID);
   const gate = evaluateRequestGate(currentState);
 
+  pluginContext?.debug?.log?.("publishNextPlannedAction", "entered publish gate", {
+    sessionID: workflowContext.sessionID,
+    gateOutcome: gate.outcome,
+    gateReason: gate.reason,
+    hasInitProposal: currentState?.initProposal != null,
+    hasBranchProposal: currentState?.branchProposal != null,
+    hasCommitProposal: currentState?.commitProposal != null,
+    hasPushProposal: currentState?.pushProposal != null,
+  });
+
   if (gate.outcome === "allow") {
     const nextProposal = selectNextPlannedAction(currentState);
     const classified = classifyGitAction(nextProposal);

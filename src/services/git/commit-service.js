@@ -60,6 +60,10 @@ export function buildCommitAction(input = {}, options = {}) {
         : null,
     message: typeof input.message === "string" ? input.message : null,
     files: filesArray,
+    // strengthen-git-init-proposal Task 5: propagate the baseline-commit
+    // allowEmpty flag so `buildCommitArgs` can swap the standard
+    // `add + commit -- <pathspec>` for `commit --allow-empty -m <message>`.
+    allowEmpty: input.allowEmpty === true,
   };
 }
 

@@ -173,6 +173,16 @@ export const RUNTIME_CONFIG_SCHEMA = {
       // Allow forward-compatible audit transport keys.
       additionalProperties: true,
     },
+    debug: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+        logFilePath: { type: "string" },
+      },
+      // Forward-compat: future debug knobs (verbosity, scopes) can be added
+      // by callers without a schema bump.
+      additionalProperties: true,
+    },
   },
   // Top-level stays strict: any unknown top-level key is almost certainly a typo.
   additionalProperties: false,

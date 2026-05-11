@@ -604,6 +604,17 @@ export function createNativeEventHook(injections = {}) {
     const type = typeof event.type === "string" ? event.type : null;
     if (!type) return;
 
+    deps.pluginContext?.debug?.log?.("native-event", `received event.type=${type}`, {
+      sessionID: readSessionID(event?.properties),
+      props: event?.properties
+        ? {
+            name: event.properties.name ?? null,
+            id: event.properties.id ?? null,
+            requestID: event.properties.requestID ?? null,
+          }
+        : null,
+    });
+
     try {
       switch (type) {
         case "command.executed":

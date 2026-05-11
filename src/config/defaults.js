@@ -136,4 +136,20 @@ export const DEFAULT_PLUGIN_CONFIG = {
     logFilePath: "",
     httpEndpoint: "",
   },
+  debug: {
+    // Diagnostic logger gated by `enabled`. When true, the plugin appends a
+    // line-per-event log to `logFilePath` (or `.opencode/devai-aidd-debug.log`
+    // if blank) covering the init-prompt flow: bootstrap, command.executed,
+    // readiness check, init proposal generation, approval prompt delivery to
+    // the runtime client. Use this when the model is suspected of ignoring
+    // the question-tool instruction so you can pinpoint where the chain
+    // actually breaks.
+    //
+    // The log is intentionally separate from `audit` because audit is a
+    // structured stream consumed by ops, while `debug` is a one-shot
+    // troubleshooting trace meant to be tail'd by a human and cleared when
+    // the bug is reproduced.
+    enabled: false,
+    logFilePath: "",
+  },
 };

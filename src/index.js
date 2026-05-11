@@ -19,6 +19,7 @@ import {
   loadWorkflowCommands,
 } from "./config/load-config.js";
 import { createAuditLogger } from "./audit/logger.js";
+import { createDebugLogger } from "./audit/debug-logger.js";
 import { createWorkflowStateStore } from "./services/workflow/workflow-state.js";
 import { createCommandExecuteBeforeHook } from "./hooks/command-execute-before.js";
 import { createToolExecuteBeforeHook } from "./hooks/tool-execute-before.js";
@@ -120,6 +121,22 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     const workflowState = createWorkflowStateStore();
     const branchConfig = runtimeConfig.config.branch;
 
+    // strengthen-git-init-proposal D2/D3: optional diagnostic logger gated by
+    // `config.debug.enabled`. No-op when disabled. Surfaced through
+    // pluginContext.debug so any service or hook can append a trace line
+    // without taking a hard dependency on the logger module.
+    const debugLogger = createDebugLogger({
+      enabled: runtimeConfig.config?.debug?.enabled === true,
+      logFilePath: runtimeConfig.config?.debug?.logFilePath ?? "",
+      directory,
+    });
+    debugLogger.log("bootstrap", "plugin instance constructed", {
+      directory,
+      workflowCommandCount: workflowCommands.size,
+      hasGlobalConfig: runtimeConfig.sources.hasGlobalConfig,
+      hasProjectConfig: runtimeConfig.sources.hasProjectConfig,
+    });
+
     // Build pluginContext so downstream hook factories (Story 1.4+) and
     // approval hooks (Epic 2) can consume the resolver without re-loading config.
     //
@@ -131,6 +148,7 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     const pluginContext = {
       runtimeConfig,
       directory,
+      debug: debugLogger,
       gitRunner: runGitCommand,
       gitActionRunner: ({ action }) =>
         runGitAction({
@@ -157,6 +175,13 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       // explanation payload built by buildApprovalRequest — this adapter must
       // not recompose strings, only forward what the request already contains.
       async requestApproval(request) {
+        debugLogger.log("requestApproval", "received approval request", {
+          actionType: request?.actionType,
+          requestId: request?.id,
+          actionId: request?.actionId,
+          sessionID: request?.sessionID,
+          hasPromptAsync: typeof client?.session?.promptAsync === "function",
+        });
         if (client?.session?.promptAsync) {
           // Native event refactor: prepend a question-tool instruction so the
           // model asks the user via the native `question` tool with a stable
@@ -210,6 +235,18 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
                 },
               },
             ],
+          });
+          debugLogger.log("requestApproval", "prompt delivered to client.session.promptAsync", {
+            actionType: request?.actionType,
+            requestId: request?.id,
+            header: nativeHeader,
+            options: nativeOptions,
+            promptTextLength: promptText?.length ?? 0,
+          });
+        } else {
+          debugLogger.log("requestApproval", "SKIPPED — client.session.promptAsync is not a function", {
+            actionType: request?.actionType,
+            requestId: request?.id,
           });
         }
       },
@@ -285,7 +322,7 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       // workflowState today (phase advancement). pluginContext is unused by
       // these factories — keep the injection surface minimal so the contract
       // matches the consumer.
-      "tool.execute.before": createToolExecuteBeforeHook({ workflowState }),
+      "tool.execute.before": createToolExecuteBeforeHook({ workflowState, pluginContext }),
       "tool.execute.after": createToolExecuteAfterHook({
         workflowState,
         audit,

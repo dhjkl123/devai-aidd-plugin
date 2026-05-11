@@ -11827,6 +11827,202 @@ async function verifyMutatingToolThrowMessagePreserved() {
 }
 
 /**
+ * strengthen-git-init-proposal AC4: BASH_GIT_BLOCK_MESSAGE constant in
+ * src/hooks/tool-execute-before.js must match TD #3 canonical byte-for-byte,
+ * and the Error thrown by the bash+git block must carry that exact string.
+ */
+async function verifyBashGitBlockMessagePreserved() {
+  const toolBeforeModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "hooks", "tool-execute-before.js"),
+  ).href;
+  const mod = await import(`${toolBeforeModuleUrl}?bash-git=${Date.now()}`);
+  const CANONICAL =
+    "Git workflow guard: a git repository must be initialized before running git commands. Approve the pending \"Initialize Git\" prompt instead of running git directly.";
+  assert.equal(
+    mod.BASH_GIT_BLOCK_MESSAGE,
+    CANONICAL,
+    `verifyBashGitBlockMessagePreserved: exported constant must match TD #3 canonical byte-for-byte; got ${JSON.stringify(mod.BASH_GIT_BLOCK_MESSAGE)}`,
+  );
+
+  // Wire up the hook with an init proposal pending and verify the throw.
+  const { createWorkflowStateStore } = await import(workflowStateModuleUrl);
+  const store = createWorkflowStateStore();
+  const sessionID = "bash-git-block-canonical";
+  store.set(sessionID, {
+    sessionID,
+    initProposal: { kind: "init", action: "git-init" },
+  });
+  const hook = mod.createToolExecuteBeforeHook({
+    workflowState: store,
+    pluginContext: { directory: "/no/such/path/that/is/not/a/git/repo" },
+  });
+
+  let thrown = null;
+  try {
+    await hook({ sessionID, tool: "bash", args: { command: "git status" } });
+  } catch (error) {
+    thrown = error;
+  }
+  assert.ok(thrown, "verifyBashGitBlockMessagePreserved: bash+git must throw when init proposal pending");
+  assert.equal(
+    thrown.message,
+    CANONICAL,
+    `verifyBashGitBlockMessagePreserved: Error.message must match canonical byte-for-byte; got ${JSON.stringify(thrown.message)}`,
+  );
+}
+
+/**
+ * strengthen-git-init-proposal AC1b: when the working directory is not a git
+ * repository, the block fires even without a workflow session (race-safe path
+ * — F2/F3). pluginContext.directory drives the `.git` existence check.
+ */
+async function verifyBashGitBlockFiresWithoutWorkflowSession() {
+  const toolBeforeModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "hooks", "tool-execute-before.js"),
+  ).href;
+  const mod = await import(`${toolBeforeModuleUrl}?bash-git-race=${Date.now()}`);
+  const { createWorkflowStateStore } = await import(workflowStateModuleUrl);
+
+  const store = createWorkflowStateStore();
+  const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-no-git-"));
+  try {
+    const hook = mod.createToolExecuteBeforeHook({
+      workflowState: store,
+      pluginContext: { directory: nonGitDir },
+    });
+
+    let thrown = null;
+    try {
+      await hook({ sessionID: "no-workflow", tool: "bash", args: { command: "git status" } });
+    } catch (error) {
+      thrown = error;
+    }
+    assert.ok(
+      thrown,
+      "verifyBashGitBlockFiresWithoutWorkflowSession: must throw on bash+git in non-git directory even without workflow session",
+    );
+    assert.equal(thrown.message, mod.BASH_GIT_BLOCK_MESSAGE);
+  } finally {
+    fs.rmSync(nonGitDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * strengthen-git-init-proposal AC2: false-positive guard. A bash+git call
+ * inside an actual git repo with no init proposal must NOT throw.
+ */
+async function verifyBashGitBlockSkippedInGitRepo() {
+  const toolBeforeModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "hooks", "tool-execute-before.js"),
+  ).href;
+  const mod = await import(`${toolBeforeModuleUrl}?bash-git-skip=${Date.now()}`);
+  const { createWorkflowStateStore } = await import(workflowStateModuleUrl);
+
+  const store = createWorkflowStateStore();
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-real-git-"));
+  fs.mkdirSync(path.join(repoDir, ".git")); // synthetic — only existsSync is checked
+  try {
+    const hook = mod.createToolExecuteBeforeHook({
+      workflowState: store,
+      pluginContext: { directory: repoDir },
+    });
+    // No throw expected.
+    await hook({ sessionID: "false-positive-guard", tool: "bash", args: { command: "git status" } });
+  } finally {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * strengthen-git-init-proposal AC3: non-git bash commands must pass through
+ * even when an init proposal is pending.
+ */
+async function verifyBashNonGitNotBlockedDuringInitPending() {
+  const toolBeforeModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "hooks", "tool-execute-before.js"),
+  ).href;
+  const mod = await import(`${toolBeforeModuleUrl}?bash-non-git=${Date.now()}`);
+  const { createWorkflowStateStore } = await import(workflowStateModuleUrl);
+
+  const store = createWorkflowStateStore();
+  const sessionID = "non-git-during-init";
+  store.set(sessionID, { sessionID, initProposal: { kind: "init", action: "git-init" } });
+  const hook = mod.createToolExecuteBeforeHook({
+    workflowState: store,
+    pluginContext: { directory: "/no/such/path" },
+  });
+  // ls is not git — must pass.
+  await hook({ sessionID, tool: "bash", args: { command: "ls -la" } });
+  // digit is not git — must pass.
+  await hook({ sessionID, tool: "bash", args: { command: "echo digit gitea" } });
+}
+
+/**
+ * strengthen-git-init-proposal AC1d: looksLikeGitCommand pattern coverage.
+ */
+async function verifyLooksLikeGitCommandPatternCoverage() {
+  const helperUrl = pathToFileURL(
+    path.join(projectRoot, "src", "services", "workflow", "looks-like-git-command.js"),
+  ).href;
+  const { looksLikeGitCommand } = await import(`${helperUrl}?coverage=${Date.now()}`);
+
+  const positives = [
+    "git status",
+    " git push",
+    "& git status",
+    "C:\\Program Files\\Git\\bin\\git.exe status",
+    "cmd /c git status",
+    "cmd.exe /c git status",
+    'bash -c "git status"',
+    "pwd && git status",
+    "cd repo; git status",
+    "GIT_TERMINAL_PROMPT=0 git status",
+  ];
+  for (const cmd of positives) {
+    assert.equal(
+      looksLikeGitCommand(cmd),
+      true,
+      `verifyLooksLikeGitCommandPatternCoverage: expected true for ${JSON.stringify(cmd)}`,
+    );
+  }
+
+  const negatives = [
+    "digit",
+    "echo gitea",
+    "magit-cli --help",
+    "gitlab-runner --version",
+    "ls -la",
+    "pwd",
+    "",
+    null,
+    undefined,
+    42,
+  ];
+  for (const cmd of negatives) {
+    assert.equal(
+      looksLikeGitCommand(cmd),
+      false,
+      `verifyLooksLikeGitCommandPatternCoverage: expected false for ${JSON.stringify(cmd)}`,
+    );
+  }
+}
+
+/**
+ * strengthen-git-init-proposal AC4b: src/index.js must inject pluginContext
+ * into the tool.execute.before factory. Without that, the `.git` fallback
+ * check silently degrades (treats every directory as a git repo).
+ */
+async function verifyToolExecuteBeforeReceivesPluginContext() {
+  const indexSrc = fs.readFileSync(path.join(projectRoot, "src", "index.js"), "utf8");
+  // Grep for the registration line. Looser regex to tolerate formatting drift.
+  const re = /createToolExecuteBeforeHook\s*\(\s*\{[^}]*pluginContext[^}]*\}\s*\)/;
+  assert.ok(
+    re.test(indexSrc),
+    "verifyToolExecuteBeforeReceivesPluginContext: src/index.js must pass `pluginContext` to createToolExecuteBeforeHook",
+  );
+}
+
+/**
  * AC13: mutating tool input must advance `phase` to "mutating" and the state
  * must NOT contain a `lifecycle` key.
  */
@@ -12234,6 +12430,13 @@ main()
   .then(() => verifyAliasExportRemoved())
   .then(() => verifyStartInstructionTextSimplified())
   .then(() => verifyMutatingToolThrowMessagePreserved())
+  // strengthen-git-init-proposal — bash+git block contract
+  .then(() => verifyBashGitBlockMessagePreserved())
+  .then(() => verifyBashGitBlockFiresWithoutWorkflowSession())
+  .then(() => verifyBashGitBlockSkippedInGitRepo())
+  .then(() => verifyBashNonGitNotBlockedDuringInitPending())
+  .then(() => verifyLooksLikeGitCommandPatternCoverage())
+  .then(() => verifyToolExecuteBeforeReceivesPluginContext())
   .then(() => verifyMutatingToolAdvancesPhase())
   .then(() => verifySessionDeletedClearsState())
   // Native event contract — opencode native plugin (.opencode/plugins)

@@ -9,12 +9,8 @@
  */
 
 import { detectWorkflowContext } from "../services/workflow/detect-workflow-context.js";
-import {
-  buildBranchProposal,
-  computeCandidateBranchName,
-  evaluateBranchStrategy,
-} from "../services/git/branch-service.js";
 import { checkRepositoryReadiness } from "../services/git/check-repository-readiness.js";
+import { planBranchProposal } from "../services/git/plan-branch-proposal.js";
 import { publishNextPlannedAction } from "../services/approval/publish-next-planned-action.js";
 
 function resolveCurrentBranch(input, context, pluginContext) {
@@ -47,6 +43,13 @@ export function createCommandExecuteBeforeHook(
     if (workflowCommands && workflowState) {
       const context = detectWorkflowContext(input, workflowCommands, {
         detectedAt: new Date().toISOString(),
+      });
+      pluginContext?.debug?.log?.("command-execute-before", "workflow detection result", {
+        rawCommand: input?.command,
+        sessionID: input?.sessionID,
+        detected: context !== null,
+        detectedCommand: context?.commandName ?? null,
+        workflowCommandCount: workflowCommands?.size ?? null,
       });
       if (context) {
         const priorState = workflowState.get(context.sessionID);
@@ -92,6 +95,12 @@ export function createCommandExecuteBeforeHook(
           directory: pluginContext?.directory,
           gitRunner: pluginContext?.gitRunner,
           policy: workflowPolicy,
+        });
+        pluginContext?.debug?.log?.("command-execute-before", "readiness check completed", {
+          outcome: readiness?.outcome,
+          reason: readiness?.reason,
+          isGitRepository: readiness?.details?.isGitRepository ?? null,
+          hasProposal: Boolean(readiness?.details?.proposal),
         });
         const readinessDurationMs = Number(process.hrtime.bigint() - readinessStartedAt) / 1e6;
 
@@ -152,54 +161,14 @@ export function createCommandExecuteBeforeHook(
 
         if (!shouldSkipBranchPlanning(readiness)) {
           const currentBranch = resolveCurrentBranch(input, context, pluginContext);
-          const strategy = evaluateBranchStrategy({
+          await planBranchProposal({
             workflowContext: context,
             workflowPolicy,
             branchConfig,
             currentBranch,
+            workflowState,
+            audit,
           });
-
-          if (strategy.requirement !== "unnecessary") {
-            const candidateName = computeCandidateBranchName({
-              workflowContext: context,
-              workflowPolicy,
-              branchConfig,
-            });
-            const proposal = buildBranchProposal({
-              strategy,
-              candidateName,
-              currentBranch,
-            });
-
-            if (proposal) {
-              workflowState.set(context.sessionID, {
-                ...workflowState.get(context.sessionID),
-                branchProposal: proposal,
-              });
-              if (audit) {
-                // Story 3.4: best-effort audit; never abort the hook on a
-                // throwing logger.
-                try {
-                  await audit.info("git.action.planned", {
-                    event: "git.action.planned",
-                    timestamp: new Date().toISOString(),
-                    workflow: context.commandName,
-                    command: context.commandName,
-                    sessionID: context.sessionID,
-                    details: {
-                      kind: "branch",
-                      action: proposal.action,
-                      name: proposal.name,
-                      reason: proposal.reason,
-                      isLongLived: strategy.isLongLived,
-                    },
-                  });
-                } catch {
-                  // Best-effort only.
-                }
-              }
-            }
-          }
         }
 
         await publishNextPlannedAction({

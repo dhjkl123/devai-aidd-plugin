@@ -146,6 +146,149 @@ async function nativeEventGitInitApprovalFlow() {
   }
 }
 
+// strengthen-git-init-proposal — bash+git block scenarios (Task 12)
+async function bashGitBlockedWhileInitPending() {
+  const directory = createTempWorkspace({ initializeGit: false });
+  try {
+    const { handlers } = await bootstrapPlugin(directory);
+    const sessionID = "e2e-bash-block";
+
+    // Trigger workflow → init proposal lands in state.
+    await handlers["command.execute.before"](
+      { command: "/bmad-bmm-create-prd", arguments: "", sessionID },
+      { parts: [] },
+    );
+
+    let thrown = null;
+    try {
+      await handlers["tool.execute.before"]({
+        sessionID,
+        tool: "bash",
+        args: { command: "git status" },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    assert.ok(thrown, "bash+git must throw while init proposal is pending");
+    assert.match(
+      thrown.message,
+      /git repository must be initialized before running git commands/,
+      `bash+git throw message must match canonical; got ${JSON.stringify(thrown.message)}`,
+    );
+
+    // Non-git bash command must pass through.
+    await handlers["tool.execute.before"]({
+      sessionID,
+      tool: "bash",
+      args: { command: "ls" },
+    });
+  } finally {
+    cleanupTempWorkspace(directory);
+  }
+}
+
+async function initAcceptCreatesGitDir() {
+  const directory = createTempWorkspace({ initializeGit: false });
+  try {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { handlers } = await bootstrapPlugin(directory);
+    const sessionID = "e2e-init-accept-creates-git";
+
+    await handlers.event({
+      event: {
+        type: "command.executed",
+        properties: { sessionID, name: "/bmad-bmm-create-prd", arguments: "" },
+      },
+    });
+
+    const questionID = "init-q-1";
+    await handlers.event({
+      event: { type: "question.asked", properties: { sessionID, id: questionID, header: "Initialize Git" } },
+    });
+    await handlers.event({
+      event: {
+        type: "question.replied",
+        properties: {
+          sessionID,
+          requestID: questionID,
+          answers: [["Initialize Git (Recommended)"]],
+        },
+      },
+    });
+
+    // Verify real .git directory exists post-accept.
+    assert.equal(
+      fs.existsSync(path.join(directory, ".git")),
+      true,
+      "git init must create .git directory after accept",
+    );
+    // .gitignore must exist with the DEFAULT_GITIGNORE_LINES contents.
+    const gitignorePath = path.join(directory, ".gitignore");
+    assert.equal(fs.existsSync(gitignorePath), true, ".gitignore must be auto-written");
+    const gitignoreBody = fs.readFileSync(gitignorePath, "utf8");
+    for (const line of ["node_modules/", "dist/", ".env", "_bmad-output/", ".claude/"]) {
+      assert.ok(
+        gitignoreBody.includes(line),
+        `default .gitignore must include ${line}; got: ${gitignoreBody}`,
+      );
+    }
+  } finally {
+    cleanupTempWorkspace(directory);
+  }
+}
+
+async function initAcceptPublishesBaselineCommit() {
+  const directory = createTempWorkspace({ initializeGit: false });
+  try {
+    const { handlers, mock } = await bootstrapPlugin(directory);
+    const sessionID = "e2e-init-accept-publishes-commit";
+
+    await handlers.event({
+      event: {
+        type: "command.executed",
+        properties: { sessionID, name: "/bmad-bmm-create-prd", arguments: "" },
+      },
+    });
+    const questionID = "init-q-2";
+    await handlers.event({
+      event: { type: "question.asked", properties: { sessionID, id: questionID, header: "Initialize Git" } },
+    });
+    await handlers.event({
+      event: {
+        type: "question.replied",
+        properties: {
+          sessionID,
+          requestID: questionID,
+          answers: [["Initialize Git (Recommended)"]],
+        },
+      },
+    });
+
+    // After init accept, a baseline commit `git.action.planned` event must
+    // have fired (load-bearing assertion — TD #11/AC11).
+    const planned = findAuditEvents(mock.logs, "git.action.planned");
+    const baselinePlanned = planned.find(
+      (e) => e.details?.kind === "commit" && e.details?.action === "baseline-commit",
+    );
+    assert.ok(
+      baselinePlanned,
+      `baseline commit must be planned after init accept; got planned events: ${JSON.stringify(planned.map((p) => p.details))}`,
+    );
+
+    // A second approval prompt (the baseline commit) must have been delivered.
+    const commitPrompt = mock.prompts.find(
+      (p) => p?.parts?.[0]?.metadata?.actionType === "commit",
+    );
+    assert.ok(
+      commitPrompt,
+      "baseline commit approval prompt must be delivered after init accept",
+    );
+  } finally {
+    cleanupTempWorkspace(directory);
+  }
+}
+
 await runScenario(
   "readiness: uninitialized workspace proposes init and skips branch planning",
   uninitializedRepositoryProposesInit,
@@ -153,4 +296,16 @@ await runScenario(
 await runScenario(
   "native: git init approval flow via command.executed → question.asked → question.replied",
   nativeEventGitInitApprovalFlow,
+);
+await runScenario(
+  "block: bash+git is blocked while init proposal pending; non-git bash passes",
+  bashGitBlockedWhileInitPending,
+);
+await runScenario(
+  "init: accept executes git init + writes .gitignore",
+  initAcceptCreatesGitDir,
+);
+await runScenario(
+  "init: accept publishes baseline commit prompt via post-init chain",
+  initAcceptPublishesBaselineCommit,
 );

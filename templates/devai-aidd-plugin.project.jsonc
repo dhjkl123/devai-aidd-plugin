@@ -185,5 +185,16 @@
       "branchRequired": true,
       "finalization": "no-forced-finalization"
     }
+  },
+  // Diagnostic logger for the git-init prompt flow. Flip `enabled` to true
+  // when the model appears to ignore the question-tool instruction (e.g. you
+  // run `/bmad-*` in a non-git workspace and the "Initialize Git" prompt
+  // never surfaces). On the next workflow command the plugin appends a
+  // line-per-event trace covering bootstrap -> command.executed -> readiness
+  // -> init proposal -> approval prompt delivery. `logFilePath` defaults to
+  // `<workspace>/.opencode/devai-aidd-debug.log` when blank.
+  "debug": {
+    "enabled": false,
+    "logFilePath": ""
   }
 }

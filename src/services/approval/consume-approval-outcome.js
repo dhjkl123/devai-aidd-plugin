@@ -147,6 +147,14 @@ export function consumeApprovalOutcome({
       proposalCleanup.pushProposal = null;
     } else if (resolution.actionKind === "commit") {
       proposalCleanup.commitProposal = null;
+    } else if (resolution.actionKind === "init") {
+      // strengthen-git-init-proposal Task 6: DENY/IGNORE on init must clear the
+      // proposal slot, otherwise `selectNextPlannedAction` would re-publish the
+      // same init prompt on the next planning pass. ACCEPT clears the slot
+      // inside the executor (`execute-approved-action.js`) only on success;
+      // ACCEPT-with-failure intentionally leaves the slot so the recovery
+      // gate's "Retry" choice can re-publish.
+      proposalCleanup.initProposal = null;
     }
   }
 

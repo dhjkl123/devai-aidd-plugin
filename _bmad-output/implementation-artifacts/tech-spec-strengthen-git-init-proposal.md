@@ -2,8 +2,14 @@
 title: 'Git workflow guard 강화 — block-until-init 및 인터랙티브 init 체인'
 slug: 'strengthen-git-init-proposal'
 created: '2026-05-11'
-status: 'ready-for-dev'
+status: 'Completed'
 stepsCompleted: [1, 2, 3, 4]
+implementation_commit: '(pending — to be assigned after final review)'
+implementation_date: '2026-05-11'
+review_findings_total: 21
+review_findings_fixed: 5
+review_findings_skipped: 16
+review_approach: 'auto-fix-high-only'
 tech_stack: ['Node.js 22', 'ESM JavaScript', 'esbuild bundle', 'plain node:assert tests', 'opencode native plugin event API']
 files_to_modify:
   - 'src/hooks/tool-execute-before.js'
@@ -668,6 +674,30 @@ devai 환경에서 `/bmad-*` 워크플로우 실행 시, 모델(devai 내부 AI 
 - 자동 init 모드 (사용자 승인 없이 자동으로 init 수행) — 별도 정책 옵션으로 추후 검토 가능
 - .gitignore 템플릿 선택 UI (Python/Java/Go 등) — 별도 elicitation flow 필요
 - 모델 지시문(promptAsync) phrasing 추가 강화 — 이번 spec과 호환 가능한 후속 작업
+
+#### Review Notes (Step 6)
+
+Adversarial code review completed against the implementation diff. 21 findings total. Auto-fix applied to High severity items only (user choice).
+
+**Fixed (5)**:
+
+- **F1** `looks-like-git-command.js:26` — `CHAINED_SHELL_PATTERN` 확장: `\n`과 `(`를 boundary 문자 집합에 추가. heredoc/`$()`/`<()` bypass 차단.
+- **F2** `execute-approved-action.js:413+` — post-baseline `planBranchProposal`에 `currentBranch`를 `state.readiness.details.branch`에서 가져옴. evaluateBranchStrategy가 실제 브랜치 인지.
+- **F4** `execute-approved-action.js:304+` — post-init `publishNextPlannedAction`에 `phase: "in-progress"`로 갱신된 workflowContext 전달. 다운스트림 phase 게이팅 정합성.
+- **F5** `tool-execute-before.js:18+` — `directoryIsGitRepo`가 directory 없거나 fs throw 시 `false`(차단) 반환. wiring regression 시 silent fail-open 방지.
+- **F6** `execute-approved-action.js:207+` — `executeInit` 호출을 try/catch로 감쌈. throw 시 synthetic failure envelope 반환 → recovery gate가 정상적으로 열림.
+
+**Skipped (16)**:
+
+- **F3** (High, noise) — 재검토 결과 audit ordering은 이미 올바름 (`workflowState.set` → `audit.info("git.action.planned")` → `publishNextPlannedAction`). 리뷰어 미독해.
+- F7~F15 (Medium 9): 정답이 trade-off이거나 별도 결정 필요. 후속 cycle로.
+- F16~F20 (Low 5): non-load-bearing 또는 cosmetic.
+- F21 (Note): 정적 grep을 런타임 검증으로 강화 — 추후 enhancement.
+
+**Verification after fixes**:
+
+- `npm run build` ✅ — dist 478.1kb
+- `npm test` ✅ — 15 e2e 시나리오 + regression 모두 통과
 
 #### 아키텍처 메모
 

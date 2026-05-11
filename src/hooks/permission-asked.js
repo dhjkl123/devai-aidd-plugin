@@ -296,7 +296,8 @@ export async function resolveApprovalOrRecovery(args) {
       result.outcome === "resolved" &&
       outcome === APPROVAL_OUTCOMES.ACCEPT &&
       (result.resolution?.actionKind === "commit" ||
-        result.resolution?.actionKind === "push")
+        result.resolution?.actionKind === "push" ||
+        result.resolution?.actionKind === "init")
     ) {
       const executionResult = await executeApprovedAction({
         workflowState,
