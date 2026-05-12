@@ -1,18 +1,34 @@
-param(
-  [string]$InstallRoot = "$env:USERPROFILE\\.config\\opencode"
-)
-
 $ErrorActionPreference = "Stop"
 
-$pluginPath = Join-Path $InstallRoot "plugins\\devai-aidd-plugin.js"
-$manifestPath = Join-Path $InstallRoot "manifest.json"
-$checksumsPath = Join-Path $InstallRoot "checksums.txt"
+# Operates on the CURRENT WORKING DIRECTORY's .opencode/. Removes:
+#   - .opencode/plugins/devai-aidd-plugin.js
+#   - .opencode/devai-aidd-plugin.*.jsonc (project, global, ...)
 
-foreach ($path in @($pluginPath, $manifestPath, $checksumsPath)) {
-  if (Test-Path $path) {
-    Remove-Item -LiteralPath $path -Force
-  }
+$cwd = (Get-Location).Path
+$opencodeDir = Join-Path $cwd ".opencode"
+
+if (-not (Test-Path $opencodeDir)) {
+  Write-Host "No .opencode directory in $cwd. Nothing to remove."
+  return
 }
 
-Write-Host "Removed DevAI AIDD Plugin plugin files from $InstallRoot"
-Write-Host "Existing configuration files were preserved."
+$pluginPath = Join-Path $opencodeDir "plugins\devai-aidd-plugin.js"
+$removed = @()
+
+if (Test-Path $pluginPath) {
+  Remove-Item -LiteralPath $pluginPath -Force
+  $removed += $pluginPath
+}
+
+$jsoncFiles = Get-ChildItem -LiteralPath $opencodeDir -Filter "devai-aidd-plugin.*.jsonc" -File -ErrorAction SilentlyContinue
+foreach ($file in $jsoncFiles) {
+  Remove-Item -LiteralPath $file.FullName -Force
+  $removed += $file.FullName
+}
+
+if ($removed.Count -eq 0) {
+  Write-Host "No DevAI AIDD Plugin files found under $opencodeDir."
+} else {
+  Write-Host "Removed:"
+  foreach ($r in $removed) { Write-Host "  $r" }
+}

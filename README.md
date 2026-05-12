@@ -10,6 +10,9 @@
 
 - [주요 기능](#주요-기능)
 - [설치](#설치)
+  - [원격 설치](#원격-설치)
+  - [프로젝트별 설치 (--project-path)](#프로젝트별-설치---project-path)
+  - [제거](#제거)
 - [빠른 시작](#빠른-시작)
 - [설정](#설정)
   - [설정 파일 우선순위](#설정-파일-우선순위)
@@ -28,6 +31,15 @@
 - **별도 리뷰 시스템 없이 책임을 추적한다** — `git log`, `git blame`만으로 워크플로 산출물의 변경 이력과 최종 수정자를 그대로 따라갈 수 있다.
 
 ## 설치
+
+설치 모드는 두 가지이다.
+
+| 모드 | 사용 시점 | 설치 위치 |
+|---|---|---|
+| 원격 설치 | 사내 storage가 준비된 상태에서 사용자 머신에 글로벌 설치 | `~/.config/opencode/` |
+| 프로젝트별 설치 (`--project-path`) | 특정 프로젝트에만 설치하고 머지된 단일 config로 운영 | `<ProjectPath>/.opencode/` |
+
+### 원격 설치
 
 > 아래 `<storage-account>` 자리는 사내 메인테이너로부터 실제 storage account 이름을 받아 치환한다.
 
@@ -52,6 +64,63 @@ bash install.sh
 - Windows: `%USERPROFILE%\.config\opencode\`
 - Linux / WSL: `~/.config/opencode/`
 - 공통 플러그인 파일: `plugins/devai-aidd-plugin.js`
+
+### 프로젝트별 설치 (--project-path)
+
+특정 프로젝트에만 플러그인을 설치하고, **global 템플릿과 project 템플릿을 정적으로 deep-merge한 단일 `.opencode/devai-aidd-plugin.project.jsonc`** 를 생성한다. 글로벌 설치와 무관하게 동작하며, opencode가 해당 프로젝트에서만 플러그인을 로드하게 할 때 쓴다.
+
+설치 결과:
+
+- `<ProjectPath>/.opencode/plugins/devai-aidd-plugin.js` — 플러그인 번들
+- `<ProjectPath>/.opencode/devai-aidd-plugin.project.jsonc` — global + project 머지본 (헤더 주석으로 origin 명시, 배열은 project 레이어가 전체 교체)
+
+선결 조건:
+
+- repo 작업트리에서 실행할 것 (스크립트 위치 기준 상대경로로 `dist/`, `templates/`, `installer/merge-configs.mjs`를 읽는다)
+- `npm run build`로 `dist/devai-aidd-plugin.js`를 만들어둘 것
+- Node가 PATH에 있을 것 (머지 헬퍼가 Node로 실행됨)
+
+```powershell
+# Windows: repo 루트에서
+npm run build
+powershell -ExecutionPolicy Bypass -File .\installer\install.ps1 -ProjectPath C:\path\to\project
+```
+
+```bash
+# Linux / WSL / macOS: repo 루트에서
+npm run build
+bash installer/install.sh --project-path /path/to/project
+```
+
+기존 `<ProjectPath>/.opencode/devai-aidd-plugin.project.jsonc`가 있으면 덮어쓰지 않고 보존한다. 새로 머지하고 싶으면 해당 파일을 직접 지운 뒤 재실행한다.
+
+설치 후 프로젝트의 `opencode.jsonc`가 플러그인을 인식하도록 다음을 추가한다.
+
+```jsonc
+// <ProjectPath>/opencode.jsonc
+{
+  "plugins": [
+    {
+      "name": "DevAI AIDD Plugin",
+      "path": ".opencode/plugins/devai-aidd-plugin.js"
+    }
+  ]
+}
+```
+
+### 제거
+
+플러그인을 설치한 프로젝트 루트에서 실행하면 해당 프로젝트의 `.opencode/` 안의 플러그인 파일과 설정이 삭제된다.
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File <repo>\installer\uninstall.ps1
+```
+
+```bash
+# Linux / WSL / macOS
+bash <repo>/installer/uninstall.sh
+```
 
 ## 빠른 시작
 
@@ -100,6 +169,9 @@ bash install.sh
 2. 프로젝트 설정 — `{project-root}/.opencode/devai-aidd-plugin.project.jsonc`
 
 프로젝트 설정은 글로벌 설정을 override한다.
+
+> **프로젝트별 설치 모드 사용자**
+> `--project-path`로 설치한 경우 글로벌 설정 파일은 만들어지지 않고, 머지된 단일 `.opencode/devai-aidd-plugin.project.jsonc`에 global 기본값과 project override가 모두 들어가 있다. 같은 우선순위 규칙이 그대로 적용되며, 런타임은 번들된 베이스라인 → 디스크상의 project 파일만 머지한다.
 
 ### 코드 수정 없이 정책 바꾸기
 

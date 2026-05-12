@@ -10715,16 +10715,17 @@ const STORY_44_EXPECTED_PUBLISHED_FILES = Object.freeze([
   "install.ps1",
   "install.sh",
   "uninstall.ps1",
+  "uninstall.sh",
   "devai-aidd-plugin.global.jsonc",
   "devai-aidd-plugin.project.jsonc",
   "opencode.jsonc.example",
 ]);
 
 // Story 4.4 R2 CRITICAL-1: the set of files BOTH installer scripts verify
-// against checksums.txt. install.ps1 line 47 and install.sh line 36 hash
-// these 4 files and look up the expected hash via the parser; any name in
-// this list that lacks a checksums.txt line will cause every install
-// attempt to fail at the integrity-check step.
+// against checksums.txt. install.ps1 and install.sh hash these 4 files in
+// their integrity-check loops and look up the expected hash via the parser;
+// any name in this list that lacks a checksums.txt line will cause every
+// install attempt to fail at the integrity-check step.
 const STORY_44_INSTALLER_VERIFIED_FILES = Object.freeze([
   "devai-aidd-plugin.js",
   "devai-aidd-plugin.global.jsonc",
@@ -10790,7 +10791,7 @@ async function verifyStory44ReleaseManifestCompleteness() {
       assert.deepEqual(
         observedNames,
         expectedNames,
-        `verifyStory44ReleaseManifestCompleteness: ${label} manifest must list exactly the 7 published files; missing/extra entries indicate filesToPublish drift`,
+        `verifyStory44ReleaseManifestCompleteness: ${label} manifest must list exactly the 8 published files; missing/extra entries indicate filesToPublish drift`,
       );
       for (const entry of manifest.files) {
         assert.equal(
@@ -10848,10 +10849,10 @@ async function verifyStory44ReleaseManifestCompleteness() {
  *
  * Story 4.4 R2 CRITICAL-1: in addition to per-file parser equivalence,
  * `checksums.txt` MUST contain a line for `manifest.json` because both
- * installers (install.ps1 line 47, install.sh line 36) verify the
- * manifest's integrity. Without that line, every install attempt fails at
- * the integrity-check step. This regression now asserts:
- *   - 8 lines total (7 published files + manifest.json).
+ * installers (install.ps1 and install.sh integrity-check loops) verify
+ * the manifest's integrity. Without that line, every install attempt fails
+ * at the integrity-check step. This regression now asserts:
+ *   - 9 lines total (8 published files + manifest.json).
  *   - Every file in `STORY_44_INSTALLER_VERIFIED_FILES` has a parser-
  *     recoverable line whose hash matches the on-disk file hash.
  *   - The manifest.json line's hash equals the actual sha256 of the
@@ -10875,12 +10876,12 @@ async function verifyStory44ReleaseChecksumLinesMatchInstallerParsers() {
         `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} checksums.txt must end with trailing newline`,
       );
 
-      // Story 4.4 R2 CRITICAL-1: 8 lines total = 7 published files + manifest.json.
+      // Story 4.4 R2 CRITICAL-1: 9 lines total = 8 published files + manifest.json.
       const lines = text.split("\n").filter((line) => line.length > 0);
       assert.equal(
         lines.length,
-        8,
-        `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} checksums.txt must have exactly 8 lines (7 published files + manifest.json); got ${lines.length}`,
+        9,
+        `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} checksums.txt must have exactly 9 lines (8 published files + manifest.json); got ${lines.length}`,
       );
 
       const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
@@ -10905,10 +10906,10 @@ async function verifyStory44ReleaseChecksumLinesMatchInstallerParsers() {
       }
 
       // Story 4.4 R2 CRITICAL-1: every file the installer integrity-checks
-      // (install.ps1 line 47 / install.sh line 36) must have a parser-
-      // recoverable checksums line whose hash equals the actual on-disk
-      // sha256. This is the assertion that, when missing, lets a broken
-      // checksums.txt slip through review.
+      // (the install.ps1 / install.sh integrity-check loops) must have a
+      // parser-recoverable checksums line whose hash equals the actual
+      // on-disk sha256. This is the assertion that, when missing, lets a
+      // broken checksums.txt slip through review.
       for (const name of STORY_44_INSTALLER_VERIFIED_FILES) {
         const filePath = path.join(root, name);
         assert.ok(
@@ -10951,7 +10952,7 @@ async function verifyStory44ReleaseChecksumLinesMatchInstallerParsers() {
 
 /**
  * Story 4.4 (AC1, AC2): the `latest/` and `versions/<version>/` directories
- * must contain the SAME 7 published files with byte-identical SHA-256
+ * must contain the SAME 8 published files with byte-identical SHA-256
  * digests. This locks the make-release contract that "two publish targets
  * mirror each other" and prevents a future refactor from publishing only
  * one target.
@@ -10964,7 +10965,7 @@ async function verifyStory44ReleaseChecksumLinesMatchInstallerParsers() {
  * `generatedAt` timestamp. That is by design — checksums.txt in each
  * directory references its own manifest's hash, so the installer integrity
  * check is closed within a single download root. This regression
- * therefore mirrors only the 7 published files.
+ * therefore mirrors only the 8 published files.
  */
 async function verifyStory44LatestAndVersionedDirsMirrored() {
   const fixture = story44GenerateFixtureRelease("mirror");
