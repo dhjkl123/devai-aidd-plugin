@@ -8652,6 +8652,37 @@ async function verifyBuildCommitArgsScopesPathspecToProposal() {
     /A valid commit action is required/,
     "null commit action must throw",
   );
+
+  // Brownfield baseline: when files would blow past the Windows argv ceiling
+  // the caller passes `pathspecFromFile`, switching git to read the NUL-
+  // separated path list from a temp file. Same scoping guarantee, no argv
+  // limit.
+  const viaFile = buildCommitArgs(
+    { message: "Initial commit", files: ["src/a.js", "docs/b.md"] },
+    { pathspecFromFile: "/tmp/devai-aidd-pathspec-xyz/files.lst" },
+  );
+  assert.deepEqual(viaFile.addArgs, [
+    "add",
+    "-A",
+    "--pathspec-from-file=/tmp/devai-aidd-pathspec-xyz/files.lst",
+    "--pathspec-file-nul",
+  ]);
+  assert.deepEqual(viaFile.commitArgs, [
+    "commit",
+    "-m",
+    "Initial commit",
+    "--pathspec-from-file=/tmp/devai-aidd-pathspec-xyz/files.lst",
+    "--pathspec-file-nul",
+  ]);
+
+  // allowEmpty must still bypass both inline and file modes (baseline with
+  // zero changes still needs a HEAD ref to grow).
+  const empty = buildCommitArgs(
+    { message: "Initial commit", files: [], allowEmpty: true },
+    { pathspecFromFile: "/tmp/should-be-ignored" },
+  );
+  assert.equal(empty.addArgs, null);
+  assert.deepEqual(empty.commitArgs, ["commit", "--allow-empty", "-m", "Initial commit"]);
 }
 
 async function verifyRunGitActionRejectsStagedFilesOutsideProposal() {
