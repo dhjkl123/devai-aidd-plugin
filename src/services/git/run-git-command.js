@@ -1,7 +1,19 @@
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const execFileAsync = promisify(execFile);
+
+// Inline pathspec is forwarded as `git add -A -- <f1> <f2> ...`. On Windows
+// CreateProcess caps the combined commandline at ~32K characters. For a
+// brownfield baseline-commit (`git init` on top of an existing tree with
+// hundreds of files), the inline form blows past that ceiling and the
+// child_process spawn fails before git ever sees the request. Above this
+// file count we switch to git's `--pathspec-from-file=<path> --pathspec-file-nul`
+// mode, which reads NUL-separated paths from a temp file with no argv limit.
+const PATHSPEC_INLINE_LIMIT = 80;
 
 const ALLOWED_COMMANDS = new Map([
   ["rev-parse-inside-work-tree", ["rev-parse", "--is-inside-work-tree"]],
@@ -59,20 +71,19 @@ export function runGitCommand({ directory, command, timeoutMs = 1500 } = {}) {
  * (and tests) can assert the exact pathspec that reaches `git`.
  *
  * Returns `{ addArgs, commitArgs }`:
- *   - `addArgs` uses `git add -A -- <files>` so deleted files in the proposal
- *     scope are staged for removal alongside additions/modifications. The
- *     `-A` flag is restricted to the proposal pathspec — files outside the
- *     scope are never affected.
- *   - `commitArgs` repeats the pathspec on the `git commit` line so that
- *     unrelated, previously-staged files are NOT swept into the commit. This
- *     fix addresses the Story 3.2 review HIGH item: the prior implementation
- *     omitted the pathspec on commit and could include files staged outside
- *     the approved proposal.
+ *   - Inline mode (default): `git add -A -- <files>` / `git commit -m <msg> -- <files>`.
+ *     The pathspec is restricted to the approved proposal so unrelated
+ *     pre-staged files cannot be swept into the commit (Story 3.2 review HIGH).
+ *   - File mode (`options.pathspecFromFile = "<absolute path>"`): the same
+ *     scoping guarantee, but path list arrives via `--pathspec-from-file=<path>
+ *     --pathspec-file-nul` to bypass the Windows ~32K argv limit when the
+ *     proposal contains hundreds of files (typical brownfield baseline).
  *
- * @param {{ message?: string|null, files?: string[]|null }} action
- * @returns {{ addArgs: string[], commitArgs: string[] }}
+ * @param {{ message?: string|null, files?: string[]|null, allowEmpty?: boolean }} action
+ * @param {{ pathspecFromFile?: string|null }} [options]
+ * @returns {{ addArgs: string[]|null, commitArgs: string[] }}
  */
-export function buildCommitArgs(action) {
+export function buildCommitArgs(action, options = {}) {
   if (!action || typeof action !== "object") {
     throw new Error("A valid commit action is required.");
   }
@@ -96,6 +107,23 @@ export function buildCommitArgs(action) {
 
   if (!Array.isArray(action.files) || action.files.length === 0) {
     throw new Error("Commit actions require at least one file.");
+  }
+
+  const pathspecFile =
+    typeof options.pathspecFromFile === "string" && options.pathspecFromFile.length > 0
+      ? options.pathspecFromFile
+      : null;
+  if (pathspecFile) {
+    return {
+      addArgs: ["add", "-A", `--pathspec-from-file=${pathspecFile}`, "--pathspec-file-nul"],
+      commitArgs: [
+        "commit",
+        "-m",
+        message,
+        `--pathspec-from-file=${pathspecFile}`,
+        "--pathspec-file-nul",
+      ],
+    };
   }
 
   return {
@@ -144,12 +172,36 @@ export async function runGitAction({ directory, action, timeoutMs = 5000 } = {})
   }
 
   if (action.kind === "commit") {
-    const { addArgs, commitArgs } = buildCommitArgs(action);
-    if (Array.isArray(addArgs) && addArgs.length > 0) {
-      await execGit(directory, addArgs, timeoutMs);
+    const fileCount = Array.isArray(action.files) ? action.files.length : 0;
+    const useFileMode = action.allowEmpty !== true && fileCount > PATHSPEC_INLINE_LIMIT;
+    let pathspecDir = null;
+    let pathspecFile = null;
+    if (useFileMode) {
+      pathspecDir = mkdtempSync(join(tmpdir(), "devai-aidd-pathspec-"));
+      pathspecFile = join(pathspecDir, "files.lst");
+      // NUL-separated payload pairs with `--pathspec-file-nul` so paths with
+      // whitespace, quotes, or backslashes survive untouched.
+      writeFileSync(pathspecFile, action.files.join("\0"), "utf8");
     }
-    const stdout = await execGit(directory, commitArgs, timeoutMs);
-    return { stdout, observedState: null };
+    try {
+      const { addArgs, commitArgs } = buildCommitArgs(
+        action,
+        useFileMode ? { pathspecFromFile: pathspecFile } : {},
+      );
+      if (Array.isArray(addArgs) && addArgs.length > 0) {
+        await execGit(directory, addArgs, timeoutMs);
+      }
+      const stdout = await execGit(directory, commitArgs, timeoutMs);
+      return { stdout, observedState: null };
+    } finally {
+      if (pathspecDir) {
+        try {
+          rmSync(pathspecDir, { recursive: true, force: true });
+        } catch {
+          // best-effort
+        }
+      }
+    }
   }
 
   if (action.kind === "push") {

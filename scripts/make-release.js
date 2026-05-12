@@ -8,7 +8,7 @@ import path from "node:path";
  * Invariants enforced by this script (kept stable for installer compatibility
  * and regression coverage in tests/regression.test.js):
  *   - Output directories: `release/devai-aidd-plugin/versions/<version>/` and
- *     `release/devai-aidd-plugin/latest/` MUST contain the SAME 7 published
+ *     `release/devai-aidd-plugin/latest/` MUST contain the SAME 8 published
  *     files with byte-identical SHA-256 hashes plus `manifest.json` and
  *     `checksums.txt`.
  *   - `manifest.json.version === package.json.version`. The directory name
@@ -19,10 +19,10 @@ import path from "node:path";
  *     (`awk '$2 == name { print $1 }'`). Changing the format will silently
  *     break end-user installs.
  *   - `checksums.txt` MUST contain a line for `manifest.json` IN ADDITION TO
- *     the 7 published files (8 lines total). Both installer parsers
- *     (install.ps1 line 47, install.sh line 36) verify the integrity of
+ *     the 8 published files (9 lines total). Both installer integrity-check
+ *     loops (install.ps1 / install.sh) verify the integrity of
  *     `manifest.json` against `checksums.txt`. The manifest itself does NOT
- *     self-reference (its `files[]` array still enumerates the 7 published
+ *     self-reference (its `files[]` array still enumerates the 8 published
  *     files only) — the manifest entry lives in `checksums.txt` exclusively
  *     to support the installer integrity check.
  * Verify-first / mutate-release-tree-only-after-validation: pre-flight
@@ -58,6 +58,7 @@ const filesToPublish = [
   { source: path.join(projectRoot, "installer", "install.ps1"), name: "install.ps1" },
   { source: path.join(projectRoot, "installer", "install.sh"), name: "install.sh" },
   { source: path.join(projectRoot, "installer", "uninstall.ps1"), name: "uninstall.ps1" },
+  { source: path.join(projectRoot, "installer", "uninstall.sh"), name: "uninstall.sh" },
   { source: path.join(projectRoot, "templates", "devai-aidd-plugin.global.jsonc"), name: "devai-aidd-plugin.global.jsonc" },
   { source: path.join(projectRoot, "templates", "devai-aidd-plugin.project.jsonc"), name: "devai-aidd-plugin.project.jsonc" },
   { source: path.join(projectRoot, "templates", "opencode.jsonc.example"), name: "opencode.jsonc.example" },
