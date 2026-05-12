@@ -23,6 +23,46 @@ import path from "node:path";
 
 import { DevaiAiddGuardPlugin } from "../../src/index.js";
 
+// Project JSONC fixture mirroring what a real user project does. Since
+// `DEFAULT_PLUGIN_CONFIG` no longer ships any field values, this fixture
+// supplies the FULL workflowPolicy entries (with required `category`,
+// `identityStrategy`, `finalization`) plus `branchRequired: true` for the
+// implementation workflows that e2e scenarios exercise.
+const E2E_BRANCH_REQUIRED_JSONC = JSON.stringify({
+  workflowPolicy: {
+    "bmad-bmm-create-story": {
+      category: "implementation",
+      identityStrategy: "story",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    "bmad-bmm-dev-story": {
+      category: "implementation",
+      identityStrategy: "story",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    "bmad-bmm-quick-dev": {
+      category: "implementation",
+      identityStrategy: "ticket-or-args",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    "bmad-bmm-qa-generate-e2e-tests": {
+      category: "implementation",
+      identityStrategy: "artifact-or-args",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    "bmad-bmm-create-prd": {
+      category: "planning",
+      identityStrategy: "artifact-singleton",
+      artifactKey: "prd",
+      finalization: "commit-optional-push",
+    },
+  },
+});
+
 export function createTempWorkspace({
   initializeGit = false,
   withRemote = false,
@@ -35,6 +75,11 @@ export function createTempWorkspace({
   for (const name of workflowCommands) {
     fs.writeFileSync(path.join(commandsDir, `${name}.md`), `# ${name}\n`, "utf8");
   }
+  fs.writeFileSync(
+    path.join(tempRoot, ".opencode", "devai-aidd-plugin.project.jsonc"),
+    E2E_BRANCH_REQUIRED_JSONC,
+    "utf8",
+  );
 
   if (initializeGit) {
     execFileSync("git", ["init", "--initial-branch=main"], { cwd: tempRoot, stdio: "pipe" });

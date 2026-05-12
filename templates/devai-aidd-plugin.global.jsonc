@@ -15,13 +15,53 @@
   //     - workflowPolicy.<command>.branchRequired / finalization
   //                                   — opt commands in/out of branch + commit
   //                                     gating without touching plugin code.
+  //
+  //   Plugin code carries NO default values for these fields. Removing or
+  //   omitting a key here means the field becomes empty/disabled. The
+  //   shape below mirrors the historical built-in defaults so a fresh
+  //   install behaves the same as before this file existed.
   "branch": {
     "pattern": "{type}/{ticket}-{slug}",
     "defaultType": "chore",
     "fallbackTicket": "no-ticket",
     "longLivedBranches": ["main", "master"],
     "defaultMergeTarget": "",
-    "validationRegex": "^(feat|fix|docs|chore|refactor|design)\\/[A-Z]+-\\d+-[a-z0-9-]+$|^(feat|fix|docs|chore|refactor|design)\\/no-ticket-[a-z0-9-]+$"
+    "validationRegex": "^(feat|fix|docs|chore|refactor|design)\\/[A-Z]+-\\d+-[a-z0-9-]+$|^(feat|fix|docs|chore|refactor|design)\\/no-ticket-[a-z0-9-]+$",
+    "commandTypeMap": {
+      "bmad-bmm-check-implementation-readiness": "docs",
+      "bmad-bmm-correct-course": "refactor",
+      "bmad-bmm-create-architecture": "docs",
+      "bmad-bmm-create-epics-and-stories": "docs",
+      "bmad-bmm-create-prd": "docs",
+      "bmad-bmm-create-product-brief": "docs",
+      "bmad-bmm-create-story": "docs",
+      "bmad-bmm-create-ux-design": "docs",
+      "bmad-bmm-dev-story": "feat",
+      "bmad-bmm-document-project": "docs",
+      "bmad-bmm-domain-research": "docs",
+      "bmad-bmm-edit-prd": "docs",
+      "bmad-bmm-generate-project-context": "docs",
+      "bmad-bmm-market-research": "docs",
+      "bmad-bmm-qa-generate-e2e-tests": "feat",
+      "bmad-bmm-quick-dev": "feat",
+      "bmad-bmm-quick-dev-new-preview": "feat",
+      "bmad-bmm-quick-spec": "docs",
+      "bmad-bmm-retrospective": "docs",
+      "bmad-bmm-sprint-planning": "docs",
+      "bmad-bmm-sprint-status": "chore",
+      "bmad-bmm-technical-research": "docs",
+      "bmad-bmm-validate-prd": "docs",
+      "bmad-bmm-code-review": "fix",
+      "bmad-brainstorming": "docs",
+      "bmad-editorial-review-prose": "docs",
+      "bmad-editorial-review-structure": "docs",
+      "bmad-help": "chore",
+      "bmad-index-docs": "docs",
+      "bmad-party-mode": "chore",
+      "bmad-review-adversarial-general": "fix",
+      "bmad-review-edge-case-hunter": "fix",
+      "bmad-shard-doc": "docs"
+    }
   },
   "audit": {
     "enabled": true,
@@ -29,5 +69,13 @@
     "logToFile": false,
     "logFilePath": "",
     "httpEndpoint": ""
+  },
+  "debug": {
+    // Diagnostic logger gated by `enabled`. When true, the plugin appends a
+    // line-per-event log to `logFilePath` (or `.opencode/devai-aidd-debug.log`
+    // if blank) covering the init-prompt flow. Use this when the model is
+    // suspected of ignoring the question-tool instruction.
+    "enabled": false,
+    "logFilePath": ""
   }
 }

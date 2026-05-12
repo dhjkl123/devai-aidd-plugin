@@ -90,11 +90,17 @@ export function mergeConfigs(layers) {
 // `src/services/workflow/resolve-workflow-policy.js` need to repeat per-field
 // `|| <default>` fallbacks. After Story 4.1, those services receive an
 // already-normalized effective config and act as thin pass-throughs.
+// Minimal code-side safety nets used when neither the merged config nor any
+// template supplied a value. These exist purely so the plugin does not crash
+// or behave nonsensically when run without any JSONC at all — they are NOT
+// "defaults" in the user-facing sense (those live in
+// `templates/devai-aidd-plugin.global.jsonc`).
 const SAFE_BRANCH_DEFAULTS = {
   pattern: "{type}/{ticket}-{slug}",
   defaultType: "chore",
   fallbackTicket: "no-ticket",
   validationRegex: "",
+  longLivedBranches: ["main", "master"],
 };
 
 function normalizeConfig(config) {
@@ -104,18 +110,24 @@ function normalizeConfig(config) {
     merged.branch = {};
   }
 
-  // longLivedBranches: dedupe, lowercase, trim, drop empty.
+  // longLivedBranches: dedupe, lowercase, trim, drop empty. If the merged
+  // config has none, fall back to the code-side safety net so a fresh install
+  // without any JSONC still treats main/master as protected.
   const configuredLongLivedBranches = Array.isArray(merged.branch.longLivedBranches)
     ? merged.branch.longLivedBranches
     : [];
 
-  merged.branch.longLivedBranches = Array.from(
+  const normalizedLongLived = Array.from(
     new Set(
       configuredLongLivedBranches
         .map((branchName) => String(branchName || "").trim().toLowerCase())
         .filter(Boolean),
     ),
   );
+  merged.branch.longLivedBranches =
+    normalizedLongLived.length > 0
+      ? normalizedLongLived
+      : [...SAFE_BRANCH_DEFAULTS.longLivedBranches];
 
   // defaultMergeTarget: trim only (empty string is a valid "no merge target" signal).
   merged.branch.defaultMergeTarget = String(merged.branch.defaultMergeTarget || "").trim();

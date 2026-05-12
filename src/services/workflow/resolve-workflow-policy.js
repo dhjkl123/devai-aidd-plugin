@@ -96,11 +96,14 @@ export function resolveWorkflowPolicy(workflowContext, runtimeConfig) {
   // Case 3: commandName matched → return resolved policy
   const policyEntry = workflowPolicy[commandName];
 
-  // Build a fresh policy object to avoid mutating runtimeConfig
+  // Build a fresh policy object to avoid mutating runtimeConfig.
+  // `branchRequired` is opt-in via JSONC. When absent, the resolved policy
+  // carries `false` so downstream consumers (branch-service, explanation
+  // builder) can keep their strict `=== true` comparisons.
   const effectivePolicy = {
     category: policyEntry.category,
     identityStrategy: policyEntry.identityStrategy,
-    branchRequired: policyEntry.branchRequired,
+    branchRequired: policyEntry.branchRequired === true,
     finalization: policyEntry.finalization,
   };
   if (Object.prototype.hasOwnProperty.call(policyEntry, "artifactKey")) {

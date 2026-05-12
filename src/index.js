@@ -339,9 +339,9 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     // MUST stay byte-for-byte equal to `SUPPORTED_HOOK_KEYS`. Under the native
     // opencode runtime, `event` is the load-bearing native router that handles
     // `command.executed`, `question.asked`, `question.replied`,
-    // `question.rejected`, `session.idle`, and `session.deleted`. The other
-    // five named handlers remain as compatibility-only ingress points for the
-    // in-process test harness and any non-native invocation path.
+    // `question.rejected`, and `session.deleted`. The other five named
+    // handlers remain as compatibility-only ingress points for the in-process
+    // test harness and any non-native invocation path.
     const commandExecuteBeforeHandler = createCommandExecuteBeforeHook({
       workflowCommands,
       workflowState,

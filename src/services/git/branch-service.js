@@ -158,17 +158,6 @@ export function evaluateBranchStrategy({
     };
   }
 
-  if (workflowPolicy.category === "implementation") {
-    return {
-      requirement: "optional",
-      reason: "implementation-policy-optional-branch",
-      policyMatch,
-      isLongLived,
-      currentBranch: current,
-      validationRegex: normalizedConfig.validationRegex,
-    };
-  }
-
   return {
     requirement: "unnecessary",
     reason: "policy-does-not-require-branch",

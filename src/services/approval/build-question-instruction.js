@@ -135,15 +135,15 @@ export function buildQuestionInstruction({ commandName, actionType, proposal } =
   if (actionType === "commit") {
     return finalize({
       header: "Finalize Changes",
-      options: ["Approve (Recommended)", "Deny", "Ignore and continue"],
+      options: ["Approve (Recommended)", "Ignore and continue"],
       lines: [
         guardLine,
         "The workflow has produced changes that need a commit before finishing.",
         "Ask the user the `Finalize Changes` question with these exact options:",
         "1. `Approve (Recommended)`",
-        "2. `Deny`",
-        "3. `Ignore and continue`",
+        "2. `Ignore and continue`",
         "If the user chooses Approve, commit the staged changes only after that approval.",
+        "If the user chooses Ignore and continue, proceed with the workflow without committing.",
         "Do not run git or modify files before the user answers this question.",
       ],
     });
@@ -188,15 +188,15 @@ export function buildQuestionInstruction({ commandName, actionType, proposal } =
   if (actionType === "push") {
     return finalize({
       header: "Push Changes",
-      options: ["Approve (Recommended)", "Deny", "Ignore and continue"],
+      options: ["Approve (Recommended)", "Ignore and continue"],
       lines: [
         guardLine,
         "The committed changes are ready to push to the remote.",
         "Ask the user the `Push Changes` question with these exact options:",
         "1. `Approve (Recommended)`",
-        "2. `Deny`",
-        "3. `Ignore and continue`",
+        "2. `Ignore and continue`",
         "If the user chooses Approve, push the current branch and set the upstream if needed.",
+        "If the user chooses Ignore and continue, proceed with the workflow without pushing.",
         "Do not run git or continue the workflow before the user answers this question.",
       ],
     });
@@ -204,9 +204,9 @@ export function buildQuestionInstruction({ commandName, actionType, proposal } =
 
   return {
     header: "Approval Required",
-    options: ["Approve (Recommended)", "Deny", "Ignore and continue"],
+    options: ["Approve (Recommended)", "Ignore and continue"],
     instructionText:
-      'Ask the user with the question tool. Header: "Approval Required". Options: "Approve (Recommended)", "Deny", "Ignore and continue".',
+      'Ask the user with the question tool. Header: "Approval Required". Options: "Approve (Recommended)", "Ignore and continue".',
   };
 }
 
