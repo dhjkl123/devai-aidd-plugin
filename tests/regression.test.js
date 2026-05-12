@@ -99,12 +99,197 @@ function verifyBuiltArtifactExists({
   );
 }
 
+// `DEFAULT_PLUGIN_CONFIG` no longer carries field values — branch/workflow/
+// audit/debug live in installer-shipped templates. Service-direct tests that
+// pass branch + workflowPolicy fixtures inline use these constants instead of
+// reading from `DEFAULT_PLUGIN_CONFIG.{branch,workflowPolicy}`.
+const TEST_BRANCH_CONFIG = {
+  pattern: "{type}/{ticket}-{slug}",
+  defaultType: "chore",
+  fallbackTicket: "no-ticket",
+  longLivedBranches: ["main", "master"],
+  defaultMergeTarget: "",
+  validationRegex:
+    "^(feat|fix|docs|chore|refactor|design)\\/[A-Z]+-\\d+-[a-z0-9-]+$|^(feat|fix|docs|chore|refactor|design)\\/no-ticket-[a-z0-9-]+$",
+  commandTypeMap: {
+    "bmad-bmm-check-implementation-readiness": "docs",
+    "bmad-bmm-correct-course": "refactor",
+    "bmad-bmm-create-architecture": "docs",
+    "bmad-bmm-create-epics-and-stories": "docs",
+    "bmad-bmm-create-prd": "docs",
+    "bmad-bmm-create-product-brief": "docs",
+    "bmad-bmm-create-story": "docs",
+    "bmad-bmm-create-ux-design": "docs",
+    "bmad-bmm-dev-story": "feat",
+    "bmad-bmm-document-project": "docs",
+    "bmad-bmm-domain-research": "docs",
+    "bmad-bmm-edit-prd": "docs",
+    "bmad-bmm-generate-project-context": "docs",
+    "bmad-bmm-market-research": "docs",
+    "bmad-bmm-qa-generate-e2e-tests": "feat",
+    "bmad-bmm-quick-dev": "feat",
+    "bmad-bmm-quick-dev-new-preview": "feat",
+    "bmad-bmm-quick-spec": "docs",
+    "bmad-bmm-retrospective": "docs",
+    "bmad-bmm-sprint-planning": "docs",
+    "bmad-bmm-sprint-status": "chore",
+    "bmad-bmm-technical-research": "docs",
+    "bmad-bmm-validate-prd": "docs",
+    "bmad-bmm-code-review": "fix",
+    "bmad-brainstorming": "docs",
+    "bmad-editorial-review-prose": "docs",
+    "bmad-editorial-review-structure": "docs",
+    "bmad-help": "chore",
+    "bmad-index-docs": "docs",
+    "bmad-party-mode": "chore",
+    "bmad-review-adversarial-general": "fix",
+    "bmad-review-edge-case-hunter": "fix",
+    "bmad-shard-doc": "docs",
+  },
+};
+
+const TEST_WORKFLOW_POLICY = {
+  "bmad-bmm-create-story": {
+    category: "implementation",
+    identityStrategy: "story",
+    branchRequired: true,
+    finalization: "commit-and-push",
+  },
+  "bmad-bmm-dev-story": {
+    category: "implementation",
+    identityStrategy: "story",
+    branchRequired: true,
+    finalization: "commit-and-push",
+  },
+  "bmad-bmm-quick-dev": {
+    category: "implementation",
+    identityStrategy: "ticket-or-args",
+    branchRequired: true,
+    finalization: "commit-and-push",
+  },
+  "bmad-bmm-qa-generate-e2e-tests": {
+    category: "implementation",
+    identityStrategy: "artifact-or-args",
+    branchRequired: true,
+    finalization: "commit-and-push",
+  },
+  "bmad-bmm-create-prd": {
+    category: "planning",
+    identityStrategy: "artifact-singleton",
+    artifactKey: "prd",
+    branchRequired: false,
+    finalization: "commit-optional-push",
+  },
+};
+
+// Returns the test policy for a given command (used by manual `resolvePolicy`
+// callbacks in tests that bypass the full bootstrap pipeline).
+function defaultPolicyWithLegacyBranchRequired(commandName /*, defaults */) {
+  return TEST_WORKFLOW_POLICY[commandName] ?? null;
+}
+
+// Project JSONC fixture used by full-bootstrap tests. `DEFAULT_PLUGIN_CONFIG`
+// no longer carries any field values — branch.* / workflowPolicy.* / audit.* /
+// debug.* all live in the installer-shipped templates. Tests that exercise the
+// full bootstrap pipeline write this fixture into the temp workspace's
+// project JSONC so the bootstrap reads it like a real user project would.
+//
+// We include the full branch fixture (pattern, commandTypeMap, etc.) AND
+// branchRequired:true for implementation workflows. mergeObjects in
+// load-config does deep per-key merge, so any other field tests need can be
+// extended without touching code.
+const TEST_PROJECT_JSONC = JSON.stringify({
+  branch: {
+    pattern: "{type}/{ticket}-{slug}",
+    defaultType: "chore",
+    fallbackTicket: "no-ticket",
+    longLivedBranches: ["main", "master"],
+    defaultMergeTarget: "",
+    validationRegex:
+      "^(feat|fix|docs|chore|refactor|design)\\/[A-Z]+-\\d+-[a-z0-9-]+$|^(feat|fix|docs|chore|refactor|design)\\/no-ticket-[a-z0-9-]+$",
+    commandTypeMap: {
+      "bmad-bmm-check-implementation-readiness": "docs",
+      "bmad-bmm-correct-course": "refactor",
+      "bmad-bmm-create-architecture": "docs",
+      "bmad-bmm-create-epics-and-stories": "docs",
+      "bmad-bmm-create-prd": "docs",
+      "bmad-bmm-create-product-brief": "docs",
+      "bmad-bmm-create-story": "docs",
+      "bmad-bmm-create-ux-design": "docs",
+      "bmad-bmm-dev-story": "feat",
+      "bmad-bmm-document-project": "docs",
+      "bmad-bmm-domain-research": "docs",
+      "bmad-bmm-edit-prd": "docs",
+      "bmad-bmm-generate-project-context": "docs",
+      "bmad-bmm-market-research": "docs",
+      "bmad-bmm-qa-generate-e2e-tests": "feat",
+      "bmad-bmm-quick-dev": "feat",
+      "bmad-bmm-quick-dev-new-preview": "feat",
+      "bmad-bmm-quick-spec": "docs",
+      "bmad-bmm-retrospective": "docs",
+      "bmad-bmm-sprint-planning": "docs",
+      "bmad-bmm-sprint-status": "chore",
+      "bmad-bmm-technical-research": "docs",
+      "bmad-bmm-validate-prd": "docs",
+      "bmad-bmm-code-review": "fix",
+    },
+  },
+  workflowPolicy: {
+    "bmad-bmm-create-story": {
+      category: "implementation",
+      identityStrategy: "story",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    "bmad-bmm-dev-story": {
+      category: "implementation",
+      identityStrategy: "story",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    "bmad-bmm-quick-dev": {
+      category: "implementation",
+      identityStrategy: "ticket-or-args",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    "bmad-bmm-qa-generate-e2e-tests": {
+      category: "implementation",
+      identityStrategy: "artifact-or-args",
+      branchRequired: true,
+      finalization: "commit-and-push",
+    },
+    "bmad-bmm-create-prd": {
+      category: "planning",
+      identityStrategy: "artifact-singleton",
+      artifactKey: "prd",
+      finalization: "commit-optional-push",
+    },
+  },
+  audit: {
+    enabled: true,
+    logToClient: true,
+    logToFile: false,
+    logFilePath: "",
+    httpEndpoint: "",
+  },
+});
+
+function writeProjectBranchRequiredFixture(tempRoot) {
+  fs.writeFileSync(
+    path.join(tempRoot, ".opencode", "devai-aidd-plugin.project.jsonc"),
+    TEST_PROJECT_JSONC,
+    "utf8",
+  );
+}
+
 function createTempWorkspace() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-regression-"));
   const commandsDir = path.join(tempRoot, ".opencode", "commands");
   fs.mkdirSync(commandsDir, { recursive: true });
   fs.writeFileSync(path.join(commandsDir, "bmad-bmm-quick-dev.md"), "# quick dev\n", "utf8");
   fs.writeFileSync(path.join(commandsDir, "bmad-bmm-create-prd.md"), "# create prd\n", "utf8");
+  writeProjectBranchRequiredFixture(tempRoot);
   return tempRoot;
 }
 
@@ -1021,9 +1206,14 @@ async function verifySchemaVersionEnforcement() {
  */
 async function verifyResolveWorkflowPolicy() {
   const { resolveWorkflowPolicy } = await import(resolveWorkflowPolicyModuleUrl);
-  const { DEFAULT_PLUGIN_CONFIG } = await import(
-    pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href
-  );
+  // `DEFAULT_PLUGIN_CONFIG` no longer ships field values — build a synthetic
+  // runtime config from the test fixtures to exercise the resolver contract.
+  const runtimeConfig = {
+    branch: TEST_BRANCH_CONFIG,
+    workflowPolicy: TEST_WORKFLOW_POLICY,
+    audit: {},
+    debug: {},
+  };
 
   // Case 1: matched command
   const matchedContext = {
@@ -1033,7 +1223,7 @@ async function verifyResolveWorkflowPolicy() {
     detectedAt: "2026-05-08T00:00:00.000Z",
     phase: "start",
   };
-  const matchedResult = resolveWorkflowPolicy(matchedContext, DEFAULT_PLUGIN_CONFIG);
+  const matchedResult = resolveWorkflowPolicy(matchedContext, runtimeConfig);
   assert.equal(
     matchedResult.outcome,
     "allow",
@@ -1072,7 +1262,7 @@ async function verifyResolveWorkflowPolicy() {
     detectedAt: "2026-05-08T00:00:00.000Z",
     phase: "start",
   };
-  const unmatchedResult = resolveWorkflowPolicy(unmatchedContext, DEFAULT_PLUGIN_CONFIG);
+  const unmatchedResult = resolveWorkflowPolicy(unmatchedContext, runtimeConfig);
   assert.equal(
     unmatchedResult.outcome,
     "ask",
@@ -1089,7 +1279,7 @@ async function verifyResolveWorkflowPolicy() {
   );
 
   // Case 3: null context
-  const nullResult = resolveWorkflowPolicy(null, DEFAULT_PLUGIN_CONFIG);
+  const nullResult = resolveWorkflowPolicy(null, runtimeConfig);
   assert.equal(
     nullResult.outcome,
     "skip",
@@ -1185,7 +1375,7 @@ async function verifyEffectiveConfigNormalizationContract() {
 
   // Sanity: the in-memory default already satisfies the contract.
   assertBranchShapeNormalized(
-    DEFAULT_PLUGIN_CONFIG.branch,
+    TEST_BRANCH_CONFIG,
     "verifyEffectiveConfigNormalizationContract.defaults",
   );
 
@@ -1257,8 +1447,8 @@ async function verifyEffectiveConfigNormalizationContract() {
     for (const key of VALUE_EQUIVALENT_KEYS) {
       assert.deepEqual(
         resultGlobalOnly.config.branch[key],
-        DEFAULT_PLUGIN_CONFIG.branch[key],
-        `verifyEffectiveConfigNormalizationContract: branch.${key} value must equal DEFAULT_PLUGIN_CONFIG.branch.${key} when only global template is installed`,
+        TEST_BRANCH_CONFIG[key],
+        `verifyEffectiveConfigNormalizationContract: branch.${key} value must equal TEST_BRANCH_CONFIG.${key} when only global template is installed`,
       );
     }
 
@@ -1530,6 +1720,18 @@ async function verifyEffectivePolicyDeterminism() {
           longLivedBranches: ["main", "develop"],
           commandTypeMap: { "bmad-bmm-dev-story": "feat" },
         },
+        // `DEFAULT_PLUGIN_CONFIG.workflowPolicy` is now empty — the test
+        // exercises the "matched policy" branch of resolveWorkflowPolicy, so
+        // the project JSONC must supply an explicit entry for the command
+        // under test.
+        workflowPolicy: {
+          "bmad-bmm-dev-story": {
+            category: "implementation",
+            identityStrategy: "story",
+            branchRequired: true,
+            finalization: "commit-and-push",
+          },
+        },
       }),
       "utf8",
     );
@@ -1716,11 +1918,13 @@ async function verifyBranchServiceContracts() {
     detectedAt: "2026-05-08T00:00:00.000Z",
     phase: "start",
   };
-  const workflowPolicy = DEFAULT_PLUGIN_CONFIG.workflowPolicy["bmad-bmm-quick-dev"];
+  // `branchRequired` is opt-in via project JSONC (defaults no longer set it).
+  // Use the test fixture which carries `branchRequired: true` for impl workflows.
+  const workflowPolicy = TEST_WORKFLOW_POLICY["bmad-bmm-quick-dev"];
   const candidate = branchService.computeCandidateBranchName({
     workflowContext,
     workflowPolicy,
-    branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+    branchConfig: TEST_BRANCH_CONFIG,
   });
   assert.equal(
     candidate,
@@ -1734,7 +1938,7 @@ async function verifyBranchServiceContracts() {
       arguments: "",
     },
     workflowPolicy,
-    branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+    branchConfig: TEST_BRANCH_CONFIG,
   });
   assert.equal(
     fallbackCandidate,
@@ -1749,7 +1953,7 @@ async function verifyBranchServiceContracts() {
       arguments: "ABC-123 docs refresh",
     },
     workflowPolicy,
-    branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+    branchConfig: TEST_BRANCH_CONFIG,
   });
   assert.equal(
     defaultTypeCandidate,
@@ -1760,7 +1964,7 @@ async function verifyBranchServiceContracts() {
   const requiredStrategy = branchService.evaluateBranchStrategy({
     workflowContext,
     workflowPolicy,
-    branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+    branchConfig: TEST_BRANCH_CONFIG,
     currentBranch: "main",
   });
   assert.equal(
@@ -1779,8 +1983,8 @@ async function verifyBranchServiceContracts() {
       ...workflowContext,
       commandName: "bmad-bmm-create-prd",
     },
-    workflowPolicy: DEFAULT_PLUGIN_CONFIG.workflowPolicy["bmad-bmm-create-prd"],
-    branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+    workflowPolicy: TEST_WORKFLOW_POLICY["bmad-bmm-create-prd"],
+    branchConfig: TEST_BRANCH_CONFIG,
     currentBranch: "docs/ABC-123-prd",
   });
   assert.equal(
@@ -1804,7 +2008,7 @@ async function verifyBranchServiceContracts() {
     strategy: branchService.evaluateBranchStrategy({
       workflowContext,
       workflowPolicy,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       currentBranch: "feat/ABC-999-other-work",
     }),
     candidateName: candidate,
@@ -1820,7 +2024,7 @@ async function verifyBranchServiceContracts() {
     workflowContext,
     workflowPolicy,
     branchConfig: {
-      ...DEFAULT_PLUGIN_CONFIG.branch,
+      ...TEST_BRANCH_CONFIG,
       validationRegex: "[",
     },
   });
@@ -1851,10 +2055,10 @@ async function verifyBranchProposalIntegration() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         resolvePolicy(workflowContext) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[workflowContext.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(workflowContext.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) {
             return { outcome: "ask", details: { fallback: {} } };
           }
@@ -1996,11 +2200,11 @@ async function verifyBranchProposalIntegration() {
       {
         workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
         workflowState: noGitWorkflowState,
-        branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+        branchConfig: TEST_BRANCH_CONFIG,
         pluginContext: {
           directory: noGitWorkspace,
           resolvePolicy(workflowContext) {
-            const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[workflowContext.commandName];
+            const policy = defaultPolicyWithLegacyBranchRequired(workflowContext.commandName, DEFAULT_PLUGIN_CONFIG);
             if (!policy) {
               return { outcome: "ask", details: { fallback: {} } };
             }
@@ -2073,9 +2277,9 @@ async function verifyBranchProposalIntegration() {
       detectedAt: "2026-05-08T00:00:00.000Z",
       phase: "start",
     },
-    workflowPolicy: DEFAULT_PLUGIN_CONFIG.workflowPolicy["bmad-bmm-quick-dev"],
+    workflowPolicy: TEST_WORKFLOW_POLICY["bmad-bmm-quick-dev"],
     branchConfig: {
-      ...DEFAULT_PLUGIN_CONFIG.branch,
+      ...TEST_BRANCH_CONFIG,
       validationRegex: "^feat\\/[A-Z]+-\\d+-must-fail$",
     },
   });
@@ -2789,11 +2993,11 @@ async function verifyApprovalRequestFromBranchProposal() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -2899,11 +3103,11 @@ async function verifyApprovalRequestFromInitProposal() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: noGitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -2989,11 +3193,11 @@ async function verifyApprovalIdempotency() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -3073,11 +3277,11 @@ async function verifyNoApprovalForNonWorkflowAndPlanning() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -3148,11 +3352,11 @@ async function verifyApprovalRequestPayloadShape() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -3287,11 +3491,11 @@ async function verifyApprovalPromptDeliveryFailureAudit() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -3387,11 +3591,11 @@ async function verifyPriorStateCarryOver() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -4487,11 +4691,11 @@ async function verifyStaleGitFieldsInvalidatedOnReentry() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -4982,11 +5186,11 @@ async function verifyApprovalExplanationHookIntegration() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -5661,11 +5865,11 @@ async function verifyCommandExecuteBeforePromotesQueueHead() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -5924,11 +6128,11 @@ async function verifyApprovalRequestedAuditIncludesActionId() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -5986,11 +6190,11 @@ async function verifyApprovalRequestedAuditDetailsShape() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -9331,11 +9535,11 @@ async function verifyStory34ApprovalRequestedCarriesCorrelationAxes() {
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev"]),
       workflowState,
-      branchConfig: DEFAULT_PLUGIN_CONFIG.branch,
+      branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
         directory: gitWorkspace,
         resolvePolicy(wfCtx) {
-          const policy = DEFAULT_PLUGIN_CONFIG.workflowPolicy[wfCtx.commandName];
+          const policy = defaultPolicyWithLegacyBranchRequired(wfCtx.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) return { outcome: "ask", details: { fallback: {} } };
           return { outcome: "allow", details: { policy } };
         },
@@ -12178,8 +12382,8 @@ async function verifySessionDeletedClearsState() {
 // but `handlers.event` must be the load-bearing path: a native flow that
 // only ever calls `handlers.event({ event })` must still publish approvals,
 // match question.replied to the active approval, route deny through
-// recovery, clear session state, and run finalization fallback via
-// session.idle. The two assertions below pin the new contract:
+// recovery, and clear session state. The two assertions below pin the new
+// contract:
 //
 // 1. `verifyNativeEventHandlerExists` — the bootstrap must expose a callable
 //    `event` handler that accepts the native payload envelope (`{ event:

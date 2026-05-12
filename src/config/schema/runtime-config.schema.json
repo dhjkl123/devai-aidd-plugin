@@ -73,7 +73,7 @@
             "description": "Optional artifact key for singleton artifact strategies."
           }
         },
-        "required": ["category", "identityStrategy", "branchRequired", "finalization"],
+        "required": ["category", "identityStrategy", "finalization"],
         "additionalProperties": true
       },
       "description": "Per-command workflow policy mappings."

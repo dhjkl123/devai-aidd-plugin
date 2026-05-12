@@ -154,7 +154,7 @@ export const RUNTIME_CONFIG_SCHEMA = {
             description: "Optional artifact key for singleton artifact strategies.",
           },
         },
-        required: ["category", "identityStrategy", "branchRequired", "finalization"],
+        required: ["category", "identityStrategy", "finalization"],
         // Allow forward-compatible per-command extension keys (e.g. future
         // priority/requiresApproval fields) without breaking older hosts.
         additionalProperties: true,

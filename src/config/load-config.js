@@ -1,5 +1,6 @@
 import path from "node:path";
 import { DEFAULT_PLUGIN_CONFIG } from "./defaults.js";
+import { BASELINE_TEMPLATE_TEXT } from "./baseline-template.generated.js";
 import {
   GLOBAL_CONFIG_DIR,
   GLOBAL_CONFIG_FILE_NAME,
@@ -88,14 +89,59 @@ export function mergeConfigs(layers) {
 // All branch.* fields downstream consumers depend on are filled with safe
 // defaults HERE so neither `src/services/git/branch-service.js` nor
 // `src/services/workflow/resolve-workflow-policy.js` need to repeat per-field
-// `|| <default>` fallbacks. After Story 4.1, those services receive an
-// already-normalized effective config and act as thin pass-throughs.
-const SAFE_BRANCH_DEFAULTS = {
-  pattern: "{type}/{ticket}-{slug}",
-  defaultType: "chore",
-  fallbackTicket: "no-ticket",
-  validationRegex: "",
-};
+// `|| <default>` fallbacks.
+//
+// Source of "default values":
+//   - `pattern`, `defaultType`, `fallbackTicket`, `validationRegex`,
+//     `commandTypeMap` and the rest of the user-facing knobs come from the
+//     bundled baseline (`templates/devai-aidd-plugin.global.jsonc`, embedded
+//     into `BASELINE_TEMPLATE_TEXT` at build time). Edit the template to
+//     change them — no JS code change required.
+//   - `longLivedBranches` is intentionally kept as a JS-side hardcoded
+//     ALWAYS-UNION list: `main` and `master` are universal across teams, so
+//     we always include them in the effective config regardless of what
+//     JSONC supplies. A user listing `["develop"]` ends up with
+//     `["main", "master", "develop"]` — they can ADD to the protected set
+//     but cannot remove `main`/`master`.
+const HARDCODED_LONG_LIVED_BRANCHES = ["main", "master"];
+
+/**
+ * Parse the embedded baseline template once at module load. If parsing fails
+ * (would only happen if the template ships malformed — caught by the build),
+ * fall back to an empty object so loadRuntimeConfig still works.
+ */
+function parseBaselineTemplate() {
+  const result = parseJsoncResult(BASELINE_TEMPLATE_TEXT);
+  return result.ok && result.value && typeof result.value === "object" && !Array.isArray(result.value)
+    ? result.value
+    : {};
+}
+
+const BASELINE_CONFIG = parseBaselineTemplate();
+
+/**
+ * Frozen view of the baseline `branch.*` block. Exposed so the defensive
+ * shim in `src/services/git/branch-service.js#normalizeBranchConfig` (only
+ * triggered for raw test inputs that bypass `loadRuntimeConfig`) can read
+ * the same default values as the canonical normalization path, without
+ * keeping a second hardcoded copy. `longLivedBranches` is intentionally
+ * NOT included — that fallback stays hardcoded in both call sites because
+ * `main`/`master` protection must survive a baseline parse failure.
+ */
+export const BASELINE_BRANCH_CONFIG = Object.freeze({
+  pattern:
+    typeof BASELINE_CONFIG?.branch?.pattern === "string" && BASELINE_CONFIG.branch.pattern.length > 0
+      ? BASELINE_CONFIG.branch.pattern
+      : "{type}/{ticket}-{slug}",
+  defaultType:
+    typeof BASELINE_CONFIG?.branch?.defaultType === "string" && BASELINE_CONFIG.branch.defaultType.length > 0
+      ? BASELINE_CONFIG.branch.defaultType
+      : "chore",
+  fallbackTicket:
+    typeof BASELINE_CONFIG?.branch?.fallbackTicket === "string" && BASELINE_CONFIG.branch.fallbackTicket.length > 0
+      ? BASELINE_CONFIG.branch.fallbackTicket
+      : "no-ticket",
+});
 
 function normalizeConfig(config) {
   const merged = mergeObjects(cloneDefaultConfig(), config);
@@ -104,34 +150,29 @@ function normalizeConfig(config) {
     merged.branch = {};
   }
 
-  // longLivedBranches: dedupe, lowercase, trim, drop empty.
+  // longLivedBranches: dedupe, lowercase, trim, drop empty, then ALWAYS
+  // union with the JS-side hardcoded list. `main` and `master` are
+  // universally used across teams, so we never let a user accidentally
+  // remove them from the protected set — they can only ADD branches.
   const configuredLongLivedBranches = Array.isArray(merged.branch.longLivedBranches)
     ? merged.branch.longLivedBranches
     : [];
 
+  const normalizedLongLived = configuredLongLivedBranches
+    .map((branchName) => String(branchName || "").trim().toLowerCase())
+    .filter(Boolean);
+
   merged.branch.longLivedBranches = Array.from(
-    new Set(
-      configuredLongLivedBranches
-        .map((branchName) => String(branchName || "").trim().toLowerCase())
-        .filter(Boolean),
-    ),
+    new Set([...HARDCODED_LONG_LIVED_BRANCHES, ...normalizedLongLived]),
   );
 
   // defaultMergeTarget: trim only (empty string is a valid "no merge target" signal).
   merged.branch.defaultMergeTarget = String(merged.branch.defaultMergeTarget || "").trim();
 
-  // pattern / defaultType / fallbackTicket: safe-default fallback.
-  for (const key of ["pattern", "defaultType", "fallbackTicket"]) {
-    const value = merged.branch[key];
-    if (typeof value !== "string" || value.length === 0) {
-      merged.branch[key] = SAFE_BRANCH_DEFAULTS[key];
-    }
-  }
-
   // validationRegex: empty string is meaningful ("no regex enforced"),
   // so only normalize the non-string case (defensive — schema rejects this).
   if (typeof merged.branch.validationRegex !== "string") {
-    merged.branch.validationRegex = SAFE_BRANCH_DEFAULTS.validationRegex;
+    merged.branch.validationRegex = "";
   }
 
   // commandTypeMap: must be a plain object. Coerce non-objects to {}.
@@ -205,12 +246,20 @@ function tagErrorsWithLayer(errors, layerName) {
  *   - When every layer fails, the result is the normalized DEFAULT_PLUGIN_CONFIG.
  *
  * Precedence order (lowest to highest priority):
- *   DEFAULT_PLUGIN_CONFIG → globalConfig → projectConfig
+ *   DEFAULT_PLUGIN_CONFIG → baselineConfig → globalConfig → projectConfig
+ *
+ * `baselineConfig` is the bundled `templates/devai-aidd-plugin.global.jsonc`,
+ * embedded into the JS bundle at build time. It supplies the user-facing
+ * defaults (branch.pattern, branch.defaultType, branch.commandTypeMap, etc.)
+ * so neither `normalizeConfig` nor downstream services need to carry their
+ * own copies of those values. A user's installed global JSONC is still read
+ * from disk and overrides this baseline.
  *
  * @returns {{ mergedConfig: object, droppedLayers: string[], errors: import("ajv").ErrorObject[] }}
  */
 function validateAndRecover(globalConfig, projectConfig) {
   const orderedLayers = [
+    { name: "baselineConfig", value: BASELINE_CONFIG },
     { name: "globalConfig", value: globalConfig },
     { name: "projectConfig", value: projectConfig },
   ];

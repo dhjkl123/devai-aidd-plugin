@@ -17,13 +17,14 @@
  *                          `question.rejected` can be matched.
  *   - question.replied   → resolves approval or recovery through the shared
  *                          resolver in `permission-asked.js`.
- *   - question.rejected  → treats as a controlled approval deny (sourceHook:
- *                          "question.rejected") or as a no-op for recovery
- *                          when no matching pending record is found.
- *   - session.idle       → best-effort finalization fallback when no active
- *                          approval / recovery gate is pending. Populates
- *                          touchedFiles via `pluginContext.listChangedFiles()`
- *                          if no `file.edited` events were observed.
+
+ *   - question.rejected  → treats as a controlled `ignore-and-continue` skip
+ *                          (sourceHook: "question.rejected") since UI dismiss
+ *                          (X button) is closer in intent to "ignore" than to
+ *                          an explicit deny — the user never saw a Deny option
+ *                          (those were removed from commit/push/branch prompts).
+ *                          No-op for recovery when no matching pending record
+ *                          is found.
  *   - session.deleted    → clears all workflow/approval/recovery/touched-file
  *                          state for the session.
  *
@@ -34,9 +35,6 @@
 
 import { resolveApprovalOrRecovery } from "./permission-asked.js";
 import { readRecoveryGate } from "../services/approval/recovery-orchestrator.js";
-import { evaluateWorkflowFinalization } from "../services/workflow/evaluate-workflow-finalization.js";
-import { publishNextPlannedAction } from "../services/approval/publish-next-planned-action.js";
-import { normalizeTrackedFileEntry } from "../services/workflow/finalization-artifacts.js";
 import { APPROVAL_OUTCOMES } from "../services/approval/approval-resolution-state.js";
 import {
   APPROVAL_OUTCOME_ALIASES,
@@ -279,27 +277,6 @@ function safeWorkflowStateUpdate(workflowState, sessionID, patch) {
   }
 }
 
-function recordTouchedFilesFromList(workflowState, sessionID, paths, repositoryRoot) {
-  if (!Array.isArray(paths) || paths.length === 0) return;
-  const state = workflowState.get(sessionID);
-  if (!state) return;
-  const existing = Array.isArray(state.touchedFiles) ? state.touchedFiles : [];
-  const seen = new Set(existing.map((e) => e?.path).filter(Boolean));
-  const additions = [];
-  for (const filePath of paths) {
-    const normalized = normalizeTrackedFileEntry(filePath, repositoryRoot);
-    if (!normalized) continue;
-    if (seen.has(normalized.path)) continue;
-    seen.add(normalized.path);
-    additions.push(normalized);
-  }
-  if (additions.length === 0) return;
-  workflowState.set(sessionID, {
-    ...state,
-    touchedFiles: [...existing, ...additions],
-  });
-}
-
 async function handleCommandExecuted({ event, deps }) {
   const props = event?.properties ?? {};
   const sessionID = readSessionID(props);
@@ -340,31 +317,6 @@ async function handleCommandExecuted({ event, deps }) {
     }
   }
 
-  // F5/F6: command.executed signals a fresh workflow start (or re-entry).
-  // Clear the native finalization marker so a subsequent session.idle for
-  // this run can publish finalization. Without this, a session that was
-  // already finalized in a previous run would refuse to publish again on
-  // re-entry.
-  safeWorkflowStateUpdate(deps.workflowState, sessionID, {
-    nativeFinalizationPublishedAt: null,
-  });
-
-  // After detection-driven planning, if the session is now tracked AND has no
-  // active approval, attempt finalization-style publish in case the workflow
-  // command itself produced a finalizable state. This mirrors the previous
-  // command.execute.before → tool.execute.after(finish) chain when running
-  // under native event mode where `tool.execute.after` may not be invoked.
-  try {
-    const state = deps.workflowState?.get?.(sessionID);
-    if (!state?.commandName) return;
-    if (state.approvalCurrent) return;
-    // Only run finalization fallback when caller explicitly signalled that
-    // command.executed marks finalization (rare; most native flows still rely
-    // on session.idle for finalization). We do NOT auto-finalize here to
-    // avoid duplicate publishes during normal workflow start.
-  } catch {
-    // best-effort
-  }
 }
 
 function recordPendingApprovalQuestion({ workflowState, sessionID, questionID, questionHeader, active }) {
@@ -546,7 +498,7 @@ async function handleQuestionRejected({ event, deps }) {
       pluginContext: deps.pluginContext,
       sessionID,
       sourceHook: "question.rejected",
-      parsedOutcome: APPROVAL_OUTCOMES.DENY,
+      parsedOutcome: APPROVAL_OUTCOMES.IGNORE_AND_CONTINUE,
       parsedRecoveryChoice: null,
       echoedRequestId: pendingApproval.approvalId ?? null,
       echoedActionId: pendingApproval.actionId ?? null,
@@ -564,92 +516,6 @@ async function handleSessionDeleted({ event, deps }) {
     deps.workflowState?.clear?.(sessionID);
   } catch {
     // best-effort
-  }
-}
-
-async function handleSessionIdle({ event, deps }) {
-  const props = event?.properties ?? {};
-  const sessionID = readSessionID(props);
-  if (!sessionID) return;
-
-  const state = deps.workflowState?.get?.(sessionID);
-  if (!state?.commandName) return;
-  if (state.approvalCurrent) return;
-  const gate = readRecoveryGate(deps.workflowState, sessionID);
-  if (gate && !isTerminalRecoveryState(gate.state)) return;
-
-  // F5/F6 (adversarial review): idempotency marker. If finalization has
-  // already been evaluated for this session — either via legacy
-  // `tool.execute.after("finish")` or a prior `session.idle` — skip republish
-  // so we don't double-publish commit/push approvals across the legacy and
-  // native ingress paths.
-  if (state.nativeFinalizationPublishedAt) return;
-
-  // Populate touchedFiles from a git status fallback. We refresh on every
-  // session.idle so partial coverage (file.edited fired for 1 file but git
-  // status shows 10) cannot drop the remaining changes — see F8.
-  if (typeof deps.pluginContext?.listChangedFiles === "function") {
-    try {
-      const changed = deps.pluginContext.listChangedFiles();
-      recordTouchedFilesFromList(
-        deps.workflowState,
-        sessionID,
-        changed,
-        deps.pluginContext?.directory,
-      );
-    } catch {
-      // best-effort
-    }
-  }
-
-  // Run finalization assessment + commit/push approval publish, mirroring
-  // the legacy tool.execute.after(finish) finalization path.
-  try {
-    const assessment = await evaluateWorkflowFinalization({
-      workflowState: deps.workflowState,
-      sessionID,
-      input: { sessionID, tool: "finish" },
-      output: { changedFiles: [] },
-      audit: deps.audit,
-      pluginContext: deps.pluginContext,
-    });
-
-    const finishedState = deps.workflowState?.get?.(sessionID) ?? null;
-    const hasFinalizationProposal =
-      finishedState?.commitProposal != null || finishedState?.pushProposal != null;
-    const shouldPublishFinishApproval =
-      Boolean(finishedState?.commandName) &&
-      (assessment?.outcome === "allow" || hasFinalizationProposal);
-    if (shouldPublishFinishApproval) {
-      const workflowContext = {
-        commandName: finishedState.commandName,
-        arguments: finishedState.arguments || "",
-        sessionID,
-        detectedAt: finishedState.detectedAt,
-        phase: finishedState.phase || "finish",
-      };
-      const resolvedPolicy = deps.pluginContext?.resolvePolicy?.(workflowContext);
-      const workflowPolicy =
-        resolvedPolicy?.outcome === "allow"
-          ? resolvedPolicy.details?.policy || null
-          : null;
-      await publishNextPlannedAction({
-        workflowState: deps.workflowState,
-        workflowContext,
-        workflowPolicy,
-        audit: deps.audit,
-        pluginContext: deps.pluginContext,
-      });
-    }
-
-    // Stamp the marker AFTER the publish (or after assessment if no publish
-    // was needed) so subsequent session.idle events on the same session see
-    // it and short-circuit.
-    safeWorkflowStateUpdate(deps.workflowState, sessionID, {
-      nativeFinalizationPublishedAt: new Date().toISOString(),
-    });
-  } catch {
-    // finalization is best-effort under session.idle
   }
 }
 
@@ -693,9 +559,6 @@ export function createNativeEventHook(injections = {}) {
           return;
         case "question.rejected":
           await handleQuestionRejected({ event, deps });
-          return;
-        case "session.idle":
-          await handleSessionIdle({ event, deps });
           return;
         case "session.deleted":
           await handleSessionDeleted({ event, deps });

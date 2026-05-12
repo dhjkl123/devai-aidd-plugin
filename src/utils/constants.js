@@ -41,7 +41,6 @@ export const NATIVE_EVENT_TYPES = Object.freeze([
   "question.replied",
   "question.rejected",
   "command.executed",
-  "session.idle",
   "session.deleted",
 ]);
 

@@ -1,6 +1,8 @@
 node_modules/
 npm-debug.log*
 
+src/config/baseline-template.generated.js
+
 .opencode/state/
 
 dist/*

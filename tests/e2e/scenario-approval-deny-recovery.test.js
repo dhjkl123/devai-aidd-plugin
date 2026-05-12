@@ -185,7 +185,7 @@ async function nativeQuestionRepliedDenyOpensRecovery() {
   }
 }
 
-async function nativeQuestionRejectedTreatsAsDeny() {
+async function nativeQuestionRejectedTreatsAsIgnoreAndContinue() {
   const directory = createTempWorkspace({ initializeGit: true, withInitialCommit: true });
   try {
     const { handlers, mock } = await bootstrapPlugin(directory);
@@ -229,7 +229,11 @@ async function nativeQuestionRejectedTreatsAsDeny() {
 
     const resolved = findAuditEvents(mock.logs, "approval.resolved");
     assert.equal(resolved.length, 1, "question.rejected must produce exactly one approval.resolved");
-    assert.equal(resolved[0].outcome, "deny");
+    assert.equal(
+      resolved[0].outcome,
+      "ignore-and-continue",
+      "UI dismiss (X) maps to ignore-and-continue since user never saw a Deny option",
+    );
   } finally {
     cleanupTempWorkspace(directory);
   }
@@ -248,6 +252,6 @@ await runScenario(
   nativeQuestionRepliedDenyOpensRecovery,
 );
 await runScenario(
-  "native: question.rejected is treated as controlled deny",
-  nativeQuestionRejectedTreatsAsDeny,
+  "native: question.rejected is treated as controlled ignore-and-continue",
+  nativeQuestionRejectedTreatsAsIgnoreAndContinue,
 );

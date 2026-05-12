@@ -1,3 +1,5 @@
+import { BASELINE_BRANCH_CONFIG } from "../../config/load-config.js";
+
 // Story 4.1: This function is now a thin defensive pass-through.
 //
 // As of Story 4.1, every consumer in `src/index.js` and the hook layer
@@ -11,35 +13,36 @@
 // callers passing raw inputs) still get a usable shape, but we DO NOT expose
 // `normalizeBranchConfig` to new callers — the canonical input is the
 // already-normalized effective config produced by `loadRuntimeConfig`.
+//
+// Default values for `pattern`/`defaultType`/`fallbackTicket` are sourced from
+// `BASELINE_BRANCH_CONFIG` (the embedded global template) so this shim stays
+// in sync with the user-facing defaults without maintaining a second copy.
+// `longLivedBranches` is ALWAYS unioned with `["main", "master"]` (matching
+// the canonical normalization in `load-config.js#normalizeConfig`) — both
+// names are universal across teams and a caller cannot opt out.
 function normalizeBranchConfig(branchConfig = {}) {
   if (!branchConfig || typeof branchConfig !== "object" || Array.isArray(branchConfig)) {
     branchConfig = {};
   }
 
-  // Defensive shallow shape — for raw/test inputs that bypassed the
-  // canonical `normalizeConfig` pipeline. When called via the standard
-  // bootstrap, every field below is already populated and these fallbacks
-  // are no-ops. Round 2 follow-up (AI-5): `defaultMergeTarget` is included
-  // so this defensive shape exposes the same 7-key contract that
-  // `normalizeConfig` guarantees on the canonical path. Previously it
-  // only carried 6 keys and direct callers reading `defaultMergeTarget`
-  // would have received `undefined`.
+  const configuredLongLived = Array.isArray(branchConfig.longLivedBranches)
+    ? branchConfig.longLivedBranches
+    : [];
+
   return {
     pattern:
       typeof branchConfig.pattern === "string" && branchConfig.pattern.length > 0
         ? branchConfig.pattern
-        : "{type}/{ticket}-{slug}",
+        : BASELINE_BRANCH_CONFIG.pattern,
     defaultType:
       typeof branchConfig.defaultType === "string" && branchConfig.defaultType.length > 0
         ? branchConfig.defaultType
-        : "chore",
+        : BASELINE_BRANCH_CONFIG.defaultType,
     fallbackTicket:
       typeof branchConfig.fallbackTicket === "string" && branchConfig.fallbackTicket.length > 0
         ? branchConfig.fallbackTicket
-        : "no-ticket",
-    longLivedBranches: Array.isArray(branchConfig.longLivedBranches)
-      ? [...branchConfig.longLivedBranches]
-      : ["main", "master"],
+        : BASELINE_BRANCH_CONFIG.fallbackTicket,
+    longLivedBranches: Array.from(new Set(["main", "master", ...configuredLongLived])),
     defaultMergeTarget:
       typeof branchConfig.defaultMergeTarget === "string"
         ? branchConfig.defaultMergeTarget
@@ -151,17 +154,6 @@ export function evaluateBranchStrategy({
     return {
       requirement: "required",
       reason: "policy-requires-branch",
-      policyMatch,
-      isLongLived,
-      currentBranch: current,
-      validationRegex: normalizedConfig.validationRegex,
-    };
-  }
-
-  if (workflowPolicy.category === "implementation") {
-    return {
-      requirement: "optional",
-      reason: "implementation-policy-optional-branch",
       policyMatch,
       isLongLived,
       currentBranch: current,
