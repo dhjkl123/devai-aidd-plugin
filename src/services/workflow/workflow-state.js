@@ -152,6 +152,15 @@ export function createWorkflowStateStore() {
       if (copy.pendingRecoveryContext !== null && copy.pendingRecoveryContext !== undefined) {
         copy.pendingRecoveryContext = structuredClone(copy.pendingRecoveryContext);
       }
+      if (copy.startupChainCurrent !== null && copy.startupChainCurrent !== undefined) {
+        copy.startupChainCurrent = structuredClone(copy.startupChainCurrent);
+      }
+      if (copy.pendingStartupQuestion !== null && copy.pendingStartupQuestion !== undefined) {
+        copy.pendingStartupQuestion = structuredClone(copy.pendingStartupQuestion);
+      }
+      if (Array.isArray(copy.startupChainHistory)) {
+        copy.startupChainHistory = structuredClone(copy.startupChainHistory);
+      }
       // Story 2.5: deep-clone the recovery gate so callers cannot tamper with
       // gate state, options, or history through the returned snapshot.
       if (copy.recoveryGate !== null && copy.recoveryGate !== undefined) {

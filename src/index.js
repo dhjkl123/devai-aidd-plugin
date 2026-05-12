@@ -31,6 +31,9 @@ import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-poli
 import { runGitAction, runGitCommand } from "./services/git/run-git-command.js";
 import { buildRecoveryPrompt } from "./services/approval/build-recovery-prompt.js";
 import { buildQuestionInstruction } from "./services/approval/build-question-instruction.js";
+import {
+  buildStartupChainQuestionInstruction,
+} from "./services/approval/build-startup-chain-question-instruction.js";
 import { parseStatusPorcelainPaths } from "./services/workflow/parse-status-porcelain.js";
 // `SUPPORTED_HOOK_KEYS` is the canonical 6-key contract list referenced by
 // the regression suite. Keep the import live so the SOT anchor cannot be
@@ -285,6 +288,25 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         }
       },
 
+      async requestStartupChainApproval(chainRequest) {
+        debugLogger.log("requestStartupChainApproval", "received startup chain request", {
+          startupChainId: chainRequest?.startupChainId,
+          sessionID: chainRequest?.sessionID,
+          stepCount: Array.isArray(chainRequest?.steps) ? chainRequest.steps.length : 0,
+        });
+        // Startup chain prompts are delivered to the model via `output.parts`
+        // in `command-execute-before.js`. The model is instructed to call the
+        // native `question` tool with the chain question batch; native-event
+        // hook routes `question.asked` / `question.replied` back to
+        // `executeStartupChain`. No promptAsync delivery is required here.
+        const instruction = buildStartupChainQuestionInstruction(chainRequest);
+        debugLogger.log("requestStartupChainApproval", "startup chain will be handled by native question tool via output.parts", {
+          startupChainId: instruction.startupChainId,
+          sessionID: chainRequest?.sessionID,
+          questionKeys: instruction.metadata.questionKeys,
+        });
+      },
+
       // Story 2.5 (MEDIUM review): prompt-delivery adapter for recovery gates.
       // Mirrors `requestApproval` so a recovery gate's `options[]` reaches the
       // user immediately. Without this, AC1 — "those options are explained in
@@ -351,6 +373,13 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     });
 
     return {
+      // The `tool` surface is retained as part of the SUPPORTED_HOOK_KEYS
+      // contract (Story 4.5). The previous startup-approval custom tool was
+      // removed because opencode's ToolContext does not expose an
+      // `askQuestion()` API; startup chain approvals are now delivered to the
+      // model via `output.parts` instruction text and resolved through the
+      // native `question` tool flow (`question.asked` / `question.replied`).
+      tool: {},
       "command.execute.before": commandExecuteBeforeHandler,
       // Story 2.3 (LOW): tool.execute.before / tool.execute.after only consume
       // workflowState today (phase advancement). pluginContext is unused by

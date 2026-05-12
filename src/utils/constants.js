@@ -18,7 +18,7 @@ export const STATE_DIRECTORY_NAME = "devai-aidd-plugin";
 // signals via `event.type`. The native router (see `src/hooks/native-event.js`)
 // is what makes the plugin work when bundled into `.opencode/plugins`.
 //
-// `SUPPORTED_HOOK_KEYS` remains a 6-entry list to keep the existing wrapper
+// `SUPPORTED_HOOK_KEYS` remains the canonical native plugin surface list.
 // surface and regression tests (Story 4.5 src/dist parity) intact. The legacy
 // named handlers (`command.execute.before`, `tool.execute.before`,
 // `tool.execute.after`, `permission.asked`, `file.edited`) are now
@@ -26,6 +26,7 @@ export const STATE_DIRECTORY_NAME = "devai-aidd-plugin";
 // harness and any non-native invocation path; they are NOT required for native
 // opencode operation.
 export const SUPPORTED_HOOK_KEYS = Object.freeze([
+  "tool",
   "command.execute.before",
   "tool.execute.before",
   "tool.execute.after",

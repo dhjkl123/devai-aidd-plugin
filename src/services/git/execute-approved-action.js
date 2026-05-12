@@ -1,106 +1,12 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-
 import { publishNextPlannedAction } from "../approval/publish-next-planned-action.js";
 import { buildCommitAction, executeCommit } from "./commit-service.js";
 import { buildPushAction, executePush } from "./push-service.js";
-import {
-  buildInitAction,
-  executeInit,
-  DEFAULT_GITIGNORE_LINES,
-} from "./init-service.js";
+import { buildInitAction, executeInit } from "./init-service.js";
 import { buildBaselineCommitProposal } from "./build-init-proposal.js";
 import { checkRepositoryReadiness } from "./check-repository-readiness.js";
 import { planBranchProposal } from "./plan-branch-proposal.js";
-
-/**
- * strengthen-approval-prompt-instructions follow-up: normalize a raw user
- * answer string (e.g. "Add to .gitignore and Commit (Recommended)") into the
- * same lowercase token shape used by `permission-asked-aliases.js`.
- *
- * Mirrors the steps in `native-event.js:normalizeAnswerKey` so this module
- * does not have to import the hook.
- */
-function normalizeUserAnswer(answer) {
-  if (typeof answer !== "string") return "";
-  return answer
-    .toLowerCase()
-    .replace(/\s*\(.*\)\s*$/, "")
-    .replace(/^[^a-z0-9]+/, "")
-    .replace(/[^a-z0-9-]+/g, " ")
-    .trim();
-}
-
-/**
- * Append unique .gitignore rules to the project's `.gitignore`, creating the
- * file if it does not exist. Returns true when at least one rule was newly
- * written; false otherwise. Best-effort: IO errors are swallowed and surfaced
- * via the audit channel so the commit path can still proceed (the user
- * explicitly accepted that risk by picking "Commit Anyway" if this fails).
- */
-async function appendGitignoreRules(directory, rules, audit) {
-  if (typeof directory !== "string" || directory.length === 0) return false;
-  if (!Array.isArray(rules) || rules.length === 0) return false;
-  const target = join(directory, ".gitignore");
-  let existing = "";
-  try {
-    if (existsSync(target)) {
-      existing = readFileSync(target, "utf8");
-    }
-  } catch (error) {
-    if (audit) {
-      try {
-        await audit.info("init.gitignore.read.failed", {
-          event: "init.gitignore.read.failed",
-          timestamp: new Date().toISOString(),
-          workflow: null,
-          command: null,
-          sessionID: null,
-          outcome: "skip",
-          details: { reason: "readFileSync-threw", error: error?.message ?? String(error) },
-        });
-      } catch {
-        // best-effort
-      }
-    }
-    existing = "";
-  }
-  const existingLines = new Set(
-    existing
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0),
-  );
-  const additions = rules.filter((rule) => !existingLines.has(rule));
-  if (additions.length === 0) return false;
-  const separator = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
-  const block =
-    (existing.length === 0
-      ? ""
-      : "# Added by devai-aidd-plugin to shield sensitive paths from the baseline commit\n");
-  const body = existing + separator + block + additions.join("\n") + "\n";
-  try {
-    writeFileSync(target, body, "utf8");
-  } catch (error) {
-    if (audit) {
-      try {
-        await audit.info("init.gitignore.append.failed", {
-          event: "init.gitignore.append.failed",
-          timestamp: new Date().toISOString(),
-          workflow: null,
-          command: null,
-          sessionID: null,
-          outcome: "skip",
-          details: { reason: "writeFileSync-threw", error: error?.message ?? String(error) },
-        });
-      } catch {
-        // best-effort
-      }
-    }
-    return false;
-  }
-  return true;
-}
+import { buildBranchAction, executeBranch } from "./branch-action-service.js";
+import { resolveBaselineCommitFiles } from "./baseline-commit-service.js";
 
 function buildRepositorySnapshot(state) {
   const details = state?.readiness?.details ?? {};
@@ -476,72 +382,17 @@ export async function executeApprovedAction({
     let baselineFiles = approvalRequest.proposal.files ?? [];
     let baselineAllowEmpty = approvalRequest.proposal?.allowEmpty === true;
     if (isBaselineCommit) {
-      const normalizedAnswer = normalizeUserAnswer(approvalRequest.userAnswer);
-      const sensitiveRules = Array.isArray(approvalRequest.proposal?.sensitiveRules)
-        ? approvalRequest.proposal.sensitiveRules
-        : [];
-      const setupGitignore =
-        normalizedAnswer === "setup gitignore and commit" ||
-        // legacy label retained for backward compat with the previous build
-        (normalizedAnswer === "add to gitignore and commit" && sensitiveRules.length > 0);
-      if (setupGitignore) {
-        // The default template covers common no-go paths (.env, *.pem,
-        // node_modules/, _bmad-output/, etc.). Sensitive rules add any
-        // extras the scan flagged for this specific working tree.
-        const rulesToAppend = Array.from(
-          new Set([...DEFAULT_GITIGNORE_LINES, ...sensitiveRules]),
-        );
-        const appended = await appendGitignoreRules(
-          approvalRequest.proposal.directory ?? pluginContext?.directory ?? "",
-          rulesToAppend,
-          audit,
-        );
-        if (appended && typeof pluginContext?.listChangedFiles === "function") {
-          let refreshed = null;
-          try {
-            refreshed = pluginContext.listChangedFiles();
-          } catch (error) {
-            if (audit) {
-              try {
-                await audit.info("baseline-commit.gitignore.refresh.failed", {
-                  event: "baseline-commit.gitignore.refresh.failed",
-                  timestamp: new Date().toISOString(),
-                  workflow: workflowContext.commandName,
-                  command: workflowContext.commandName,
-                  sessionID,
-                  outcome: "skip",
-                  details: { reason: "listChangedFiles-threw", error: error?.message ?? String(error) },
-                });
-              } catch {
-                // best-effort
-              }
-            }
-            refreshed = null;
-          }
-          if (Array.isArray(refreshed)) {
-            baselineFiles = refreshed;
-            baselineAllowEmpty = refreshed.length === 0;
-            if (audit) {
-              try {
-                await audit.info("baseline-commit.gitignore.updated", {
-                  event: "baseline-commit.gitignore.updated",
-                  timestamp: new Date().toISOString(),
-                  workflow: workflowContext.commandName,
-                  command: workflowContext.commandName,
-                  sessionID,
-                  outcome: "allow",
-                  details: {
-                    rulesAppended: rulesToAppend,
-                    filesRemaining: refreshed.length,
-                  },
-                });
-              } catch {
-                // best-effort
-              }
-            }
-          }
-        }
-      }
+      const resolvedBaseline = await resolveBaselineCommitFiles({
+        answer: approvalRequest.userAnswer,
+        proposal: approvalRequest.proposal,
+        directory: pluginContext?.directory ?? "",
+        listChangedFiles: pluginContext?.listChangedFiles?.bind(pluginContext),
+        audit,
+        workflowContext,
+        sessionID,
+      });
+      baselineFiles = resolvedBaseline.files;
+      baselineAllowEmpty = resolvedBaseline.allowEmpty;
     }
 
     const plan = buildCommitAction({
@@ -613,6 +464,54 @@ export async function executeApprovedAction({
           pluginContext,
         });
       }
+    }
+  } else if (
+    (approvalRequest.actionType === "branch/create" ||
+      approvalRequest.actionType === "branch/switch") &&
+    approvalRequest.proposal?.kind === "branch"
+  ) {
+    const plan = buildBranchAction({
+      proposal: approvalRequest.proposal,
+      correlationId: approvalRequest.proposal.correlationId ?? null,
+    });
+    const expectedBranchState = {
+      ...(repositorySnapshot ?? {}),
+      headBranch: plan.targetBranch,
+    };
+    envelope = await executeBranch({
+      plan,
+      approval: { resolvedAt: approvedAt },
+      expectedState: expectedBranchState,
+      repositorySnapshot,
+      workflowContext,
+      gitRunner: pluginContext?.gitActionRunner ?? null,
+      audit,
+      workflowState,
+    });
+
+    if (envelope.ok) {
+      let refreshedReadiness = state.readiness ?? null;
+      try {
+        refreshedReadiness = checkRepositoryReadiness({
+          directory: pluginContext?.directory,
+          gitRunner: pluginContext?.gitRunner,
+          policy: null,
+        });
+      } catch {
+        refreshedReadiness = {
+          ...(state.readiness ?? {}),
+          details: {
+            ...(state.readiness?.details ?? {}),
+            branch: envelope.details?.observedState?.headBranch ?? plan.targetBranch,
+          },
+        };
+      }
+      const nextState = workflowState.get(sessionID) ?? {};
+      workflowState.set(sessionID, {
+        ...nextState,
+        branchProposal: null,
+        readiness: refreshedReadiness,
+      });
     }
   } else if (
     approvalRequest.actionType === "push" &&
