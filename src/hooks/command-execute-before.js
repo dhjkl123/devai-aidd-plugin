@@ -14,6 +14,10 @@ import { planBranchProposal } from "../services/git/plan-branch-proposal.js";
 import { publishNextPlannedAction } from "../services/approval/publish-next-planned-action.js";
 import { buildQuestionInstruction } from "../services/approval/build-question-instruction.js";
 import { buildBaselineCommitProposal } from "../services/git/build-init-proposal.js";
+import { buildStartupChainPlan } from "../services/git/startup-chain-planner.js";
+import {
+  buildStartupChainQuestionInstruction,
+} from "../services/approval/build-startup-chain-question-instruction.js";
 
 function resolveCurrentBranch(input, context, pluginContext) {
   if (typeof input?.currentBranch === "string" && input.currentBranch.length > 0) {
@@ -61,6 +65,15 @@ function shouldSkipBranchPlanning(readiness, state) {
 
 function buildStartInstructionText({ commandName, readiness, approvalCurrent, state }) {
   const header = `Git workflow guard is active for /${commandName}.`;
+
+  if (state?.startupChainCurrent) {
+    try {
+      const instruction = buildStartupChainQuestionInstruction(state.startupChainCurrent);
+      if (instruction?.instructionText) return instruction.instructionText;
+    } catch {
+      // best-effort fallback to header
+    }
+  }
 
   // strengthen-approval-prompt-instructions follow-up: the user already
   // opted out of git automation for this session (Skip on Initialize Git or
@@ -142,6 +155,11 @@ export function createCommandExecuteBeforeHook(
           pendingActions: Array.isArray(priorState?.pendingActions)
             ? priorState.pendingActions
             : [],
+          startupChainCurrent: priorState?.startupChainCurrent ?? null,
+          pendingStartupQuestion: priorState?.pendingStartupQuestion ?? null,
+          startupChainHistory: Array.isArray(priorState?.startupChainHistory)
+            ? priorState.startupChainHistory
+            : [],
           lastContinuationDecision: priorState?.lastContinuationDecision ?? null,
           readiness: undefined,
           branchProposal: undefined,
@@ -189,6 +207,167 @@ export function createCommandExecuteBeforeHook(
           ...workflowState.get(context.sessionID),
           readiness,
         });
+
+        const stateForStartupChain = workflowState.get(context.sessionID);
+        const currentBranchForStartup = resolveCurrentBranch(input, context, pluginContext);
+        const startupChainPlan = buildStartupChainPlan({
+          readiness,
+          workflowContext: context,
+          workflowPolicy,
+          branchConfig,
+          currentBranch: currentBranchForStartup,
+          state: stateForStartupChain,
+        });
+
+        let startupChainPromptDelivered = false;
+        if (
+          startupChainPlan.shouldAsk === true &&
+          typeof pluginContext?.requestStartupChainApproval === "function"
+        ) {
+          const startupChainId = `startup-chain:${context.sessionID}:${context.commandName}`;
+          const startupChain = {
+            ...startupChainPlan,
+            startupChainId,
+            sessionID: context.sessionID,
+            commandName: context.commandName,
+            workflowContext: context,
+            workflowPolicy,
+            branchConfig,
+            createdAt: new Date().toISOString(),
+          };
+          workflowState.set(context.sessionID, {
+            ...workflowState.get(context.sessionID),
+            startupChainCurrent: startupChain,
+            pendingStartupQuestion: null,
+            initProposal: null,
+            commitProposal: null,
+            branchProposal: null,
+            approvalCurrent: null,
+          });
+          if (audit) {
+            try {
+              await audit.info("startup.chain.requested", {
+                event: "startup.chain.requested",
+                timestamp: startupChain.createdAt,
+                workflow: context.commandName,
+                command: context.commandName,
+                sessionID: context.sessionID,
+                outcome: "ask",
+                details: {
+                  startupChainId,
+                  questionKeys: startupChain.steps.map((step) => step.key),
+                  actionIds: startupChain.steps.map((step) => step.correlationId ?? null),
+                  correlationIds: startupChain.steps.map((step) => step.correlationId ?? null),
+                },
+              });
+            } catch {
+              // best-effort
+            }
+          }
+          try {
+            await pluginContext.requestStartupChainApproval(startupChain);
+            startupChainPromptDelivered = true;
+          } catch (error) {
+            workflowState.set(context.sessionID, {
+              ...workflowState.get(context.sessionID),
+              startupChainCurrent: null,
+              pendingStartupQuestion: null,
+            });
+            if (audit) {
+              try {
+                await audit.info("startup.chain.prompt.delivery.failed", {
+                  event: "startup.chain.prompt.delivery.failed",
+                  timestamp: new Date().toISOString(),
+                  workflow: context.commandName,
+                  command: context.commandName,
+                  sessionID: context.sessionID,
+                  outcome: "skip",
+                  details: {
+                    reason: "prompt-delivery-failed",
+                    startupChainId,
+                    error: error?.message ?? String(error),
+                  },
+                });
+              } catch {
+                // best-effort
+              }
+            }
+          }
+        }
+
+        if (startupChainPromptDelivered) {
+          const stateAfterStartupPrompt = workflowState.get(context.sessionID);
+          let startupInstruction = null;
+          try {
+            startupInstruction = buildStartupChainQuestionInstruction(
+              stateAfterStartupPrompt?.startupChainCurrent ?? null,
+            );
+          } catch {
+            startupInstruction = null;
+          }
+          if (audit) {
+            try {
+              await audit.info("git.readiness.checked", {
+                event: "git.readiness.checked",
+                timestamp: new Date().toISOString(),
+                workflow: context.commandName,
+                command: context.commandName,
+                sessionID: context.sessionID,
+                outcome: readiness.outcome,
+                details: {
+                  isGitRepository: readiness.details?.isGitRepository === true,
+                  hasRemote: readiness.details?.hasRemote === true,
+                  branch: readiness.details?.branch || null,
+                  durationMs: readinessDurationMs,
+                },
+              });
+            } catch {
+              // Best-effort only.
+            }
+            const initStep = stateAfterStartupPrompt?.startupChainCurrent?.steps?.find?.(
+              (step) => step.key === "init",
+            );
+            if (initStep) {
+              try {
+                await audit.info("git.action.planned", {
+                  event: "git.action.planned",
+                  timestamp: new Date().toISOString(),
+                  workflow: context.commandName,
+                  command: context.commandName,
+                  sessionID: context.sessionID,
+                  outcome: "ask",
+                  details: {
+                    kind: "init",
+                    requiresApproval: true,
+                    startupChainId: stateAfterStartupPrompt.startupChainCurrent.startupChainId,
+                  },
+                });
+              } catch {
+                // Best-effort only.
+              }
+            }
+          }
+          if (!Array.isArray(output.parts)) {
+            output.parts = [];
+          }
+          output.parts.push({
+            type: "text",
+            text: buildStartInstructionText({
+              commandName: context.commandName,
+              readiness,
+              approvalCurrent: null,
+              state: stateAfterStartupPrompt ?? null,
+            }),
+            synthetic: true,
+            metadata: {
+              source: "devai-git-workflow",
+              phase: "start",
+              startupChain: true,
+              ...(startupInstruction?.metadata ?? {}),
+            },
+          });
+          return;
+        }
 
         // strengthen-approval-prompt-instructions follow-up: if the user
         // already picked "Skip" on the Initialize Git prompt earlier in this

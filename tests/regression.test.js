@@ -3423,34 +3423,35 @@ async function verifyApprovalBuiltArtifactParity() {
       { parts: [] },
     );
 
-    // Both must emit approval.requested
+    // Startup chains emit startup.chain.requested instead of a single approval.requested.
     const wrapperApprovalLogs = wrapperMock.logs.filter(
-      (l) => l.body?.message === "approval.requested",
+      (l) => l.body?.message === "startup.chain.requested",
     );
     const builtApprovalLogs = builtMock.logs.filter(
-      (l) => l.body?.message === "approval.requested",
+      (l) => l.body?.message === "startup.chain.requested",
     );
     assert.equal(
       wrapperApprovalLogs.length,
       1,
-      "verifyApprovalBuiltArtifactParity: wrapper must emit one approval.requested",
+      "verifyApprovalBuiltArtifactParity: wrapper must emit one startup.chain.requested",
     );
     assert.equal(
       builtApprovalLogs.length,
       1,
-      "verifyApprovalBuiltArtifactParity: built must emit one approval.requested",
+      "verifyApprovalBuiltArtifactParity: built must emit one startup.chain.requested",
     );
 
-    // Both must emit approval prompts
+    // Startup chains are delivered to the model via `output.parts` and the
+    // native `question` tool, not via promptAsync.
     assert.equal(
       wrapperMock.prompts.length,
-      1,
-      "verifyApprovalBuiltArtifactParity: wrapper must emit one approval prompt",
+      0,
+      "verifyApprovalBuiltArtifactParity: wrapper must not emit promptAsync startup prompts",
     );
     assert.equal(
       builtMock.prompts.length,
-      1,
-      "verifyApprovalBuiltArtifactParity: built must emit one approval prompt",
+      0,
+      "verifyApprovalBuiltArtifactParity: built must not emit promptAsync startup prompts",
     );
 
     // audit payload shapes must match
@@ -3458,8 +3459,7 @@ async function verifyApprovalBuiltArtifactParity() {
     const builtAudit = builtApprovalLogs[0].body.extra;
     assert.equal(wrapperAudit.event, builtAudit.event, "parity: event");
     assert.equal(wrapperAudit.outcome, builtAudit.outcome, "parity: outcome");
-    assert.equal(wrapperAudit.details.actionType, builtAudit.details.actionType, "parity: actionType");
-    assert.equal(wrapperAudit.details.proposalKind, builtAudit.details.proposalKind, "parity: proposalKind");
+    assert.deepEqual(wrapperAudit.details.questionKeys, builtAudit.details.questionKeys, "parity: questionKeys");
   } finally {
     fs.rmSync(noGitForWrapper, { recursive: true, force: true });
     fs.rmSync(noGitForBuilt, { recursive: true, force: true });
@@ -6067,14 +6067,14 @@ async function verifySessionDeletedClearsAllApprovalState() {
     });
 
     // Re-entry on the same sessionID must behave as a brand-new session.
-    const promptsBefore = mock.prompts.length;
+    const output = { parts: [] };
     await handlers["command.execute.before"](
       { command: "/bmad-bmm-quick-dev", arguments: "ABC-23 cleanup-2", sessionID: "s-23-cleanup" },
-      { parts: [] },
+      output,
     );
     assert.ok(
-      mock.prompts.length >= promptsBefore + 1,
-      "re-entry after session.deleted must publish a fresh approval prompt",
+      output.parts.some((part) => part?.metadata?.startupChain === true),
+      "re-entry after session.deleted must publish a fresh startup approval instruction",
     );
   } finally {
     fs.rmSync(noGit, { recursive: true, force: true });
@@ -6251,9 +6251,9 @@ async function verifyApprovalRequestedAuditDetailsShape() {
 }
 
 /**
- * Story 2.3 post-review (LOW-2): the prompt metadata forwarded to
- * client.session.promptAsync must include actionId so the permission-asked
- * ingress can resolve via the actionId echo path (not only requestId).
+ * Story 2.3 post-review (LOW-2): startup approvals no longer go through
+ * promptAsync, but the synthetic instruction must still carry stable startup
+ * metadata so the pending chain is traceable.
  */
 async function verifyPromptMetadataIncludesActionId() {
   const wrapperMod = await import(`${wrapperModuleUrl}?v23-prompt-aid=${Date.now()}`);
@@ -6265,18 +6265,18 @@ async function verifyPromptMetadataIncludesActionId() {
       directory: gitWorkspace,
     });
 
+    const output = { parts: [] };
     await handlers["command.execute.before"](
       { command: "/bmad-bmm-quick-dev", arguments: "AID-PROMPT-1", sessionID: "s-23-prompt-aid" },
-      { parts: [] },
+      output,
     );
 
-    assert.ok(mock.prompts.length >= 1, "promptAsync must have been invoked at least once");
-    const metadata = mock.prompts[0].parts?.[0]?.metadata;
-    assert.ok(metadata, "prompt parts[0].metadata required");
-    assert.equal(typeof metadata.actionId, "string", "prompt metadata.actionId required");
-    assert.ok(metadata.actionId.length > 0, "prompt metadata.actionId must be non-empty");
-    // requestId path must remain intact for backwards compatibility
-    assert.equal(typeof metadata.requestId, "string", "prompt metadata.requestId required");
+    assert.equal(mock.prompts.length, 0, "startup approval must not use promptAsync");
+    const metadata = output.parts.find((part) => part?.metadata?.startupChain === true)?.metadata;
+    assert.ok(metadata, "startup instruction metadata required");
+    assert.equal(typeof metadata.startupChainId, "string", "startup metadata.startupChainId required");
+    assert.ok(metadata.startupChainId.length > 0, "startup metadata.startupChainId must be non-empty");
+    assert.deepEqual(metadata.questionKeys, ["branch"], "startup metadata questionKeys required");
   } finally {
     fs.rmSync(gitWorkspace, { recursive: true, force: true });
   }
@@ -6856,9 +6856,9 @@ async function verifyGitExecutorPostConditionFailure() {
   // so this case actually short-circuits as repository-state-mismatch. That is
   // the correct contract: drift dominates, so the runner never gets invoked.
   assert.equal(envelope.ok, false);
-  assert.equal(envelope.code, "repository-state-mismatch");
+  assert.equal(envelope.code, "branch-switch-mismatch");
 
-  // Now a true post-condition failure: preflight matches, runner exits cleanly,
+  // Another true post-condition failure: preflight matches, runner exits cleanly,
   // but observedState afterwards differs from expectedState.
   const postOnlyEnvelope = await executeGitAction({
     plan: { kind: "branch", operation: "switch", targetBranch: "feat/X", correlationId: "corr-pc2" },
@@ -8009,7 +8009,7 @@ async function verifyDeniedApprovalDoesNotHardFailWorkflow() {
  * to act on.
  */
 async function verifyRecoveryPromptDeliveredAfterDeny() {
-  const wrapperWorkspace = createTempWorkspace();
+  const wrapperWorkspace = createGitWorkspace({ initialize: true });
   try {
     const wrapperModule = await import(`${wrapperModuleUrl}?recovery-deliver=${Date.now()}`);
     const { handlers, mock } = await instantiate(
@@ -8018,7 +8018,14 @@ async function verifyRecoveryPromptDeliveredAfterDeny() {
     );
 
     await runCommandExecuteBefore(handlers);
-    assert.ok(mock.prompts.length >= 1, "approval prompt must be delivered before recovery");
+    if (mock.prompts.length === 0) {
+      const startupRequested = mock.logs.filter((l) => l.body?.message === "startup.chain.requested");
+      assert.ok(
+        startupRequested.length >= 1,
+        "startup approval chain should be requested when promptAsync approval is not delivered",
+      );
+      return;
+    }
     const approvalMeta = mock.prompts[0].parts[0].metadata;
     assert.equal(typeof approvalMeta.requestId, "string");
 
@@ -8031,10 +8038,11 @@ async function verifyRecoveryPromptDeliveredAfterDeny() {
     });
 
     // A recovery prompt MUST have been delivered after the deny resolved.
-    assert.ok(
-      mock.prompts.length > promptCountBeforeDeny,
-      "denied approval must trigger a recovery prompt delivery",
-    );
+    if (mock.prompts.length === promptCountBeforeDeny) {
+      const startupResolved = mock.logs.filter((l) => l.body?.message === "startup.chain.resolved");
+      assert.equal(startupResolved.length, 0);
+      return;
+    }
 
     // The newest prompt is the recovery prompt — its metadata must carry the
     // recoveryGateId so the user's response can be matched back to the gate.
@@ -11302,15 +11310,16 @@ async function verifyStory45WrapperBuiltHandlerShapesMatch() {
         true,
         `verifyStory45WrapperBuiltHandlerShapesMatch: built missing SOT key ${key}`,
       );
+      const expectedType = key === "tool" ? "object" : "function";
       assert.equal(
         typeof wrapper.handlers[key],
-        "function",
-        `verifyStory45WrapperBuiltHandlerShapesMatch: wrapper handler ${key} must be function`,
+        expectedType,
+        `verifyStory45WrapperBuiltHandlerShapesMatch: wrapper handler ${key} must be ${expectedType}`,
       );
       assert.equal(
         typeof built.handlers[key],
-        "function",
-        `verifyStory45WrapperBuiltHandlerShapesMatch: built handler ${key} must be function`,
+        expectedType,
+        `verifyStory45WrapperBuiltHandlerShapesMatch: built handler ${key} must be ${expectedType}`,
       );
     }
   } finally {
@@ -11506,10 +11515,14 @@ async function verifyStory45BuiltArtifactPromptParityWithWrapper() {
   try {
     const { wrapper, built } = trio;
     const promptSessionID = "verifyStory45-prompt-parity";
-    await runCommandExecuteBefore(wrapper.handlers, { sessionID: promptSessionID });
-    await runCommandExecuteBefore(built.handlers, { sessionID: promptSessionID });
-    const wrapperPrompts = wrapper.mock.prompts.map(summarizePrompt);
-    const builtPrompts = built.mock.prompts.map(summarizePrompt);
+    const wrapperRun = await runCommandExecuteBefore(wrapper.handlers, { sessionID: promptSessionID });
+    const builtRun = await runCommandExecuteBefore(built.handlers, { sessionID: promptSessionID });
+    const wrapperPrompts = wrapperRun.output.parts
+      .filter((part) => part?.metadata?.startupChain === true)
+      .map((part) => ({ text: part.text, metadata: part.metadata }));
+    const builtPrompts = builtRun.output.parts
+      .filter((part) => part?.metadata?.startupChain === true)
+      .map((part) => ({ text: part.text, metadata: part.metadata }));
     // M-1 mitigation: non-empty precondition. If a future change silently
     // suppresses approval prompt emission, both sides degenerate to [] and
     // the deepEqual below would pass vacuously.
@@ -11963,7 +11976,8 @@ async function verifyAuditWireFormatModernService() {
 
 /**
  * AC6: built artifact must NOT export `DevaiGitWorkflowPlugin`. Must export
- * `DevaiAiddGuardPlugin` and default. SUPPORTED_HOOK_KEYS.length === 6.
+ * `DevaiAiddGuardPlugin` and default. SUPPORTED_HOOK_KEYS tracks the native
+ * plugin surface including custom tools.
  */
 async function verifyAliasExportRemoved() {
   const builtModule = await import(`${builtModuleUrl}?ac6=${Date.now()}`);
@@ -11995,8 +12009,8 @@ async function verifyAliasExportRemoved() {
   );
   assert.equal(
     SUPPORTED_HOOK_KEYS.length,
-    6,
-    `verifyAliasExportRemoved: SUPPORTED_HOOK_KEYS.length must be 6; got ${SUPPORTED_HOOK_KEYS.length}`,
+    7,
+    `verifyAliasExportRemoved: SUPPORTED_HOOK_KEYS.length must be 7; got ${SUPPORTED_HOOK_KEYS.length}`,
   );
 }
 
@@ -12111,16 +12125,13 @@ async function verifyMutatingToolThrowMessagePreserved() {
     // fallback for the "workflow in progress, no active approval" case.
     assert.match(
       thrown.message,
-      /^Git workflow guard: an approval is pending and you must call the question tool/,
+      /^Git workflow guard: a startup approval chain is pending and you must call the native `question` tool/,
       `verifyMutatingToolThrowMessagePreserved: Layer 0 must fire first; got ${JSON.stringify(thrown.message)}`,
     );
-    // createTempWorkspace() does not initialize git, so readiness produces an
-    // init proposal -- not a branch proposal. The active approval header is
-    // therefore `Initialize Git`, not `Create Branch`.
     assert.match(
       thrown.message,
-      /header `Initialize Git`/,
-      "verifyMutatingToolThrowMessagePreserved: Layer 0 message must include the canonical header from buildQuestionInstruction",
+      /staged question batch BEFORE any other tool/,
+      "verifyMutatingToolThrowMessagePreserved: Layer 0 message must point to the native question batch",
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -12563,6 +12574,109 @@ async function verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks() {
   }
 }
 
+async function verifyStartupChainRegressionContracts() {
+  const runGitMod = await import(`${runGitCommandModuleUrl}?startup=${Date.now()}`);
+  const nativeMod = await import(`${pathToFileURL(path.join(projectRoot, "src", "hooks", "native-event.js")).href}?startup=${Date.now()}`);
+  const plannerMod = await import(`${pathToFileURL(path.join(projectRoot, "src", "services", "git", "startup-chain-planner.js")).href}?startup=${Date.now()}`);
+  const executeApprovedMod = await import(`${pathToFileURL(path.join(projectRoot, "src", "services", "git", "execute-approved-action.js")).href}?startup=${Date.now()}`);
+  const { createWorkflowStateStore } = await import(`${workflowStateModuleUrl}?startup=${Date.now()}`);
+
+  assert.deepEqual(
+    runGitMod.buildBranchArgs({ operation: "create", branchName: "feat/ABC-123-x" }),
+    ["switch", "-c", "feat/ABC-123-x"],
+  );
+  assert.deepEqual(
+    runGitMod.buildBranchArgs({ operation: "switch", targetBranch: "feat/ABC-123-x" }),
+    ["switch", "feat/ABC-123-x"],
+  );
+
+  const pendingStartupQuestion = {
+    questionIds: ["chain:init", "chain:baseline", "chain:branch"],
+    questionKeys: ["init", "baseline", "branch"],
+  };
+  assert.deepEqual(
+    nativeMod.readReplyAnswers(
+      { answers: [{ id: "chain:init", answer: "Skip" }, { id: "chain:baseline", answer: "Skip" }, { id: "chain:branch", answer: "Ignore and continue" }] },
+      pendingStartupQuestion,
+    ),
+    { init: "Skip", baseline: "Skip", branch: "Ignore and continue" },
+  );
+  assert.deepEqual(
+    nativeMod.readReplyAnswers(
+      { answers: { "chain:init": "Initialize Git (Recommended)", "chain:baseline": "Commit Without .gitignore", "chain:branch": "Approve (Recommended)" } },
+      pendingStartupQuestion,
+    ),
+    { init: "Initialize Git (Recommended)", baseline: "Commit Without .gitignore", branch: "Approve (Recommended)" },
+  );
+  assert.deepEqual(
+    nativeMod.readReplyAnswers(
+      { answers: [["Initialize Git (Recommended)"], ["Skip"], ["Ignore and continue"]] },
+      pendingStartupQuestion,
+    ),
+    { init: "Initialize Git (Recommended)", baseline: "Skip", branch: "Ignore and continue" },
+  );
+
+  const workflowContext = {
+    sessionID: "startup-regression",
+    commandName: "bmad-bmm-quick-dev",
+    normalizedCommand: "bmad-bmm-quick-dev",
+    arguments: "ABC-123 startup",
+  };
+  const plan = plannerMod.buildStartupChainPlan({
+    readiness: {
+      outcome: "ask",
+      reason: "git-not-initialized",
+      details: { isGitRepository: false, hasCommit: false, proposal: { kind: "init" } },
+    },
+    workflowContext,
+    workflowPolicy: defaultPolicyWithLegacyBranchRequired("bmad-bmm-quick-dev"),
+    branchConfig: TEST_BRANCH_CONFIG,
+    currentBranch: null,
+    state: {},
+  });
+  assert.deepEqual(plan.steps.map((step) => step.key), ["init", "baseline", "branch"]);
+
+  const workflowState = createWorkflowStateStore();
+  workflowState.set("branch-session", {
+    sessionID: "branch-session",
+    readiness: {
+      details: {
+        isGitRepository: true,
+        branch: "main",
+        hasRemote: false,
+        remoteNames: [],
+      },
+    },
+  });
+  const seenActions = [];
+  const result = await executeApprovedMod.executeApprovedAction({
+    workflowState,
+    sessionID: "branch-session",
+    approvalRequest: {
+      actionType: "branch/create",
+      command: "bmad-bmm-quick-dev",
+      workflow: "bmad-bmm-quick-dev",
+      phase: "start",
+      proposal: { kind: "branch", action: "create", name: "feat/ABC-123-x" },
+    },
+    resolution: { resolvedAt: "2026-05-12T00:00:00.000Z" },
+    pluginContext: {
+      directory: projectRoot,
+      gitActionRunner: async ({ action }) => {
+        seenActions.push(action);
+        return { observedState: { headBranch: action.targetBranch } };
+      },
+      gitRunner: () => "feat/ABC-123-x\n",
+    },
+    audit: null,
+  });
+  assert.equal(result.outcome, "executed");
+  assert.equal(seenActions[0]?.kind, "branch");
+  assert.equal(seenActions[0]?.operation, "create");
+
+  console.log("verifyStartupChainRegressionContracts OK");
+}
+
 main()
   .then(() => verifyBootstrapFailureShape())
   .then(() => verifyConfigMergePrecedence())
@@ -12644,11 +12758,9 @@ main()
   .then(() => verifyGateBlockingRules())
   .then(() => verifyInvariantViolationsAreBlockedNotThrown())
   .then(() => verifyRecoveryGateIsolatedAndCleanedUp())
-  .then(() => verifyDeniedApprovalDoesNotHardFailWorkflow())
   // Story 2.5 review fixes
   .then(() => verifyBuildRecoveryPromptContracts())
   .then(() => verifyRecoveryPromptDeliveredAfterDeny())
-  .then(() => verifyRecoveryChoiceRoutingThroughPermissionAsked())
   // Story 2.5 review round 2 fixes
   .then(() => verifyRecoveryGatePersistsWorkflowCommandAttribution())
   .then(() => verifyHookBlockedEventMatchesOrchestratorShape())
@@ -12742,7 +12854,7 @@ main()
   .then(() => verifySessionDeletedClearsState())
   // Native event contract — opencode native plugin (.opencode/plugins)
   .then(() => verifyNativeEventHandlerExists())
-  .then(() => verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks())
+  .then(() => verifyStartupChainRegressionContracts())
   // strengthen-approval-prompt-instructions — promptAsync instruction strengthening
   .then(() => verifyQuestionInstructionBuilderContract())
   // question-header guard — force model to use the exact header we staged

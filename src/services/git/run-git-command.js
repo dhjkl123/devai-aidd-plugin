@@ -40,6 +40,10 @@ function execGitSync(directory, args, timeoutMs) {
     env: {
       ...process.env,
       GIT_TERMINAL_PROMPT: "0",
+      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || "DevAI AIDD",
+      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL || "devai-aidd@example.invalid",
+      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || "DevAI AIDD",
+      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || "devai-aidd@example.invalid",
     },
   });
 }
@@ -163,6 +167,31 @@ export function buildPushArgs(action) {
   return ["push", remoteName, refspec];
 }
 
+export function buildBranchArgs(action) {
+  if (!action || typeof action !== "object") {
+    throw new Error("A valid branch action is required.");
+  }
+  const operation = typeof action.operation === "string" ? action.operation : null;
+  const branchName =
+    typeof action.branchName === "string" && action.branchName.length > 0
+      ? action.branchName
+      : null;
+  const targetBranch =
+    typeof action.targetBranch === "string" && action.targetBranch.length > 0
+      ? action.targetBranch
+      : branchName;
+
+  if (operation === "create") {
+    if (!branchName) throw new Error("Branch create actions require a branch name.");
+    return ["switch", "-c", branchName];
+  }
+  if (operation === "switch") {
+    if (!targetBranch) throw new Error("Branch switch actions require a target branch.");
+    return ["switch", targetBranch];
+  }
+  throw new Error(`Unsupported branch operation: ${String(operation)}`);
+}
+
 export async function runGitAction({ directory, action, timeoutMs = 5000 } = {}) {
   if (typeof directory !== "string" || directory.length === 0) {
     throw new Error("A valid directory is required for git action commands.");
@@ -217,6 +246,18 @@ export async function runGitAction({ directory, action, timeoutMs = 5000 } = {})
     // commit/push here without traversing the read-only allowlist.
     const stdout = await execGit(directory, ["init"], timeoutMs);
     return { stdout, observedState: null };
+  }
+
+  if (action.kind === "branch") {
+    const args = buildBranchArgs(action);
+    const stdout = await execGit(directory, args, timeoutMs);
+    let headBranch = null;
+    try {
+      headBranch = (await execGit(directory, ["symbolic-ref", "--short", "HEAD"], timeoutMs)).trim();
+    } catch {
+      headBranch = null;
+    }
+    return { stdout, observedState: { headBranch } };
   }
 
   throw new Error(`Unsupported git action command: ${String(action.kind)}`);

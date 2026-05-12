@@ -138,7 +138,7 @@ function matchesActiveRecoveryGate(gate, echoedGateId, parsedChoice) {
   return Boolean(parsedChoice);
 }
 
-async function deliverRecoveryPrompt({ pluginContext, gate, audit, sessionID, workflow, command }) {
+export async function deliverRecoveryPrompt({ pluginContext, gate, audit, sessionID, workflow, command }) {
   if (typeof pluginContext?.requestRecoveryDecision !== "function") return;
   if (!gate || !Array.isArray(gate.options) || gate.options.length === 0) return;
   try {
@@ -297,7 +297,8 @@ export async function resolveApprovalOrRecovery(args) {
       outcome === APPROVAL_OUTCOMES.ACCEPT &&
       (result.resolution?.actionKind === "commit" ||
         result.resolution?.actionKind === "push" ||
-        result.resolution?.actionKind === "init")
+        result.resolution?.actionKind === "init" ||
+        result.resolution?.actionKind === "branch")
     ) {
       const executionResult = await executeApprovedAction({
         workflowState,

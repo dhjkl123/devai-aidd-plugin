@@ -335,11 +335,15 @@ export async function executeGitAction(params = {}) {
   // (2) Preflight drift — must short-circuit BEFORE gitRunner is invoked,
   // because the repository state already disagrees with what the approval was
   // granted against. Mutating execution against drifted state is unsafe.
-  if (!snapshotsAgree(expectedState, repositorySnapshot)) {
+  const preflightExpectedState =
+    action.kind === "branch" && expectedState && repositorySnapshot
+      ? { ...expectedState, headBranch: repositorySnapshot.headBranch }
+      : expectedState;
+  if (!snapshotsAgree(preflightExpectedState, repositorySnapshot)) {
     const classification = classifyGitExecutionFailure({
       action,
       preflightDrift: true,
-      expectedState,
+      expectedState: preflightExpectedState,
       observedState: repositorySnapshot,
     });
     const envelope = buildFailureEnvelope({ action, classification });

@@ -22,7 +22,6 @@ import {
   createTempWorkspace,
   findAuditEvents,
   findFirstAuditEvent,
-  findApprovalPrompt,
   runScenario,
 } from "./helpers.js";
 
@@ -32,13 +31,14 @@ async function happyPathDetectsWorkflowAndPublishesBranchApproval() {
     const { handlers, mock } = await bootstrapPlugin(directory);
 
     const sessionID = "e2e-workflow-detection";
+    const output = { parts: [] };
     await handlers["command.execute.before"](
       {
         command: "/bmad-bmm-quick-dev",
         arguments: "ABC-123 add feature",
         sessionID,
       },
-      { parts: [] },
+      output,
     );
 
     const detectedEvents = findAuditEvents(mock.logs, "workflow.detected");
@@ -52,23 +52,17 @@ async function happyPathDetectsWorkflowAndPublishesBranchApproval() {
     assert.equal(readiness.details.isGitRepository, true);
     assert.equal(readiness.details.branch, "main");
 
-    const planned = findAuditEvents(mock.logs, "git.action.planned");
-    const branchPlanned = planned.find((event) => event.details?.kind === "branch");
-    assert.ok(branchPlanned, "branch action planned because seed branch != workflow branch");
+    const startupRequested = findFirstAuditEvent(mock.logs, "startup.chain.requested");
+    assert.ok(startupRequested, "startup.chain.requested fired for branch startup step");
+    assert.deepEqual(startupRequested.details.questionKeys, ["branch"]);
+    assert.equal(startupRequested.sessionID, sessionID);
 
-    const approvalRequested = findFirstAuditEvent(mock.logs, "approval.requested");
-    assert.ok(approvalRequested, "approval.requested fired for branch proposal");
-    assert.equal(approvalRequested.details.actionKind, "branch");
-    assert.equal(approvalRequested.sessionID, sessionID);
-
-    const prompt = findApprovalPrompt(mock.prompts);
-    assert.ok(prompt, "approval prompt was delivered to the runtime");
-    assert.equal(prompt.sessionID, sessionID);
-    assert.match(
-      prompt.parts[0].metadata.actionType,
-      /^branch\/(create|switch)$/,
-      "approval prompt actionType is the canonical branch subtype",
-    );
+    assert.equal(mock.prompts.length, 0, "startup prompt must not use promptAsync");
+    const startupPart = output.parts.find((part) => part?.metadata?.startupChain === true);
+    assert.ok(startupPart, "startup instruction part was emitted");
+    assert.deepEqual(startupPart.metadata.questionKeys, ["branch"]);
+    assert.match(startupPart.text, /native `question` tool/);
+    assert.doesNotMatch(startupPart.text, /devai_git_startup_approval/);
   } finally {
     cleanupTempWorkspace(directory);
   }

@@ -33,14 +33,19 @@
  * plugin failure and break unrelated handlers.
  */
 
-import { resolveApprovalOrRecovery } from "./permission-asked.js";
-import { readRecoveryGate } from "../services/approval/recovery-orchestrator.js";
+import { deliverRecoveryPrompt, resolveApprovalOrRecovery } from "./permission-asked.js";
+import {
+  openRecoveryFromExecution,
+  readRecoveryGate,
+} from "../services/approval/recovery-orchestrator.js";
 import { APPROVAL_OUTCOMES } from "../services/approval/approval-resolution-state.js";
 import {
   APPROVAL_OUTCOME_ALIASES,
   RECOVERY_CHOICE_ALIASES,
 } from "../services/approval/permission-asked-aliases.js";
 import { isTerminalRecoveryState } from "../services/approval/recovery-state.js";
+import { executeStartupChain } from "../services/git/startup-chain-executor.js";
+import { buildStartupChainQuestionInstruction } from "../services/approval/build-startup-chain-question-instruction.js";
 
 function summarizeEventProps(type, props) {
   if (!props || typeof props !== "object") return null;
@@ -147,6 +152,26 @@ function readQuestionID(props) {
   return null;
 }
 
+function readQuestionRecords(props) {
+  const questions = Array.isArray(props?.questions) ? props.questions : [];
+  if (questions.length > 0) {
+    return questions.map((question) => ({
+      id: typeof question?.id === "string" ? question.id : null,
+      header:
+        typeof question?.header === "string"
+          ? question.header
+          : typeof question?.title === "string"
+            ? question.title
+            : null,
+      options: Array.isArray(question?.options) ? question.options : [],
+    }));
+  }
+  const id = readQuestionID(props);
+  const header = readQuestionHeader(props);
+  if (!id && !header) return [];
+  return [{ id, header, options: props?.options ?? [] }];
+}
+
 function readQuestionHeader(props) {
   const candidates = [
     props?.header,
@@ -194,6 +219,51 @@ function readReplyAnswer(props) {
   const single = props?.answer;
   if (typeof single === "string" && single.length > 0) return single;
   return null;
+}
+
+export function readReplyAnswers(props, pendingStartupQuestion) {
+  const ids = Array.isArray(pendingStartupQuestion?.questionIds)
+    ? pendingStartupQuestion.questionIds
+    : [];
+  const keys = Array.isArray(pendingStartupQuestion?.questionKeys)
+    ? pendingStartupQuestion.questionKeys
+    : [];
+  const idToKey = new Map(ids.map((id, index) => [id, keys[index]]));
+  const answers = props?.answers;
+  const mapped = {};
+
+  if (Array.isArray(answers)) {
+    for (let index = 0; index < answers.length; index += 1) {
+      const entry = answers[index];
+      if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+        const id = entry.id ?? entry.questionID ?? entry.questionId;
+        const answer = entry.answer ?? entry.value ?? entry.label;
+        const key = typeof id === "string" ? idToKey.get(id) : null;
+        if (key && typeof answer === "string") mapped[key] = answer;
+        continue;
+      }
+      if (Array.isArray(entry)) {
+        const answer = entry.find((value) => typeof value === "string");
+        const key = keys[index];
+        if (key && typeof answer === "string") mapped[key] = answer;
+        continue;
+      }
+      if (typeof entry === "string") {
+        const key = keys[index];
+        if (key) mapped[key] = entry;
+      }
+    }
+  } else if (answers && typeof answers === "object") {
+    for (const [id, answer] of Object.entries(answers)) {
+      const key = idToKey.get(id);
+      if (key && typeof answer === "string") mapped[key] = answer;
+    }
+  } else if (typeof props?.answer === "string" && keys.length === 1) {
+    mapped[keys[0]] = props.answer;
+  }
+
+  const complete = keys.length > 0 && keys.every((key) => typeof mapped[key] === "string");
+  return complete ? mapped : null;
 }
 
 const APPROVAL_ANSWER_TOKENS = new Set([
@@ -345,6 +415,26 @@ function recordPendingRecoveryQuestion({ workflowState, sessionID, questionID, q
   });
 }
 
+function recordPendingStartupQuestion({ workflowState, sessionID, records, chain }) {
+  if (!Array.isArray(records) || records.length === 0 || !chain) return;
+  const questionKeys = Array.isArray(chain.steps) ? chain.steps.map((step) => step.key) : [];
+  const expectedIds = questionKeys.map((key) => `${chain.startupChainId}:${key}`);
+  // Prefer ids echoed back by the runtime when present; otherwise synthesise
+  // from the chain's expected id format so reply matching still works.
+  const questionIds = records.map((record, index) =>
+    typeof record.id === "string" && record.id.length > 0 ? record.id : expectedIds[index] ?? null,
+  );
+  safeWorkflowStateUpdate(workflowState, sessionID, {
+    pendingStartupQuestion: {
+      startupChainId: chain.startupChainId ?? null,
+      questionIds,
+      questionKeys,
+      questionHeaders: records.map((record) => record.header ?? null),
+      capturedAt: new Date().toISOString(),
+    },
+  });
+}
+
 function clearPendingApprovalQuestion(workflowState, sessionID) {
   safeWorkflowStateUpdate(workflowState, sessionID, { pendingApprovalQuestion: null });
 }
@@ -358,10 +448,47 @@ async function handleQuestionAsked({ event, deps }) {
   const sessionID = readSessionID(props);
   const questionID = readQuestionID(props);
   const questionHeader = readQuestionHeader(props);
-  if (!sessionID || !questionID) return;
+  if (!sessionID) return;
 
   const state = deps.workflowState?.get?.(sessionID);
   if (!state) return;
+
+  const startupChain = state.startupChainCurrent ?? null;
+  if (startupChain) {
+    const records = readQuestionRecords(props);
+    const expectedIds = new Set(
+      Array.isArray(startupChain.steps)
+        ? startupChain.steps.map((step) => `${startupChain.startupChainId}:${step.key}`)
+        : [],
+    );
+    let expectedHeaders = [];
+    try {
+      const expected = buildStartupChainQuestionInstruction(startupChain);
+      expectedHeaders = (expected.questions ?? []).map((q) => q.header);
+    } catch {
+      // best-effort: fall back to empty so header matching simply fails
+      // gracefully instead of crashing the hook.
+      expectedHeaders = [];
+    }
+    const headerMatch =
+      records.length === expectedHeaders.length &&
+      expectedHeaders.every((header, index) => records[index]?.header === header);
+    const hasStartupQuestion =
+      props?.metadata?.startupChain === true ||
+      records.some((record) => expectedIds.has(record.id)) ||
+      headerMatch;
+    if (hasStartupQuestion) {
+      recordPendingStartupQuestion({
+        workflowState: deps.workflowState,
+        sessionID,
+        records,
+        chain: startupChain,
+      });
+      return;
+    }
+  }
+
+  if (!questionID) return;
 
   // F4 (adversarial review): when a non-terminal recovery gate exists, always
   // route the question to recovery — regardless of whether the question header
@@ -405,10 +532,85 @@ async function handleQuestionReplied({ event, deps }) {
   const sessionID = readSessionID(props);
   const requestID = readReplyRequestID(props);
   const answer = readReplyAnswer(props);
-  if (!sessionID || !requestID) return;
+  if (!sessionID) return;
 
   const state = deps.workflowState?.get?.(sessionID);
   if (!state) return;
+
+  const pendingStartup = state.pendingStartupQuestion ?? null;
+  const startupChain = state.startupChainCurrent ?? null;
+  const startupMatches =
+    pendingStartup &&
+    startupChain &&
+    (!requestID ||
+      pendingStartup.questionIds?.includes?.(requestID) ||
+      requestID === pendingStartup.startupChainId);
+  if (startupMatches) {
+    const answers = readReplyAnswers(props, pendingStartup);
+    if (!answers) {
+      if (deps.audit) {
+        try {
+          await deps.audit.info("startup.chain.answer.unmatched", {
+            event: "startup.chain.answer.unmatched",
+            timestamp: new Date().toISOString(),
+            workflow: startupChain.commandName ?? null,
+            command: startupChain.commandName ?? null,
+            sessionID,
+            outcome: "skip",
+            details: {
+              startupChainId: startupChain.startupChainId ?? null,
+              questionIds: pendingStartup.questionIds ?? [],
+            },
+          });
+        } catch {
+          // best-effort
+        }
+      }
+      try {
+        await deps.pluginContext?.requestStartupChainApproval?.(startupChain);
+      } catch {
+        // best-effort: chain remains pending
+      }
+      return;
+    }
+
+    safeWorkflowStateUpdate(deps.workflowState, sessionID, { pendingStartupQuestion: null });
+    const executionResult = await executeStartupChain({
+      workflowState: deps.workflowState,
+      sessionID,
+      chain: startupChain,
+      answers,
+      pluginContext: deps.pluginContext,
+      audit: deps.audit,
+    });
+    if (executionResult?.outcome === "failed" && executionResult.envelope?.ok === false) {
+      try {
+        const recoveryResult = await openRecoveryFromExecution({
+          workflowState: deps.workflowState,
+          sessionID,
+          envelope: executionResult.envelope,
+          workflow: startupChain.commandName ?? null,
+          command: startupChain.commandName ?? null,
+          audit: deps.audit,
+        });
+        if (recoveryResult.outcome === "opened" && recoveryResult.gate) {
+          await deliverRecoveryPrompt({
+            pluginContext: deps.pluginContext,
+            gate: recoveryResult.gate,
+            audit: deps.audit,
+            sessionID,
+            workflow: startupChain.commandName ?? null,
+            command: startupChain.commandName ?? null,
+          });
+        }
+      } catch {
+        // best-effort
+      }
+    }
+    return;
+  }
+
+  if (!requestID) return;
 
   const pendingApproval = state.pendingApprovalQuestion ?? null;
   const pendingRecovery = state.pendingRecoveryQuestion ?? null;
