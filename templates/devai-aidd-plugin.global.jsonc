@@ -10,7 +10,12 @@
   //   Most-frequently-changed keys (recommended starting points):
   //     - branch.defaultMergeTarget — repo's primary integration branch.
   //     - branch.commandTypeMap     — map BMAD commands to branch type slugs.
-  //     - branch.longLivedBranches  — branches that should never be reused.
+  //     - branch.longLivedBranches  — extra branches that should never be reused.
+  //                                   "main" and "master" are ALWAYS included
+  //                                   by the runtime (hardcoded in the plugin),
+  //                                   so list only ADDITIONAL protected names
+  //                                   here. Removing them from this array does
+  //                                   not turn off main/master protection.
   //     - branch.validationRegex    — enforce team naming conventions.
   //     - workflowPolicy.<command>.branchRequired / finalization
   //                                   — opt commands in/out of branch + commit

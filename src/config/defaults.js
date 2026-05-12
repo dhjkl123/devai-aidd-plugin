@@ -10,12 +10,23 @@
 //   - workflowPolicy.<command>     → templates/devai-aidd-plugin.project.jsonc
 //
 // Code-side safety nets remain:
-//   - `normalizeConfig` in `src/config/load-config.js` fills `branch.pattern`,
-//     `branch.defaultType`, `branch.fallbackTicket`, `branch.validationRegex`
-//     when missing (`SAFE_BRANCH_DEFAULTS`), coerces `branch.commandTypeMap`
-//     to `{}`, and dedupes `branch.longLivedBranches`.
+//   - The bundled global template (`templates/devai-aidd-plugin.global.jsonc`)
+//     is embedded into the JS bundle at build time as `BASELINE_TEMPLATE_TEXT`
+//     and merged in as a "Layer 0" baseline by `validateAndRecover` in
+//     `src/config/load-config.js`. This supplies branch.pattern,
+//     branch.defaultType, branch.fallbackTicket, branch.validationRegex,
+//     branch.commandTypeMap, audit.*, and debug.* even when no JSONC has
+//     been installed yet.
+//   - `normalizeConfig` in `src/config/load-config.js` ALWAYS unions
+//     `branch.longLivedBranches` with `["main", "master"]` (universal across
+//     teams — a user can ADD branches but cannot remove these two), coerces
+//     non-string `branch.validationRegex` to `""`, coerces non-object
+//     `branch.commandTypeMap` to `{}`, and dedupes `branch.longLivedBranches`.
 //   - `normalizeBranchConfig` in `src/services/git/branch-service.js` provides
-//     the same defensive shape for direct callers that bypass loadRuntimeConfig.
+//     the same defensive shape for direct callers that bypass
+//     loadRuntimeConfig, sourcing pattern/defaultType/fallbackTicket from the
+//     baseline (via `BASELINE_BRANCH_CONFIG`) and keeping
+//     `longLivedBranches: ["main", "master"]` hardcoded.
 //   - `buildSafeDefaultPolicy` in `src/services/workflow/resolve-workflow-policy.js`
 //     returns a fallback policy shape (`branchRequired: false`,
 //     `finalization: "no-forced-finalization"`) when a command has no entry
