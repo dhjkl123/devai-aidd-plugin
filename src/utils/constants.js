@@ -6,6 +6,16 @@ export const GLOBAL_CONFIG_FILE_NAME = "devai-aidd-plugin.global.jsonc";
 export const PROJECT_CONFIG_FILE_NAME = "devai-aidd-plugin.project.jsonc";
 export const GLOBAL_CONFIG_DIR = ".config/opencode";
 export const PROJECT_CONFIG_DIR = ".opencode";
+export const SKILLS_SUBDIR = "skills";
+
+// opencode-skill-workflow-guard: tool-name candidates emitted by the opencode
+// runtime when a Skill is invoked by the model. The token shape is unconfirmed
+// at the SDK version we target — the first release ships diagnostic logging
+// and uses case-insensitive matching against this set. After D1 capture (see
+// tech-spec) the set will be narrowed.
+export const SKILL_TOOL_TOKENS = Object.freeze(
+  new Set(["skill", "launch-skill", "invokeskill"]),
+);
 export const PLUGIN_SERVICE_NAME = "devai-aidd-plugin";
 export const STATE_DIRECTORY_NAME = "devai-aidd-plugin";
 

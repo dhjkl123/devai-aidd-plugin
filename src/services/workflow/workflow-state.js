@@ -195,6 +195,32 @@ export function createWorkflowStateStore() {
     },
 
     /**
+     * Lazy-allocate and return a session-scoped `Set<string>` of tool-name
+     * observations. Used by the F1 diagnostic logger in
+     * `tool-execute-before.js` to dedupe per-session unknown-tool-name logs.
+     *
+     * Lives on the internal store entry directly (not exposed through `get`)
+     * so the Set persists mutably across calls and is wiped automatically by
+     * `clear(sessionID)`. Stored on a synthetic record when no workflow
+     * context exists yet — F1 must work for any session regardless of
+     * whether a workflow has been detected.
+     */
+    observedToolNames(sessionID) {
+      if (typeof sessionID !== "string" || sessionID.length === 0) {
+        return null;
+      }
+      let entry = _store.get(sessionID);
+      if (!entry) {
+        entry = {};
+        _store.set(sessionID, entry);
+      }
+      if (!(entry._observedToolNames instanceof Set)) {
+        entry._observedToolNames = new Set();
+      }
+      return entry._observedToolNames;
+    },
+
+    /**
      * Idempotent: no-op when the session is unknown or phase already equals nextPhase.
      * Throws when nextPhase is not a member of WORKFLOW_PHASES — catches typos like
      * "in_progress" early instead of letting them silently drift into the store.
