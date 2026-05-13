@@ -183,6 +183,17 @@ export const RUNTIME_CONFIG_SCHEMA = {
       // by callers without a schema bump.
       additionalProperties: true,
     },
+    readiness: {
+      type: "object",
+      properties: {
+        skipInitAndBaseline: {
+          type: "boolean",
+          description:
+            "When true (default), skip git init and baseline-commit readiness gating unless workflow policy requires repository-backed lifecycle behavior via branchRequired=true or finalization=commit-and-push|commit-optional-push.",
+        },
+      },
+      additionalProperties: true,
+    },
   },
   // Top-level stays strict: any unknown top-level key is almost certainly a typo.
   additionalProperties: false,

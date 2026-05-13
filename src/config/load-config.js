@@ -6,6 +6,7 @@ import {
   GLOBAL_CONFIG_FILE_NAME,
   PROJECT_CONFIG_DIR,
   PROJECT_CONFIG_FILE_NAME,
+  SKILLS_SUBDIR,
 } from "../utils/constants.js";
 import {
   collectWorkflowPolicyVocabularyWarnings,
@@ -182,6 +183,14 @@ function normalizeConfig(config) {
     Array.isArray(merged.branch.commandTypeMap)
   ) {
     merged.branch.commandTypeMap = {};
+  }
+
+  if (!merged.readiness || typeof merged.readiness !== "object" || Array.isArray(merged.readiness)) {
+    merged.readiness = {};
+  }
+
+  if (typeof merged.readiness.skipInitAndBaseline !== "boolean") {
+    merged.readiness.skipInitAndBaseline = true;
   }
 
   return merged;
@@ -384,4 +393,49 @@ export function loadWorkflowCommands(directory, fsAdapter) {
       .filter((entry) => entry.endsWith(".md"))
       .map((entry) => entry.replace(/\.md$/i, "")),
   );
+}
+
+/**
+ * Discover Skill-shaped workflow names from `.opencode/skills/<name>/SKILL.md`.
+ *
+ * Returns a Set of skill directory names that contain a `SKILL.md` file.
+ * Mirrors `loadWorkflowCommands` so the resulting Set can be union-merged
+ * into a single `workflowNames` Set with no signature change to downstream
+ * detection (`detectWorkflowContext`).
+ *
+ * Best-effort: any I/O failure (missing dir, permission error, etc.) results
+ * in an empty Set so bootstrap proceeds.
+ */
+export function loadWorkflowSkills(directory, fsAdapter) {
+  const skillsDirectory = path.join(directory, PROJECT_CONFIG_DIR, SKILLS_SUBDIR);
+
+  try {
+    if (!fsAdapter.existsSync(skillsDirectory)) {
+      return new Set();
+    }
+  } catch {
+    return new Set();
+  }
+
+  let entries;
+  try {
+    entries = fsAdapter.readdirSync(skillsDirectory);
+  } catch {
+    return new Set();
+  }
+
+  const skills = new Set();
+  for (const entry of entries) {
+    const name = typeof entry === "string" ? entry : entry?.name;
+    if (typeof name !== "string" || name.length === 0) continue;
+    const skillMarkerPath = path.join(skillsDirectory, name, "SKILL.md");
+    try {
+      if (fsAdapter.existsSync(skillMarkerPath)) {
+        skills.add(name);
+      }
+    } catch {
+      // best-effort: ignore individual entry failure
+    }
+  }
+  return skills;
 }

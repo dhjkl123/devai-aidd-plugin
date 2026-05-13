@@ -347,29 +347,43 @@ function safeWorkflowStateUpdate(workflowState, sessionID, patch) {
   }
 }
 
-async function handleCommandExecuted({ event, deps }) {
-  const props = event?.properties ?? {};
-  const sessionID = readSessionID(props);
-  const commandName = readCommandName(props);
-  if (!sessionID || !commandName) return;
+/**
+ * Adapt a native command-or-skill invocation into the legacy
+ * `command.execute.before` payload shape and invoke the shared handler.
+ *
+ * Exported so `tool-execute-before.js` can reuse the exact adapt code when
+ * the model invokes a Skill via the `tool.execute.before` channel — keeping
+ * a single source of truth for the synthetic `{ parts: [] }` output shape
+ * and the error-surfacing audit fallback.
+ *
+ * `commandName` is the resolved workflow name (skill or command). `args` is
+ * a string (already joined). `audit` is best-effort.
+ */
+export async function adaptAndInvokeCommandHandler({
+  commandExecuteBeforeHandler,
+  commandName,
+  args,
+  sessionID,
+  audit,
+  source,
+}) {
+  if (typeof commandExecuteBeforeHandler !== "function") return;
+  if (typeof commandName !== "string" || commandName.length === 0) return;
+  if (typeof sessionID !== "string" || sessionID.length === 0) return;
 
   const adaptedInput = {
     command: commandName,
-    arguments: readCommandArguments(props),
+    arguments: typeof args === "string" ? args : "",
     sessionID,
   };
   const adaptedOutput = { parts: [] };
 
   try {
-    await deps.commandExecuteBeforeHandler(adaptedInput, adaptedOutput);
+    await commandExecuteBeforeHandler(adaptedInput, adaptedOutput);
   } catch (error) {
-    // F9 (adversarial review): the legacy command handler emits its own
-    // audits internally, but a synchronous factory throw is invisible
-    // without this fallback. Surface it as native.event.handler.failed so
-    // bootstrap failures don't disappear under native operation.
-    if (deps.audit) {
+    if (audit) {
       try {
-        await deps.audit.info("native.event.handler.failed", {
+        await audit.info("native.event.handler.failed", {
           event: "native.event.handler.failed",
           timestamp: new Date().toISOString(),
           workflow: commandName,
@@ -377,7 +391,10 @@ async function handleCommandExecuted({ event, deps }) {
           sessionID,
           outcome: "skip",
           details: {
-            reason: "command-executed-delegation-threw",
+            reason:
+              source === "tool-execute-before"
+                ? "skill-trigger-delegation-threw"
+                : "command-executed-delegation-threw",
             error: error?.message ?? String(error),
           },
         });
@@ -386,7 +403,22 @@ async function handleCommandExecuted({ event, deps }) {
       }
     }
   }
+}
 
+async function handleCommandExecuted({ event, deps }) {
+  const props = event?.properties ?? {};
+  const sessionID = readSessionID(props);
+  const commandName = readCommandName(props);
+  if (!sessionID || !commandName) return;
+
+  await adaptAndInvokeCommandHandler({
+    commandExecuteBeforeHandler: deps.commandExecuteBeforeHandler,
+    commandName,
+    args: readCommandArguments(props),
+    sessionID,
+    audit: deps.audit,
+    source: "command.executed",
+  });
 }
 
 function recordPendingApprovalQuestion({ workflowState, sessionID, questionID, questionHeader, active }) {

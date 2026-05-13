@@ -17,6 +17,7 @@ import { createHttpAdapter } from "./adapters/http.js";
 import {
   loadRuntimeConfig,
   loadWorkflowCommands,
+  loadWorkflowSkills,
 } from "./config/load-config.js";
 import { createAuditLogger } from "./audit/logger.js";
 import { createDebugLogger } from "./audit/debug-logger.js";
@@ -65,6 +66,13 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
 
     const runtimeConfig = loadRuntimeConfig(directory, fsAdapter);
     const workflowCommands = loadWorkflowCommands(directory, fsAdapter);
+    const workflowSkills = loadWorkflowSkills(directory, fsAdapter);
+    // opencode-skill-workflow-guard: union the two discovery channels into a
+    // single Set. Downstream consumers (`detectWorkflowContext`,
+    // `resolveWorkflowPolicy`, `branch.commandTypeMap`) work on a single
+    // name → policy model, so commands and skills do not need to be
+    // distinguished past discovery.
+    const workflowNames = new Set([...workflowCommands, ...workflowSkills]);
     audit = createAuditLogger({
       client,
       directory,
@@ -114,6 +122,8 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     try {
       await audit.info("plugin bootstrap", {
         workflowCommandCount: workflowCommands.size,
+        workflowSkillCount: workflowSkills.size,
+        workflowNameCount: workflowNames.size,
         hasGlobalConfig: runtimeConfig.sources.hasGlobalConfig,
         hasProjectConfig: runtimeConfig.sources.hasProjectConfig,
         supportedRuntime: SUPPORTED_RUNTIME,
@@ -137,9 +147,30 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     debugLogger.log("bootstrap", "plugin instance constructed", {
       directory,
       workflowCommandCount: workflowCommands.size,
+      workflowSkillCount: workflowSkills.size,
+      workflowNameCount: workflowNames.size,
       hasGlobalConfig: runtimeConfig.sources.hasGlobalConfig,
       hasProjectConfig: runtimeConfig.sources.hasProjectConfig,
     });
+
+    // Task 6: when debug logging is enabled, dump the merged workflowNames
+    // members so operators can confirm skill discovery picked up the expected
+    // directories (and surface command/skill name collisions explicitly).
+    if (runtimeConfig.config?.debug?.enabled === true) {
+      const collisions = [];
+      for (const name of workflowSkills) {
+        if (workflowCommands.has(name)) collisions.push(name);
+      }
+      debugLogger.log("bootstrap", "workflow name discovery", {
+        commands: Array.from(workflowCommands),
+        skills: Array.from(workflowSkills),
+        union: Array.from(workflowNames),
+        collisions,
+      });
+      for (const name of collisions) {
+        debugLogger.log("bootstrap", "name collision between command and skill", { name });
+      }
+    }
 
     // Build pluginContext so downstream hook factories (Story 1.4+) and
     // approval hooks (Epic 2) can consume the resolver without re-loading config.
@@ -365,7 +396,10 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
     // handlers remain as compatibility-only ingress points for the in-process
     // test harness and any non-native invocation path.
     const commandExecuteBeforeHandler = createCommandExecuteBeforeHook({
-      workflowCommands,
+      // opencode-skill-workflow-guard: inject the unioned name set under the
+      // legacy `workflowCommands` key so the downstream factory and tests
+      // continue to consume the same shape (single Set membership check).
+      workflowCommands: workflowNames,
       workflowState,
       audit,
       pluginContext,
@@ -385,7 +419,17 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       // workflowState today (phase advancement). pluginContext is unused by
       // these factories — keep the injection surface minimal so the contract
       // matches the consumer.
-      "tool.execute.before": createToolExecuteBeforeHook({ workflowState, pluginContext }),
+      "tool.execute.before": createToolExecuteBeforeHook({
+        workflowState,
+        pluginContext,
+        // opencode-skill-workflow-guard: skill-trigger branch needs the
+        // shared handler and the unioned name set. `runtimeConfig` gates the
+        // F1 diagnostic logger.
+        commandExecuteBeforeHandler,
+        workflowNames,
+        audit,
+        runtimeConfig,
+      }),
       "tool.execute.after": createToolExecuteAfterHook({
         workflowState,
         audit,

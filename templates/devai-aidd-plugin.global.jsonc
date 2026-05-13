@@ -34,29 +34,53 @@
     "validationRegex": "^(feat|fix|docs|chore|refactor|design)\\/[A-Z]+-\\d+-[a-z0-9-]+$|^(feat|fix|docs|chore|refactor|design)\\/no-ticket-[a-z0-9-]+$",
     "commandTypeMap": {
       "bmad-bmm-check-implementation-readiness": "docs",
+      "bmad-check-implementation-readiness": "docs",
       "bmad-bmm-correct-course": "refactor",
+      "bmad-correct-course": "refactor",
       "bmad-bmm-create-architecture": "docs",
+      "bmad-create-architecture": "docs",
       "bmad-bmm-create-epics-and-stories": "docs",
+      "bmad-create-epics-and-stories": "docs",
       "bmad-bmm-create-prd": "docs",
+      "bmad-create-prd": "docs",
       "bmad-bmm-create-product-brief": "docs",
+      "bmad-create-product-brief": "docs",
       "bmad-bmm-create-story": "docs",
+      "bmad-create-story": "docs",
       "bmad-bmm-create-ux-design": "docs",
+      "bmad-create-ux-design": "docs",
       "bmad-bmm-dev-story": "feat",
+      "bmad-dev-story": "feat",
       "bmad-bmm-document-project": "docs",
+      "bmad-document-project": "docs",
       "bmad-bmm-domain-research": "docs",
+      "bmad-domain-research": "docs",
       "bmad-bmm-edit-prd": "docs",
+      "bmad-edit-prd": "docs",
       "bmad-bmm-generate-project-context": "docs",
+      "bmad-generate-project-context": "docs",
       "bmad-bmm-market-research": "docs",
+      "bmad-market-research": "docs",
       "bmad-bmm-qa-generate-e2e-tests": "feat",
+      "bmad-qa-generate-e2e-tests": "feat",
       "bmad-bmm-quick-dev": "feat",
+      "bmad-quick-dev": "feat",
       "bmad-bmm-quick-dev-new-preview": "feat",
+      "bmad-quick-dev-new-preview": "feat",
       "bmad-bmm-quick-spec": "docs",
+      "bmad-quick-spec": "docs",
       "bmad-bmm-retrospective": "docs",
+      "bmad-retrospective": "docs",
       "bmad-bmm-sprint-planning": "docs",
+      "bmad-sprint-planning": "docs",
       "bmad-bmm-sprint-status": "chore",
+      "bmad-sprint-status": "chore",
       "bmad-bmm-technical-research": "docs",
+      "bmad-technical-research": "docs",
       "bmad-bmm-validate-prd": "docs",
+      "bmad-validate-prd": "docs",
       "bmad-bmm-code-review": "fix",
+      "bmad-code-review": "fix",
       "bmad-brainstorming": "docs",
       "bmad-editorial-review-prose": "docs",
       "bmad-editorial-review-structure": "docs",
@@ -74,6 +98,15 @@
     "logToFile": false,
     "logFilePath": "",
     "httpEndpoint": ""
+  },
+  "readiness": {
+    // Default: skip git init + baseline commit gating for policy-light workflows.
+    // The plugin automatically re-enables that gate when the resolved workflow
+    // policy requires repository-backed lifecycle behavior:
+    //   - branchRequired === true
+    //   - finalization === "commit-and-push"
+    //   - finalization === "commit-optional-push"
+    "skipInitAndBaseline": true
   },
   "debug": {
     // Diagnostic logger gated by `enabled`. When true, the plugin appends a

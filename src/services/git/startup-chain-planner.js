@@ -6,6 +6,7 @@ import {
 
 export function buildStartupChainPlan({
   readiness,
+  readinessGate = null,
   workflowContext,
   workflowPolicy = null,
   branchConfig = null,
@@ -23,8 +24,9 @@ export function buildStartupChainPlan({
   const details = readiness?.details ?? {};
   const isGitRepository = details.isGitRepository === true;
   const hasCommit = details.hasCommit === true;
+  const gateEnabled = readinessGate?.enabled !== false;
 
-  if (!isGitRepository || readiness?.reason === "git-not-initialized") {
+  if (gateEnabled && (!isGitRepository || readiness?.reason === "git-not-initialized")) {
     steps.push({
       key: "init",
       kind: "init",
@@ -34,7 +36,7 @@ export function buildStartupChainPlan({
     });
   }
 
-  if (!hasCommit) {
+  if (gateEnabled && !hasCommit) {
     steps.push({
       key: "baseline",
       kind: "commit",

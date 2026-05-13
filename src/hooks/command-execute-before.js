@@ -15,6 +15,7 @@ import { publishNextPlannedAction } from "../services/approval/publish-next-plan
 import { buildQuestionInstruction } from "../services/approval/build-question-instruction.js";
 import { buildBaselineCommitProposal } from "../services/git/build-init-proposal.js";
 import { buildStartupChainPlan } from "../services/git/startup-chain-planner.js";
+import { resolveReadinessGate } from "../services/git/resolve-readiness-gate.js";
 import {
   buildStartupChainQuestionInstruction,
 } from "../services/approval/build-startup-chain-question-instruction.js";
@@ -161,6 +162,7 @@ export function createCommandExecuteBeforeHook(
             ? priorState.startupChainHistory
             : [],
           lastContinuationDecision: priorState?.lastContinuationDecision ?? null,
+          readinessGate: undefined,
           readiness: undefined,
           branchProposal: undefined,
           initProposal: undefined,
@@ -189,22 +191,38 @@ export function createCommandExecuteBeforeHook(
         const resolvedPolicy = pluginContext?.resolvePolicy?.(context);
         const workflowPolicy =
           resolvedPolicy?.outcome === "allow" ? resolvedPolicy.details?.policy : null;
+        const readinessGate = resolveReadinessGate({
+          runtimeConfig: pluginContext?.runtimeConfig?.config ?? null,
+          workflowPolicy,
+          workflowName: context.commandName,
+        });
+        if (readinessGate.overrideApplied) {
+          pluginContext?.debug?.log?.("command-execute-before", "readiness skip overridden by workflow policy", {
+            workflowName: context.commandName,
+            configuredSkip: readinessGate.configuredSkip,
+            overrideField: readinessGate.overrideField,
+            overrideValue: readinessGate.overrideValue,
+          });
+        }
         const readinessStartedAt = process.hrtime.bigint();
         const readiness = checkRepositoryReadiness({
           directory: pluginContext?.directory,
           gitRunner: pluginContext?.gitRunner,
           policy: workflowPolicy,
+          readinessGate,
         });
         pluginContext?.debug?.log?.("command-execute-before", "readiness check completed", {
           outcome: readiness?.outcome,
           reason: readiness?.reason,
           isGitRepository: readiness?.details?.isGitRepository ?? null,
           hasProposal: Boolean(readiness?.details?.proposal),
+          readinessGateEnabled: readinessGate.enabled === true,
         });
         const readinessDurationMs = Number(process.hrtime.bigint() - readinessStartedAt) / 1e6;
 
         workflowState.set(context.sessionID, {
           ...workflowState.get(context.sessionID),
+          readinessGate,
           readiness,
         });
 
@@ -212,6 +230,7 @@ export function createCommandExecuteBeforeHook(
         const currentBranchForStartup = resolveCurrentBranch(input, context, pluginContext);
         const startupChainPlan = buildStartupChainPlan({
           readiness,
+          readinessGate,
           workflowContext: context,
           workflowPolicy,
           branchConfig,
@@ -388,6 +407,7 @@ export function createCommandExecuteBeforeHook(
         // entering a no-baseline repo (e.g. opencode restart after the user
         // skipped baseline once).
         const baselineRequired =
+          readinessGate.enabled === true &&
           readiness?.outcome === "allow" &&
           readiness.details?.hasCommit === false &&
           stateForInitGate?.baselineSkipped !== true &&

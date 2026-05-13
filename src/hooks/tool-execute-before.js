@@ -28,6 +28,8 @@ import { buildQuestionInstruction } from "../services/approval/build-question-in
 import {
   buildStartupChainQuestionInstruction,
 } from "../services/approval/build-startup-chain-question-instruction.js";
+import { SKILL_TOOL_TOKENS } from "../utils/constants.js";
+import { adaptAndInvokeCommandHandler } from "./native-event.js";
 
 // TD #3 canonical block message — exported so regression tests can import the
 // single source of truth instead of duplicating the literal in multiple files.
@@ -80,7 +82,14 @@ function directoryIsGitRepo(directory) {
   }
 }
 
-export function createToolExecuteBeforeHook({ workflowState, pluginContext } = {}) {
+export function createToolExecuteBeforeHook({
+  workflowState,
+  pluginContext,
+  commandExecuteBeforeHandler,
+  workflowNames,
+  audit,
+  runtimeConfig,
+} = {}) {
   // opencode SDK 1.14 — tool.execute.before signature is
   //   (input: { tool, sessionID, callID }, output: { args: any })
   // The actual tool arguments live on `output.args`, NOT on `input.args`.
@@ -89,11 +98,117 @@ export function createToolExecuteBeforeHook({ workflowState, pluginContext } = {
   // hit the same bug. Always read args from `output.args`, with a defensive
   // fallback to `input.args` so the regression test mocks (which still put
   // args on the input) keep passing.
+  const debugEnabled = runtimeConfig?.config?.debug?.enabled === true;
   return async (input, output) => {
     const toolArgs =
       output && typeof output === "object" && output.args != null
         ? output.args
         : input?.args ?? null;
+
+    // F1 (opencode-skill-workflow-guard): unconditional unknown-tool-name
+    // observation log. Fires BEFORE the skill-trigger matching block so an
+    // incorrect SKILL_TOOL_TOKENS guess does NOT silence the diagnostic.
+    // Dedup is session-scoped via workflowState.observedToolNames(sessionID).
+    if (debugEnabled && typeof input?.tool === "string") {
+      try {
+        const seen = workflowState?.observedToolNames?.(input.sessionID);
+        if (seen && !seen.has(input.tool)) {
+          seen.add(input.tool);
+          pluginContext?.debug?.log?.(
+            "tool-execute-before",
+            "tool name observed (first time this session)",
+            {
+              sessionID: input?.sessionID,
+              toolName: input.tool,
+              toolArgsKeys:
+                toolArgs && typeof toolArgs === "object" && !Array.isArray(toolArgs)
+                  ? Object.keys(toolArgs)
+                  : null,
+              matchesSkillTokenSet: SKILL_TOOL_TOKENS.has(input.tool.toLowerCase()),
+            },
+          );
+        }
+      } catch {
+        // best-effort: never crash the hook on diagnostic logging.
+      }
+    }
+
+    // Skill-as-workflow trigger (opencode-skill-workflow-guard).
+    // Position: hook body entry, immediately after F1 diagnostic log, BEFORE
+    // Layer 1 (bash+git block). Layer-order regression is detected by
+    // AC4-a (debug.log call-sequence test).
+    //
+    // Effect: when the model invokes a Skill tool, this branch wakes the same
+    // commandExecuteBeforeHandler that the slash-command path uses, seeding
+    // readiness/branch/init/approval state. The actual model-side guidance is
+    // delivered by Layer 0's throw on the next cycle (see Technical Decision
+    // 7 in the tech-spec) — the synthetic `{ parts: [] }` we pass through
+    // never reaches the runtime.
+    if (
+      typeof input?.tool === "string" &&
+      SKILL_TOOL_TOKENS.has(input.tool.toLowerCase())
+    ) {
+      // F2: trigger-name candidates are `skill` / `skillName` only.
+      // `name` is too generic and would risk false-matching unrelated tools'
+      // `name` fields — log it as a diagnostic side-field only.
+      const skillName =
+        typeof toolArgs?.skill === "string" && toolArgs.skill.length > 0
+          ? toolArgs.skill
+          : typeof toolArgs?.skillName === "string" && toolArgs.skillName.length > 0
+            ? toolArgs.skillName
+            : null;
+      const fallbackNameField =
+        typeof toolArgs?.name === "string" ? toolArgs.name : null;
+
+      pluginContext?.debug?.log?.(
+        "tool-execute-before",
+        "skill tool invocation observed",
+        {
+          sessionID: input?.sessionID,
+          toolName: input.tool,
+          resolvedSkillName: skillName,
+          fallbackNameField,
+          toolArgsKeys:
+            toolArgs && typeof toolArgs === "object" && !Array.isArray(toolArgs)
+              ? Object.keys(toolArgs)
+              : null,
+        },
+      );
+
+      const priorState = workflowState?.get?.(input?.sessionID);
+      const guardBusy =
+        priorState?.approvalCurrent != null ||
+        priorState?.startupChainCurrent != null;
+      if (
+        typeof skillName === "string" &&
+        workflowNames &&
+        typeof workflowNames.has === "function" &&
+        workflowNames.has(skillName) &&
+        priorState?.commandName !== skillName &&
+        !guardBusy
+      ) {
+        try {
+          await adaptAndInvokeCommandHandler({
+            commandExecuteBeforeHandler,
+            commandName: skillName,
+            args: "",
+            sessionID: input?.sessionID,
+            audit,
+            source: "tool-execute-before",
+          });
+        } catch (error) {
+          pluginContext?.debug?.log?.(
+            "tool-execute-before",
+            "skill-trigger handler invocation failed (best-effort)",
+            {
+              sessionID: input?.sessionID,
+              resolvedSkillName: skillName,
+              error: error?.message ?? String(error),
+            },
+          );
+        }
+      }
+    }
 
     // Layer 1: bash + git block (most specific — gives the model the exact
     // "approve the pending Initialize Git prompt instead of running git
@@ -113,7 +228,11 @@ export function createToolExecuteBeforeHook({ workflowState, pluginContext } = {
       const initPending = state?.initProposal != null;
       const initActive = state?.approvalCurrent?.actionType === "init";
       const dirIsGit = directoryIsGitRepo(pluginContext?.directory);
-      if (!userOptedOut && (initPending || initActive || !dirIsGit)) {
+      const trackedSkipActive =
+        typeof state?.commandName === "string" &&
+        state.commandName.length > 0 &&
+        state?.readinessGate?.enabled === false;
+      if (!userOptedOut && (initPending || initActive || (!dirIsGit && !trackedSkipActive))) {
         throw new Error(BASH_GIT_BLOCK_MESSAGE);
       }
     }
