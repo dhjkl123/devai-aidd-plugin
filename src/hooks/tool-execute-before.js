@@ -228,7 +228,11 @@ export function createToolExecuteBeforeHook({
       const initPending = state?.initProposal != null;
       const initActive = state?.approvalCurrent?.actionType === "init";
       const dirIsGit = directoryIsGitRepo(pluginContext?.directory);
-      if (!userOptedOut && (initPending || initActive || !dirIsGit)) {
+      const trackedSkipActive =
+        typeof state?.commandName === "string" &&
+        state.commandName.length > 0 &&
+        state?.readinessGate?.enabled === false;
+      if (!userOptedOut && (initPending || initActive || (!dirIsGit && !trackedSkipActive))) {
         throw new Error(BASH_GIT_BLOCK_MESSAGE);
       }
     }

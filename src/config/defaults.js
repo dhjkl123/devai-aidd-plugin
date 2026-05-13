@@ -34,10 +34,11 @@
 //
 // Top-level keys are kept as empty containers so deep-merge consumers can
 // rely on `config.branch`, `config.workflowPolicy`, `config.audit`,
-// `config.debug` always being non-null objects.
+// `config.debug`, and `config.readiness` always being non-null objects.
 export const DEFAULT_PLUGIN_CONFIG = {
   branch: {},
   workflowPolicy: {},
   audit: {},
   debug: {},
+  readiness: {},
 };

@@ -406,6 +406,63 @@ async function testSkillTokensConstantExposed() {
   assert.equal(SKILLS_SUBDIR, "skills");
 }
 
+async function testLayer1AllowsGitForTrackedReadinessSkip() {
+  const { createToolExecuteBeforeHook } = await import(toolExecuteBeforeModuleUrl);
+  const { createWorkflowStateStore } = await import(workflowStateModuleUrl);
+
+  const workflowState = createWorkflowStateStore();
+  workflowState.set("readiness-skip-session", {
+    sessionID: "readiness-skip-session",
+    commandName: "policy-light",
+    readinessGate: { enabled: false },
+  });
+
+  const { pluginContext } = makeDebugCapture();
+  const hook = createToolExecuteBeforeHook({
+    workflowState,
+    pluginContext,
+    commandExecuteBeforeHandler: async () => {},
+    workflowNames: new Set(),
+    runtimeConfig: makeRuntimeConfig({ debugEnabled: false }),
+  });
+
+  await hook(
+    { tool: "bash", sessionID: "readiness-skip-session" },
+    { args: { command: "git status" } },
+  );
+}
+
+async function testLayer1BlocksGitForTrackedOverride() {
+  const { createToolExecuteBeforeHook, BASH_GIT_BLOCK_MESSAGE } = await import(toolExecuteBeforeModuleUrl);
+  const { createWorkflowStateStore } = await import(workflowStateModuleUrl);
+
+  const workflowState = createWorkflowStateStore();
+  workflowState.set("readiness-override-session", {
+    sessionID: "readiness-override-session",
+    commandName: "repo-backed",
+    readinessGate: { enabled: true },
+  });
+
+  const { pluginContext } = makeDebugCapture();
+  const hook = createToolExecuteBeforeHook({
+    workflowState,
+    pluginContext,
+    commandExecuteBeforeHandler: async () => {},
+    workflowNames: new Set(),
+    runtimeConfig: makeRuntimeConfig({ debugEnabled: false }),
+  });
+
+  await assert.rejects(
+    () =>
+      hook(
+        { tool: "bash", sessionID: "readiness-override-session" },
+        { args: { command: "git status" } },
+      ),
+    (error) => error?.message === BASH_GIT_BLOCK_MESSAGE,
+    "tracked override-active session must still block git commands in a non-git directory",
+  );
+}
+
 async function runTests() {
   const tests = [
     ["loadWorkflowSkills discovery + edge cases", testLoadWorkflowSkillsDiscovery],
@@ -420,6 +477,8 @@ async function runTests() {
     ["AC5 non-skill tools unaffected", testAC5NonSkillToolUnaffected],
     ["AC6 fail-open on missing skillName", testAC6FailOpenOnMissingSkillName],
     ["SKILL_TOOL_TOKENS / SKILLS_SUBDIR exposed", testSkillTokensConstantExposed],
+    ["Layer 1 allows git for tracked readiness skip", testLayer1AllowsGitForTrackedReadinessSkip],
+    ["Layer 1 blocks git for tracked override", testLayer1BlocksGitForTrackedOverride],
   ];
   for (const [name, fn] of tests) {
     await fn();

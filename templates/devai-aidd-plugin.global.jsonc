@@ -75,6 +75,15 @@
     "logFilePath": "",
     "httpEndpoint": ""
   },
+  "readiness": {
+    // Default: skip git init + baseline commit gating for policy-light workflows.
+    // The plugin automatically re-enables that gate when the resolved workflow
+    // policy requires repository-backed lifecycle behavior:
+    //   - branchRequired === true
+    //   - finalization === "commit-and-push"
+    //   - finalization === "commit-optional-push"
+    "skipInitAndBaseline": true
+  },
   "debug": {
     // Diagnostic logger gated by `enabled`. When true, the plugin appends a
     // line-per-event log to `logFilePath` (or `.opencode/devai-aidd-debug.log`

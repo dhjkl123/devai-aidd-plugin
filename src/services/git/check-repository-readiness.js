@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
 import { buildInitProposal } from "./build-init-proposal.js";
 import { runGitCommand } from "./run-git-command.js";
 
@@ -58,11 +61,41 @@ export function checkRepositoryReadiness({
   directory,
   gitRunner = runGitCommand,
   policy,
+  readinessGate = null,
 } = {}) {
   const checkedAt = new Date().toISOString();
   const baseDetails = createBaseDetails(directory, checkedAt);
+  const gateEnabled = readinessGate?.enabled !== false;
 
   try {
+    const hasDirectory = typeof directory === "string" && directory.length > 0;
+    const hasGitMarker = hasDirectory ? existsSync(join(directory, ".git")) : null;
+    if (hasGitMarker === false) {
+      if (!gateEnabled) {
+        return {
+          outcome: "allow",
+          reason: "readiness-gate-skipped",
+          message: "Repository readiness gating is disabled for this workflow.",
+          details: baseDetails,
+        };
+      }
+
+      const proposal = buildInitProposal({
+        directory,
+        reason: "git-not-initialized",
+      });
+
+      return {
+        outcome: "ask",
+        reason: "git-not-initialized",
+        message: "This working directory is not an initialized Git repository.",
+        details: {
+          ...baseDetails,
+          proposal,
+        },
+      };
+    }
+
     let repositoryResult = "";
 
     try {
@@ -79,6 +112,15 @@ export function checkRepositoryReadiness({
     }
 
     if (repositoryResult !== "true") {
+      if (!gateEnabled) {
+        return {
+          outcome: "allow",
+          reason: "readiness-gate-skipped",
+          message: "Repository readiness gating is disabled for this workflow.",
+          details: baseDetails,
+        };
+      }
+
       const proposal = buildInitProposal({
         directory,
         reason: "git-not-initialized",
@@ -149,8 +191,10 @@ export function checkRepositoryReadiness({
 
     return {
       outcome: "allow",
-      reason: "repository-ready",
-      message: "Repository readiness checks completed successfully.",
+      reason: gateEnabled ? "repository-ready" : "readiness-gate-skipped",
+      message: gateEnabled
+        ? "Repository readiness checks completed successfully."
+        : "Repository readiness gating is disabled for this workflow.",
       details: {
         ...baseDetails,
         isGitRepository: true,

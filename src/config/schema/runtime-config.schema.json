@@ -96,6 +96,16 @@
         "logFilePath": { "type": "string" }
       },
       "additionalProperties": true
+    },
+    "readiness": {
+      "type": "object",
+      "properties": {
+        "skipInitAndBaseline": {
+          "type": "boolean",
+          "description": "When true (default), skip git init and baseline-commit readiness gating unless workflow policy requires repository-backed lifecycle behavior via branchRequired=true or finalization=commit-and-push|commit-optional-push."
+        }
+      },
+      "additionalProperties": true
     }
   },
   "additionalProperties": false

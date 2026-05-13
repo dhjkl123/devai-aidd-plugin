@@ -185,6 +185,14 @@ function normalizeConfig(config) {
     merged.branch.commandTypeMap = {};
   }
 
+  if (!merged.readiness || typeof merged.readiness !== "object" || Array.isArray(merged.readiness)) {
+    merged.readiness = {};
+  }
+
+  if (typeof merged.readiness.skipInitAndBaseline !== "boolean") {
+    merged.readiness.skipInitAndBaseline = true;
+  }
+
   return merged;
 }
 

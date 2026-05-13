@@ -187,6 +187,9 @@ export function createWorkflowStateStore() {
       if (copy.pushProposal !== null && copy.pushProposal !== undefined) {
         copy.pushProposal = structuredClone(copy.pushProposal);
       }
+      if (copy.readinessGate !== null && copy.readinessGate !== undefined) {
+        copy.readinessGate = structuredClone(copy.readinessGate);
+      }
       return copy;
     },
 

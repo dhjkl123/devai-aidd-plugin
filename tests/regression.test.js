@@ -50,6 +50,9 @@ const branchServiceModuleUrl = pathToFileURL(
 const readinessServiceModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "git", "check-repository-readiness.js"),
 ).href;
+const readinessGateModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "git", "resolve-readiness-gate.js"),
+).href;
 const classifyGitExecutionFailureModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "git", "classify-git-execution-failure.js"),
 ).href;
@@ -2476,6 +2479,280 @@ async function verifyRepositoryReadinessContracts() {
     fs.rmSync(gitWorkspace, { recursive: true, force: true });
     fs.rmSync(remoteWorkspace, { recursive: true, force: true });
   }
+}
+
+async function verifyReadinessConfigContracts() {
+  const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?readiness-config=${Date.now()}`);
+
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-readiness-config-"));
+  const homeDir = path.join(tempRoot, "home");
+  const globalDir = path.join(homeDir, ".config", "opencode");
+  const projectDir = path.join(tempRoot, "project", ".opencode");
+  fs.mkdirSync(globalDir, { recursive: true });
+  fs.mkdirSync(projectDir, { recursive: true });
+
+  try {
+    const fsAdapter = buildStory41FsAdapter(homeDir);
+
+    const defaultResult = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
+    assert.equal(
+      defaultResult.config.readiness.skipInitAndBaseline,
+      true,
+      "verifyReadinessConfigContracts: missing readiness config must default skipInitAndBaseline to true",
+    );
+
+    fs.writeFileSync(
+      path.join(globalDir, "devai-aidd-plugin.global.jsonc"),
+      JSON.stringify({ readiness: { skipInitAndBaseline: false } }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "devai-aidd-plugin.project.jsonc"),
+      JSON.stringify({ readiness: { skipInitAndBaseline: true } }),
+      "utf8",
+    );
+    const overrideResult = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
+    assert.equal(
+      overrideResult.config.readiness.skipInitAndBaseline,
+      true,
+      "verifyReadinessConfigContracts: project readiness config must override global readiness config",
+    );
+
+    fs.writeFileSync(
+      path.join(projectDir, "devai-aidd-plugin.project.jsonc"),
+      JSON.stringify({ readiness: { skipInitAndBaseline: "yes" } }),
+      "utf8",
+    );
+    const invalidResult = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
+    assert.equal(
+      invalidResult.validation.droppedLayers.includes("projectConfig"),
+      true,
+      "verifyReadinessConfigContracts: invalid readiness.skipInitAndBaseline must drop the project layer",
+    );
+    assert.equal(
+      invalidResult.config.readiness.skipInitAndBaseline,
+      false,
+      "verifyReadinessConfigContracts: invalid project readiness layer must fall back to last valid lower layer",
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+}
+
+async function verifyRepositoryReadinessSkipContracts() {
+  const readinessModule = await import(`${readinessServiceModuleUrl}?readiness-skip=${Date.now()}`);
+  const gateModule = await import(`${readinessGateModuleUrl}?readiness-skip=${Date.now()}`);
+
+  const noGitWorkspace = createGitWorkspace();
+  const repoNoCommit = createTempWorkspace();
+  execFileSync("git", ["init"], { cwd: repoNoCommit, stdio: "pipe" });
+
+  try {
+    const skipGate = gateModule.resolveReadinessGate({
+      runtimeConfig: { readiness: { skipInitAndBaseline: true } },
+      workflowPolicy: {
+        branchRequired: false,
+        finalization: "no-forced-finalization",
+      },
+      workflowName: "policy-light",
+    });
+    assert.equal(skipGate.enabled, false);
+
+    const skippedInitResult = readinessModule.checkRepositoryReadiness({
+      directory: noGitWorkspace,
+      readinessGate: skipGate,
+    });
+    assert.equal(
+      skippedInitResult.outcome,
+      "allow",
+      "verifyRepositoryReadinessSkipContracts: skip-active non-git workspace must allow instead of asking for init",
+    );
+    assert.equal(skippedInitResult.reason, "readiness-gate-skipped");
+    assert.equal(skippedInitResult.details?.isGitRepository, false);
+    assert.equal(
+      skippedInitResult.details?.proposal,
+      undefined,
+      "verifyRepositoryReadinessSkipContracts: skip-active non-git workspace must not attach init proposal",
+    );
+
+    const skippedBaselineResult = readinessModule.checkRepositoryReadiness({
+      directory: repoNoCommit,
+      readinessGate: skipGate,
+    });
+    assert.equal(
+      skippedBaselineResult.outcome,
+      "allow",
+      "verifyRepositoryReadinessSkipContracts: skip-active repo with no commits must still allow",
+    );
+    assert.equal(skippedBaselineResult.details?.isGitRepository, true);
+    assert.equal(skippedBaselineResult.details?.hasCommit, false);
+
+    const overrideGate = gateModule.resolveReadinessGate({
+      runtimeConfig: { readiness: { skipInitAndBaseline: true } },
+      workflowPolicy: {
+        branchRequired: true,
+        finalization: "no-forced-finalization",
+      },
+      workflowName: "repo-backed",
+    });
+    assert.equal(overrideGate.enabled, true);
+    assert.equal(overrideGate.overrideApplied, true);
+    assert.equal(overrideGate.overrideField, "branchRequired");
+
+    const overriddenResult = readinessModule.checkRepositoryReadiness({
+      directory: noGitWorkspace,
+      readinessGate: overrideGate,
+    });
+    assert.equal(
+      overriddenResult.outcome,
+      "ask",
+      "verifyRepositoryReadinessSkipContracts: policy override must re-enable init gating",
+    );
+    assert.equal(overriddenResult.reason, "git-not-initialized");
+  } finally {
+    fs.rmSync(noGitWorkspace, { recursive: true, force: true });
+    fs.rmSync(repoNoCommit, { recursive: true, force: true });
+  }
+}
+
+async function verifyCommandExecuteBeforeReadinessGateOverwrite() {
+  const [{ createWorkflowStateStore }, commandBeforeModule] = await Promise.all([
+    import(`${workflowStateModuleUrl}?readiness-overwrite=${Date.now()}`),
+    import(`${commandExecuteBeforeModuleUrl}?readiness-overwrite=${Date.now()}`),
+  ]);
+
+  const workflowState = createWorkflowStateStore();
+  const debugLogs = [];
+  const tempWorkspace = createGitWorkspace();
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook({
+    workflowCommands: new Set(["policy-light", "repo-backed"]),
+    workflowState,
+    branchConfig: TEST_BRANCH_CONFIG,
+    pluginContext: {
+      directory: tempWorkspace,
+      runtimeConfig: { config: { readiness: { skipInitAndBaseline: true } } },
+      resolvePolicy(workflowContext) {
+        if (workflowContext.commandName === "policy-light") {
+          return {
+            outcome: "allow",
+            details: {
+              policy: {
+                category: "docs",
+                identityStrategy: "ticket-or-args",
+                branchRequired: false,
+                finalization: "no-forced-finalization",
+              },
+            },
+          };
+        }
+        return {
+          outcome: "allow",
+          details: {
+            policy: {
+              category: "implementation",
+              identityStrategy: "ticket-or-args",
+              branchRequired: true,
+              finalization: "commit-and-push",
+            },
+          },
+        };
+      },
+      debug: {
+        log(_channel, message, payload) {
+          debugLogs.push({ message, payload });
+        },
+      },
+    },
+  });
+
+  try {
+    await hook(
+      { command: "/policy-light", arguments: "", sessionID: "readiness-overwrite" },
+      { parts: [] },
+    );
+    const firstState = workflowState.get("readiness-overwrite");
+    assert.equal(firstState?.readinessGate?.enabled, false);
+    assert.equal(firstState?.initProposal, undefined);
+
+    await hook(
+      { command: "/repo-backed", arguments: "", sessionID: "readiness-overwrite" },
+      { parts: [] },
+    );
+    const secondState = workflowState.get("readiness-overwrite");
+    assert.equal(
+      secondState?.readinessGate?.enabled,
+      true,
+      "verifyCommandExecuteBeforeReadinessGateOverwrite: later workflow must overwrite prior skip-active gate state",
+    );
+    assert.equal(
+      secondState?.initProposal?.kind,
+      "init",
+      "verifyCommandExecuteBeforeReadinessGateOverwrite: later override-active workflow must restore init proposal publishing",
+    );
+    assert.ok(
+      debugLogs.some((entry) => entry.message === "readiness skip overridden by workflow policy"),
+      "verifyCommandExecuteBeforeReadinessGateOverwrite: override activation must emit one debug log line",
+    );
+  } finally {
+    fs.rmSync(tempWorkspace, { force: true, recursive: true });
+  }
+}
+
+async function verifyStartupChainReadinessSkipContracts() {
+  const plannerMod = await import(`${pathToFileURL(path.join(projectRoot, "src", "services", "git", "startup-chain-planner.js")).href}?startup-skip=${Date.now()}`);
+
+  const workflowContext = {
+    sessionID: "startup-skip",
+    commandName: "policy-light",
+    normalizedCommand: "policy-light",
+    arguments: "",
+  };
+
+  const skippedPlan = plannerMod.buildStartupChainPlan({
+    readiness: {
+      outcome: "allow",
+      reason: "readiness-gate-skipped",
+      details: { isGitRepository: false, hasCommit: false, proposal: null },
+    },
+    readinessGate: { enabled: false },
+    workflowContext,
+    workflowPolicy: {
+      category: "docs",
+      identityStrategy: "ticket-or-args",
+      branchRequired: false,
+      finalization: "no-forced-finalization",
+    },
+    branchConfig: TEST_BRANCH_CONFIG,
+    currentBranch: null,
+    state: {},
+  });
+  assert.deepEqual(
+    skippedPlan.steps.map((step) => step.key),
+    [],
+    "verifyStartupChainReadinessSkipContracts: skip-active workflow must omit init and baseline startup steps",
+  );
+
+  const overridePlan = plannerMod.buildStartupChainPlan({
+    readiness: {
+      outcome: "ask",
+      reason: "git-not-initialized",
+      details: { isGitRepository: false, hasCommit: false, proposal: { kind: "init" } },
+    },
+    readinessGate: { enabled: true },
+    workflowContext: {
+      ...workflowContext,
+      commandName: "repo-backed",
+    },
+    workflowPolicy: defaultPolicyWithLegacyBranchRequired("bmad-bmm-quick-dev"),
+    branchConfig: TEST_BRANCH_CONFIG,
+    currentBranch: null,
+    state: {},
+  });
+  assert.deepEqual(
+    overridePlan.steps.map((step) => step.key),
+    ["init", "baseline", "branch"],
+    "verifyStartupChainReadinessSkipContracts: override-active workflow must still plan init, baseline, and branch steps",
+  );
 }
 
 async function verifyRepositoryReadinessIntegration() {
@@ -12688,7 +12965,9 @@ main()
   .then(() => verifyResolveWorkflowPolicy())
   .then(() => verifyBranchServiceContracts())
   .then(() => verifyBranchProposalIntegration())
+  .then(() => verifyReadinessConfigContracts())
   .then(() => verifyRepositoryReadinessContracts())
+  .then(() => verifyRepositoryReadinessSkipContracts())
   .then(() => verifyRepositoryReadinessIntegration())
   .then(() => verifyInvalidBranchRegexValidation())
   .then(() => verifyConfigValidationFailedAuditPayload())
@@ -12855,10 +13134,12 @@ main()
   // Native event contract — opencode native plugin (.opencode/plugins)
   .then(() => verifyNativeEventHandlerExists())
   .then(() => verifyStartupChainRegressionContracts())
+  .then(() => verifyStartupChainReadinessSkipContracts())
   // strengthen-approval-prompt-instructions — promptAsync instruction strengthening
   .then(() => verifyQuestionInstructionBuilderContract())
   // question-header guard — force model to use the exact header we staged
   .then(() => verifyQuestionHeaderGuardMatchesActiveApproval())
+  .then(() => verifyCommandExecuteBeforeReadinessGateOverwrite())
   .catch((error) => {
   console.error(error);
   process.exitCode = 1;
