@@ -106,6 +106,20 @@ function verifyBuiltArtifactExists({
 // audit/debug live in installer-shipped templates. Service-direct tests that
 // pass branch + workflowPolicy fixtures inline use these constants instead of
 // reading from `DEFAULT_PLUGIN_CONFIG.{branch,workflowPolicy}`.
+function withBmadAliases(entries) {
+  const result = { ...entries };
+  for (const [key, value] of Object.entries(entries)) {
+    if (!key.startsWith("bmad-bmm-")) continue;
+    const alias = key.replace(/^bmad-bmm-/, "bmad-");
+    if (Object.prototype.hasOwnProperty.call(result, alias)) continue;
+    result[alias] =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? { ...value }
+        : value;
+  }
+  return result;
+}
+
 const TEST_BRANCH_CONFIG = {
   pattern: "{type}/{ticket}-{slug}",
   defaultType: "chore",
@@ -114,7 +128,7 @@ const TEST_BRANCH_CONFIG = {
   defaultMergeTarget: "",
   validationRegex:
     "^(feat|fix|docs|chore|refactor|design)\\/[A-Z]+-\\d+-[a-z0-9-]+$|^(feat|fix|docs|chore|refactor|design)\\/no-ticket-[a-z0-9-]+$",
-  commandTypeMap: {
+  commandTypeMap: withBmadAliases({
     "bmad-bmm-check-implementation-readiness": "docs",
     "bmad-bmm-correct-course": "refactor",
     "bmad-bmm-create-architecture": "docs",
@@ -148,10 +162,10 @@ const TEST_BRANCH_CONFIG = {
     "bmad-review-adversarial-general": "fix",
     "bmad-review-edge-case-hunter": "fix",
     "bmad-shard-doc": "docs",
-  },
+  }),
 };
 
-const TEST_WORKFLOW_POLICY = {
+const TEST_WORKFLOW_POLICY = withBmadAliases({
   "bmad-bmm-create-story": {
     category: "implementation",
     identityStrategy: "story",
@@ -183,7 +197,7 @@ const TEST_WORKFLOW_POLICY = {
     branchRequired: false,
     finalization: "commit-optional-push",
   },
-};
+});
 
 // Returns the test policy for a given command (used by manual `resolvePolicy`
 // callbacks in tests that bypass the full bootstrap pipeline).
@@ -210,7 +224,7 @@ const TEST_PROJECT_JSONC = JSON.stringify({
     defaultMergeTarget: "",
     validationRegex:
       "^(feat|fix|docs|chore|refactor|design)\\/[A-Z]+-\\d+-[a-z0-9-]+$|^(feat|fix|docs|chore|refactor|design)\\/no-ticket-[a-z0-9-]+$",
-    commandTypeMap: {
+    commandTypeMap: withBmadAliases({
       "bmad-bmm-check-implementation-readiness": "docs",
       "bmad-bmm-correct-course": "refactor",
       "bmad-bmm-create-architecture": "docs",
@@ -235,9 +249,9 @@ const TEST_PROJECT_JSONC = JSON.stringify({
       "bmad-bmm-technical-research": "docs",
       "bmad-bmm-validate-prd": "docs",
       "bmad-bmm-code-review": "fix",
-    },
+    }),
   },
-  workflowPolicy: {
+  workflowPolicy: withBmadAliases({
     "bmad-bmm-create-story": {
       category: "implementation",
       identityStrategy: "story",
@@ -268,7 +282,7 @@ const TEST_PROJECT_JSONC = JSON.stringify({
       artifactKey: "prd",
       finalization: "commit-optional-push",
     },
-  },
+  }),
   audit: {
     enabled: true,
     logToClient: true,
