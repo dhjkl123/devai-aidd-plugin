@@ -463,6 +463,39 @@ async function testLayer1BlocksGitForTrackedOverride() {
   );
 }
 
+async function testMutatingToolsAllowedInWorkflowBeforeHook() {
+  const { createToolExecuteBeforeHook } = await import(toolExecuteBeforeModuleUrl);
+  const { createWorkflowStateStore } = await import(workflowStateModuleUrl);
+
+  for (const tool of ["edit", "write", "patch", "multiedit"]) {
+    const workflowState = createWorkflowStateStore();
+    const sessionID = `mutating-allowed-${tool}`;
+    workflowState.set(sessionID, {
+      sessionID,
+      commandName: "bmad-bmm-quick-dev",
+      arguments: "",
+      detectedAt: "2026-05-14T00:00:00.000Z",
+      phase: "start",
+    });
+
+    const { pluginContext } = makeDebugCapture();
+    const hook = createToolExecuteBeforeHook({
+      workflowState,
+      pluginContext,
+      commandExecuteBeforeHandler: async () => {},
+      workflowNames: new Set(),
+      runtimeConfig: makeRuntimeConfig({ debugEnabled: false }),
+    });
+
+    await hook({ tool, sessionID }, { args: {} });
+    assert.equal(
+      workflowState.get(sessionID)?.phase,
+      "in-progress",
+      `${tool} before-hook should be allowed and advance phase to in-progress`,
+    );
+  }
+}
+
 async function runTests() {
   const tests = [
     ["loadWorkflowSkills discovery + edge cases", testLoadWorkflowSkillsDiscovery],
@@ -479,6 +512,7 @@ async function runTests() {
     ["SKILL_TOOL_TOKENS / SKILLS_SUBDIR exposed", testSkillTokensConstantExposed],
     ["Layer 1 allows git for tracked readiness skip", testLayer1AllowsGitForTrackedReadinessSkip],
     ["Layer 1 blocks git for tracked override", testLayer1BlocksGitForTrackedOverride],
+    ["mutating tools allowed in workflow before-hook", testMutatingToolsAllowedInWorkflowBeforeHook],
   ];
   for (const [name, fn] of tests) {
     await fn();

@@ -89,4 +89,19 @@ function plan(readiness, currentBranch = null) {
   assert.equal(ready.reason, "repository-ready");
 }
 
+{
+  const unavailable = plan({
+    outcome: "skip",
+    reason: "readiness-check-unavailable",
+    details: {
+      isGitRepository: false,
+      hasCommit: false,
+      branch: null,
+      failedProbe: "rev-parse-inside-work-tree",
+    },
+  });
+  assert.equal(unavailable.shouldAsk, false);
+  assert.deepEqual(unavailable.steps.map((q) => q.key), []);
+}
+
 console.log("build-startup-chain-question-instruction OK");
