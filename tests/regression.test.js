@@ -20,6 +20,9 @@ const commandExecuteBeforeModuleUrl = pathToFileURL(
 const toolExecuteAfterModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "hooks", "tool-execute-after.js"),
 ).href;
+const toolExecuteBeforeModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "hooks", "tool-execute-before.js"),
+).href;
 const permissionAskedHookModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "hooks", "permission-asked.js"),
 ).href;
@@ -68,6 +71,12 @@ const pushServiceModuleUrl = pathToFileURL(
 const runGitCommandModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "git", "run-git-command.js"),
 ).href;
+const readinessStatePolicyModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "git", "readiness-state-policy.js"),
+).href;
+const startupChainExecutorModuleUrl = pathToFileURL(
+  path.join(projectRoot, "src", "services", "git", "startup-chain-executor.js"),
+).href;
 const commitProposalModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "workflow", "commit-proposal.js"),
 ).href;
@@ -85,6 +94,7 @@ const recoveryOrchestratorModuleUrl = pathToFileURL(
 ).href;
 const builtModulePath = path.join(projectRoot, "dist", "devai-aidd-plugin.js");
 const builtModuleUrl = pathToFileURL(builtModulePath).href;
+const MUTATING_TOOL_NAMES = ["edit", "write", "patch", "multiedit"];
 
 // Story 4.5 R2 (H-1 mitigation): accept injected dependencies so the
 // regression-gate meta-guard (`verifyStory45RegressionGateAbortsWithoutBuiltArtifact`)
@@ -421,7 +431,7 @@ async function runToolMutatingBefore(handlers, options = {}) {
   // can isolate positive vs negative trios under distinct session ids.
   const input = {
     sessionID: typeof options.sessionID === "string" ? options.sessionID : "session-1",
-    tool: "write",
+    tool: typeof options.tool === "string" ? options.tool : "write",
     args: {},
   };
   const output = { args: {} };
@@ -2068,12 +2078,15 @@ async function verifyBranchProposalIntegration() {
 
   const workflowState = createWorkflowStateStore();
   const logs = [];
+  const initializedWorkspace = createGitWorkspace({ initialize: true });
+  const noGitWorkspace = createGitWorkspace();
   const hook = commandBeforeModule.createCommandExecuteBeforeHook(
     {
       workflowCommands: new Set(["bmad-bmm-quick-dev", "bmad-bmm-create-prd"]),
       workflowState,
       branchConfig: TEST_BRANCH_CONFIG,
       pluginContext: {
+        directory: initializedWorkspace,
         resolvePolicy(workflowContext) {
           const policy = defaultPolicyWithLegacyBranchRequired(workflowContext.commandName, DEFAULT_PLUGIN_CONFIG);
           if (!policy) {
@@ -2095,8 +2108,6 @@ async function verifyBranchProposalIntegration() {
     },
   );
 
-  const noGitWorkspace = createGitWorkspace();
-
   try {
     await hook(
       {
@@ -2114,8 +2125,8 @@ async function verifyBranchProposalIntegration() {
         kind: "branch",
         action: "create",
         name: "feat/ABC-123-regression-coverage",
-        reason: "no-current-branch",
-        current: null,
+        reason: "current-branch-is-long-lived",
+        current: "master",
         policyMatch: {
           commandName: "bmad-bmm-quick-dev",
           category: "implementation",
@@ -2283,6 +2294,7 @@ async function verifyBranchProposalIntegration() {
       "verifyBranchProposalIntegration: each implementation workflow run with a branch proposal must emit branch git.action.planned",
     );
   } finally {
+    fs.rmSync(initializedWorkspace, { recursive: true, force: true });
     fs.rmSync(noGitWorkspace, { recursive: true, force: true });
   }
 
@@ -2766,6 +2778,562 @@ async function verifyStartupChainReadinessSkipContracts() {
     overridePlan.steps.map((step) => step.key),
     ["init", "baseline", "branch"],
     "verifyStartupChainReadinessSkipContracts: override-active workflow must still plan init, baseline, and branch steps",
+  );
+
+  const branchPurityContext = {
+    sessionID: "startup-branch-purity",
+    commandName: "bmad-bmm-quick-dev",
+    normalizedCommand: "bmad-bmm-quick-dev",
+    arguments: "ABC-123 unavailable",
+  };
+  const branchPurityReadiness = {
+    outcome: "allow",
+    reason: "repository-ready",
+    details: {
+      isGitRepository: true,
+      hasCommit: true,
+      branch: "feat/ABC-123-unavailable",
+    },
+  };
+  const plannerDoesNotReadReadinessBranch = plannerMod.buildStartupChainPlan({
+    readiness: branchPurityReadiness,
+    readinessGate: { enabled: true },
+    workflowContext: branchPurityContext,
+    workflowPolicy: defaultPolicyWithLegacyBranchRequired("bmad-bmm-quick-dev"),
+    branchConfig: TEST_BRANCH_CONFIG,
+    currentBranch: null,
+    state: {},
+  });
+  assert.deepEqual(
+    plannerDoesNotReadReadinessBranch.steps.map((step) => step.key),
+    ["branch"],
+    "verifyStartupChainReadinessSkipContracts: planner must not use readiness.details.branch as an implicit currentBranch fallback",
+  );
+
+  const callerResolvedBranchPlan = plannerMod.buildStartupChainPlan({
+    readiness: branchPurityReadiness,
+    readinessGate: { enabled: true },
+    workflowContext: branchPurityContext,
+    workflowPolicy: defaultPolicyWithLegacyBranchRequired("bmad-bmm-quick-dev"),
+    branchConfig: TEST_BRANCH_CONFIG,
+    currentBranch: "feat/ABC-123-unavailable",
+    state: {},
+  });
+  assert.deepEqual(
+    callerResolvedBranchPlan.steps.map((step) => step.key),
+    [],
+    "verifyStartupChainReadinessSkipContracts: caller-supplied effective currentBranch must suppress duplicate branch preview",
+  );
+}
+
+async function verifyUnavailableReadinessPreservesKnownGoodState() {
+  const [{ createWorkflowStateStore }, commandBeforeModule] = await Promise.all([
+    import(`${workflowStateModuleUrl}?readiness-unavailable-preserve=${Date.now()}`),
+    import(`${commandExecuteBeforeModuleUrl}?readiness-unavailable-preserve=${Date.now()}`),
+  ]);
+
+  const workflowState = createWorkflowStateStore();
+  const prompts = [];
+  const approvals = [];
+  const sessionID = "readiness-unavailable-preserve";
+  const knownGoodReadiness = {
+    outcome: "allow",
+    reason: "repository-ready",
+    message: "Repository readiness checks completed successfully.",
+    details: {
+      directory: projectRoot,
+      checkedAt: "2026-05-13T00:00:00.000Z",
+      isGitRepository: true,
+      branch: "feat/ABC-123-unavailable",
+      hasCommit: true,
+      hasRemote: false,
+      remoteNames: [],
+    },
+  };
+  workflowState.set(sessionID, {
+    sessionID,
+    commandName: "bmad-bmm-quick-dev",
+    readiness: knownGoodReadiness,
+  });
+
+  const timeoutError = new Error("spawnSync git ETIMEDOUT");
+  timeoutError.code = "ETIMEDOUT";
+  timeoutError.signal = "SIGTERM";
+
+  const hook = commandBeforeModule.createCommandExecuteBeforeHook({
+    workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+    workflowState,
+    branchConfig: TEST_BRANCH_CONFIG,
+    pluginContext: {
+      directory: projectRoot,
+      gitRunner() {
+        throw timeoutError;
+      },
+      resolvePolicy() {
+        return {
+          outcome: "allow",
+          details: {
+            policy: defaultPolicyWithLegacyBranchRequired("bmad-bmm-quick-dev"),
+          },
+        };
+      },
+      async requestStartupChainApproval(chain) {
+        prompts.push(chain);
+      },
+      async requestApproval(request) {
+        approvals.push(request);
+      },
+    },
+  });
+
+  const output = { parts: [] };
+  await hook(
+    { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 unavailable", sessionID },
+    output,
+  );
+
+  const state = workflowState.get(sessionID);
+  assert.equal(
+    state?.readiness?.reason,
+    "repository-ready",
+    "verifyUnavailableReadinessPreservesKnownGoodState: unavailable check must not overwrite repository-ready readiness",
+  );
+  assert.equal(
+    state?.readiness?.details?.isGitRepository,
+    true,
+    "verifyUnavailableReadinessPreservesKnownGoodState: preserved readiness must keep initialized repository fact",
+  );
+  assert.equal(
+    state?.latestReadinessError?.reason,
+    "readiness-check-unavailable",
+    "verifyUnavailableReadinessPreservesKnownGoodState: unavailable diagnostics must be stored separately",
+  );
+  assert.equal(
+    state?.latestReadinessError?.details?.failedProbe,
+    "rev-parse-inside-work-tree",
+    "verifyUnavailableReadinessPreservesKnownGoodState: failed probe diagnostic must be retained",
+  );
+  assert.equal(
+    prompts.length,
+    0,
+    "verifyUnavailableReadinessPreservesKnownGoodState: unavailable check must not reissue startup chain",
+  );
+  assert.equal(
+    approvals.length,
+    0,
+    "verifyUnavailableReadinessPreservesKnownGoodState: unavailable re-entry must not publish redundant branch approval",
+  );
+  assert.equal(
+    state?.startupChainCurrent ?? null,
+    null,
+    "verifyUnavailableReadinessPreservesKnownGoodState: startupChainCurrent must remain empty",
+  );
+  assert.equal(
+    state?.branchProposal ?? null,
+    null,
+    "verifyUnavailableReadinessPreservesKnownGoodState: branchProposal must remain empty when preserved branch already matches candidate",
+  );
+  assert.equal(
+    state?.approvalCurrent ?? null,
+    null,
+    "verifyUnavailableReadinessPreservesKnownGoodState: approvalCurrent must remain empty when no redundant branch action is needed",
+  );
+  assert.equal(
+    Array.isArray(state?.pendingActions) ? state.pendingActions.length : 0,
+    0,
+    "verifyUnavailableReadinessPreservesKnownGoodState: pendingActions must not queue a redundant branch action",
+  );
+
+  const leaked = state.latestReadinessError;
+  leaked.details.failedProbe = "mutated";
+  assert.equal(
+    workflowState.get(sessionID)?.latestReadinessError?.details?.failedProbe,
+    "rev-parse-inside-work-tree",
+    "verifyUnavailableReadinessPreservesKnownGoodState: latestReadinessError must be cloned on get",
+  );
+}
+
+async function verifyEffectiveCurrentBranchFallbackContracts() {
+  const [{ createWorkflowStateStore }, commandBeforeModule] = await Promise.all([
+    import(`${workflowStateModuleUrl}?effective-branch-fallback=${Date.now()}`),
+    import(`${commandExecuteBeforeModuleUrl}?effective-branch-fallback=${Date.now()}`),
+  ]);
+
+  function knownReady(branch = "feat/ABC-123-unavailable") {
+    return {
+      outcome: "allow",
+      reason: "repository-ready",
+      details: {
+        directory: projectRoot,
+        isGitRepository: true,
+        hasCommit: true,
+        branch,
+        hasRemote: false,
+        remoteNames: [],
+      },
+    };
+  }
+
+  function timeoutGitRunner() {
+    const error = new Error("spawnSync git ETIMEDOUT");
+    error.code = "ETIMEDOUT";
+    error.signal = "SIGTERM";
+    throw error;
+  }
+
+  function createHook({ workflowState, requestStartupChainApproval, requestApproval, resolveCurrentBranch } = {}) {
+    return commandBeforeModule.createCommandExecuteBeforeHook({
+      workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+      workflowState,
+      branchConfig: TEST_BRANCH_CONFIG,
+      pluginContext: {
+        directory: projectRoot,
+        gitRunner: timeoutGitRunner,
+        resolveCurrentBranch,
+        resolvePolicy() {
+          return {
+            outcome: "allow",
+            details: {
+              policy: defaultPolicyWithLegacyBranchRequired("bmad-bmm-quick-dev"),
+            },
+          };
+        },
+        requestStartupChainApproval,
+        requestApproval,
+      },
+    });
+  }
+
+  {
+    const workflowState = createWorkflowStateStore();
+    const prompts = [];
+    const approvals = [];
+    const sessionID = "effective-branch-fallback-no-duplicate";
+    workflowState.set(sessionID, {
+      sessionID,
+      readiness: knownReady(),
+    });
+    const hook = createHook({
+      workflowState,
+      requestStartupChainApproval(chain) {
+        prompts.push(chain);
+      },
+      requestApproval(request) {
+        approvals.push(request);
+      },
+    });
+
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 unavailable", sessionID },
+      { parts: [] },
+    );
+
+    const state = workflowState.get(sessionID);
+    assert.equal(
+      prompts.length,
+      0,
+      "verifyEffectiveCurrentBranchFallbackContracts: startup-chain preview must use preserved branch fallback and avoid duplicate branch step",
+    );
+    assert.equal(
+      approvals.length,
+      0,
+      "verifyEffectiveCurrentBranchFallbackContracts: direct branch publish must use preserved branch fallback and avoid duplicate approval",
+    );
+    assert.equal(state?.branchProposal ?? null, null);
+    assert.equal(state?.approvalCurrent ?? null, null);
+    assert.equal(Array.isArray(state?.pendingActions) ? state.pendingActions.length : 0, 0);
+    assert.equal(state?.latestReadinessError?.reason, "readiness-check-unavailable");
+  }
+
+  const priorityCases = [
+    {
+      name: "input-currentBranch",
+      input: { currentBranch: "feat/ABC-999-other-work" },
+      resolver: undefined,
+      expectedCurrent: "feat/ABC-999-other-work",
+    },
+    {
+      name: "input-branch",
+      input: { branch: "feat/ABC-998-branch-field" },
+      resolver: undefined,
+      expectedCurrent: "feat/ABC-998-branch-field",
+    },
+    {
+      name: "plugin-resolver",
+      input: {},
+      resolver: () => "feat/ABC-997-resolved",
+      expectedCurrent: "feat/ABC-997-resolved",
+    },
+  ];
+
+  for (const item of priorityCases) {
+    const workflowState = createWorkflowStateStore();
+    const sessionID = `effective-branch-fallback-${item.name}`;
+    workflowState.set(sessionID, {
+      sessionID,
+      readiness: knownReady(),
+    });
+    const hook = createHook({
+      workflowState,
+      resolveCurrentBranch: item.resolver,
+    });
+
+    await hook(
+      {
+        command: "/bmad-bmm-quick-dev",
+        arguments: "ABC-123 unavailable",
+        sessionID,
+        ...item.input,
+      },
+      { parts: [] },
+    );
+
+    const proposal = workflowState.get(sessionID)?.branchProposal;
+    assert.equal(
+      proposal?.current,
+      item.expectedCurrent,
+      `verifyEffectiveCurrentBranchFallbackContracts: ${item.name} must override preserved readiness branch`,
+    );
+    assert.equal(
+      proposal?.action,
+      "switch",
+      `verifyEffectiveCurrentBranchFallbackContracts: ${item.name} mismatch must still produce switch proposal`,
+    );
+  }
+
+  const untrustedReadinessCases = [
+    {
+      name: "empty-branch",
+      readiness: {
+        ...knownReady(""),
+        details: {
+          ...knownReady("").details,
+          branch: "",
+        },
+      },
+    },
+    {
+      name: "no-commit",
+      readiness: {
+        ...knownReady(),
+        details: {
+          ...knownReady().details,
+          hasCommit: false,
+        },
+      },
+    },
+    {
+      name: "readiness-gate-skipped",
+      readiness: {
+        outcome: "allow",
+        reason: "readiness-gate-skipped",
+        details: {
+          directory: projectRoot,
+          isGitRepository: true,
+          hasCommit: true,
+          branch: "feat/ABC-123-unavailable",
+          hasRemote: false,
+          remoteNames: [],
+        },
+      },
+    },
+  ];
+
+  for (const item of untrustedReadinessCases) {
+    const workflowState = createWorkflowStateStore();
+    const sessionID = `effective-branch-fallback-untrusted-${item.name}`;
+    const prompts = [];
+    workflowState.set(sessionID, {
+      sessionID,
+      readiness: item.readiness,
+    });
+    const hook = createHook({
+      workflowState,
+      requestStartupChainApproval(chain) {
+        prompts.push(chain);
+      },
+    });
+
+    await hook(
+      { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 unavailable", sessionID },
+      { parts: [] },
+    );
+
+    const state = workflowState.get(sessionID);
+    assert.notEqual(
+      state?.startupChainCurrent ?? null,
+      null,
+      `verifyEffectiveCurrentBranchFallbackContracts: ${item.name} readiness branch must not be trusted as current branch`,
+    );
+    assert.equal(
+      prompts.length,
+      1,
+      `verifyEffectiveCurrentBranchFallbackContracts: ${item.name} must still surface required startup action instead of suppressing it via untrusted branch`,
+    );
+  }
+}
+
+async function verifyReadinessStatePolicyContracts() {
+  const {
+    buildAssumedRepositoryReadyReadiness,
+    resolveReadinessStateUpdate,
+  } = await import(`${readinessStatePolicyModuleUrl}?policy=${Date.now()}`);
+
+  const knownReady = {
+    outcome: "allow",
+    reason: "repository-ready",
+    details: {
+      directory: projectRoot,
+      isGitRepository: true,
+      hasCommit: true,
+      branch: "main",
+      hasRemote: false,
+      remoteNames: [],
+    },
+  };
+  const unavailable = {
+    outcome: "skip",
+    reason: "readiness-check-unavailable",
+    details: {
+      isGitRepository: false,
+      hasCommit: false,
+      failedProbe: "rev-parse-inside-work-tree",
+    },
+  };
+
+  const preserved = resolveReadinessStateUpdate({
+    previousReadiness: knownReady,
+    nextReadiness: unavailable,
+  });
+  assert.equal(
+    preserved.readiness,
+    knownReady,
+    "verifyReadinessStatePolicyContracts: unavailable result must preserve previous authoritative readiness",
+  );
+  assert.equal(
+    preserved.latestReadinessError,
+    unavailable,
+    "verifyReadinessStatePolicyContracts: unavailable result must be stored as latestReadinessError",
+  );
+
+  const cleared = resolveReadinessStateUpdate({
+    previousReadiness: knownReady,
+    nextReadiness: {
+      ...knownReady,
+      details: { ...knownReady.details, branch: "feat/ABC-123-clear" },
+    },
+  });
+  assert.equal(
+    cleared.latestReadinessError,
+    null,
+    "verifyReadinessStatePolicyContracts: authoritative readiness must clear latestReadinessError",
+  );
+  assert.equal(cleared.readiness.details.branch, "feat/ABC-123-clear");
+
+  const noPrior = resolveReadinessStateUpdate({
+    previousReadiness: null,
+    nextReadiness: unavailable,
+  });
+  assert.equal(
+    noPrior.readiness,
+    null,
+    "verifyReadinessStatePolicyContracts: unavailable without prior authoritative readiness must not become current readiness",
+  );
+  assert.equal(noPrior.latestReadinessError, unavailable);
+
+  const fallback = buildAssumedRepositoryReadyReadiness({
+    previousReadiness: { details: { hasRemote: true, remoteNames: ["origin"] } },
+    directory: projectRoot,
+    hasCommit: false,
+    branch: null,
+  });
+  assert.equal(fallback.reason, "repository-ready");
+  assert.equal(fallback.details.isGitRepository, true);
+  assert.equal(fallback.details.hasCommit, false);
+  assert.deepEqual(fallback.details.remoteNames, ["origin"]);
+}
+
+async function verifyStartupChainRefreshUnavailablePreservesReadyState() {
+  const [{ createWorkflowStateStore }, { executeStartupChain }] = await Promise.all([
+    import(`${workflowStateModuleUrl}?startup-refresh-unavailable=${Date.now()}`),
+    import(`${startupChainExecutorModuleUrl}?startup-refresh-unavailable=${Date.now()}`),
+  ]);
+
+  const workflowState = createWorkflowStateStore();
+  const sessionID = "startup-refresh-unavailable";
+  const chain = {
+    startupChainId: `startup-chain:${sessionID}:bmad-bmm-quick-dev`,
+    workflowContext: {
+      sessionID,
+      commandName: "bmad-bmm-quick-dev",
+      phase: "start",
+    },
+    workflowPolicy: defaultPolicyWithLegacyBranchRequired("bmad-bmm-quick-dev"),
+    steps: [
+      {
+        key: "init",
+        kind: "init",
+        action: "git-init",
+        proposal: { kind: "init", correlationId: "init-refresh-unavailable" },
+        correlationId: "init-refresh-unavailable",
+      },
+    ],
+  };
+  workflowState.set(sessionID, {
+    sessionID,
+    readiness: {
+      outcome: "ask",
+      reason: "git-not-initialized",
+      details: {
+        directory: projectRoot,
+        isGitRepository: false,
+        hasCommit: false,
+        hasRemote: false,
+        remoteNames: [],
+        proposal: { kind: "init", correlationId: "init-refresh-unavailable" },
+      },
+    },
+    startupChainCurrent: chain,
+  });
+
+  const timeoutError = new Error("spawnSync git ETIMEDOUT");
+  timeoutError.code = "ETIMEDOUT";
+
+  const result = await executeStartupChain({
+    workflowState,
+    sessionID,
+    chain,
+    answers: { init: "Initialize Git (Recommended)" },
+    pluginContext: {
+      directory: projectRoot,
+      async gitActionRunner() {
+        return { observedState: { repositoryReady: true } };
+      },
+      gitRunner() {
+        throw timeoutError;
+      },
+    },
+    audit: { async info() {} },
+  });
+
+  assert.equal(result.outcome, "resolved");
+  const state = workflowState.get(sessionID);
+  assert.equal(
+    state?.readiness?.reason,
+    "repository-ready",
+    "verifyStartupChainRefreshUnavailablePreservesReadyState: successful init must infer ready state when refresh is unavailable",
+  );
+  assert.equal(state?.readiness?.details?.isGitRepository, true);
+  assert.equal(state?.readiness?.details?.hasCommit, false);
+  assert.equal(
+    state?.latestReadinessError?.reason,
+    "readiness-check-unavailable",
+    "verifyStartupChainRefreshUnavailablePreservesReadyState: refresh timeout diagnostics must be preserved separately",
+  );
+  assert.equal(
+    state?.startupChainCurrent,
+    null,
+    "verifyStartupChainRefreshUnavailablePreservesReadyState: chain must be cleared after resolution",
   );
 }
 
@@ -11642,10 +12210,9 @@ async function verifyStory45WrapperBuiltCommandPromptParity() {
 }
 
 /**
- * Story 4.5: mutating-tool guard behavior must match across all three
- * variants on workflow sessions, AND must be silent (no throw) on
- * non-workflow sessions. Locks the byte-for-byte exception message parity
- * that Story 4.3 promised, plus TWO negative cases: (1) "no command issued"
+ * Story 4.5: mutating before-hook allow behavior must match across wrapper
+ * and built variants. The before-hook must be silent (no throw) on
+ * pass-through sessions, including TWO negative cases: (1) "no command issued"
  * (no state entry at all), (2) "non-workflow command issued" (state may
  * exist but workflow detection rejected it). Both cases must remain silent
  * across legacy/wrapper/built.
@@ -11659,27 +12226,34 @@ async function verifyStory45WrapperBuiltCommandPromptParity() {
  * creations now happen inside the try{} so a partial-failure leak is
  * impossible.
  */
-async function verifyStory45WrapperBuiltMutatingToolGuardParity() {
+async function verifyStory45WrapperBuiltMutatingToolPassThroughParity() {
   const trio = await story45InstantiatePair();
   try {
     const { wrapper, built } = trio;
 
-    const positiveSessionID = "verifyStory45-mutating-positive";
-    await runCommandExecuteBefore(wrapper.handlers, { sessionID: positiveSessionID });
-    await runCommandExecuteBefore(built.handlers, { sessionID: positiveSessionID });
+    const passThroughSessionID = "verifyStory45-mutating-allow";
 
-    const wrapperError = await runToolMutatingBefore(wrapper.handlers, { sessionID: positiveSessionID });
-    const builtError = await runToolMutatingBefore(built.handlers, { sessionID: positiveSessionID });
+    for (const tool of MUTATING_TOOL_NAMES) {
+      const wrapperError = await runToolMutatingBefore(wrapper.handlers, {
+        sessionID: `${passThroughSessionID}-${tool}-wrapper`,
+        tool,
+      });
+      const builtError = await runToolMutatingBefore(built.handlers, {
+        sessionID: `${passThroughSessionID}-${tool}-built`,
+        tool,
+      });
 
-    assert.ok(
-      wrapperError && wrapperError.message,
-      "verifyStory45WrapperBuiltMutatingToolGuardParity: wrapper must throw mutating-tool guard error on workflow session",
-    );
-    assert.equal(
-      builtError?.message,
-      wrapperError.message,
-      "verifyStory45WrapperBuiltMutatingToolGuardParity: built mutating-tool error message diverged from wrapper (esbuild minify/transform must not mutate user-visible strings)",
-    );
+      assert.equal(
+        wrapperError,
+        null,
+        `verifyStory45WrapperBuiltMutatingToolPassThroughParity: wrapper must allow ${tool} pass-through before-hook; got ${wrapperError?.message}`,
+      );
+      assert.equal(
+        builtError,
+        null,
+        `verifyStory45WrapperBuiltMutatingToolPassThroughParity: built must allow ${tool} pass-through before-hook; got ${builtError?.message}`,
+      );
+    }
 
     // ── Negative cases: must remain silent on both wrapper and built ──
     const wrapperMod = await import(wrapperModuleUrl);
@@ -11708,7 +12282,7 @@ async function verifyStory45WrapperBuiltMutatingToolGuardParity() {
         assert.equal(
           err,
           null,
-          `verifyStory45WrapperBuiltMutatingToolGuardParity: ${label} mutating-tool guard must NOT fire when no command was issued; got error: ${err?.message}`,
+          `verifyStory45WrapperBuiltMutatingToolPassThroughParity: ${label} mutating before-hook must allow when no command was issued; got error: ${err?.message}`,
         );
       }
 
@@ -11726,7 +12300,7 @@ async function verifyStory45WrapperBuiltMutatingToolGuardParity() {
         assert.equal(
           (nonWorkflowOutput.parts || []).length,
           0,
-          `verifyStory45WrapperBuiltMutatingToolGuardParity: ${label} non-workflow command must produce zero output parts; got ${(nonWorkflowOutput.parts || []).length}`,
+          `verifyStory45WrapperBuiltMutatingToolPassThroughParity: ${label} non-workflow command must produce zero output parts; got ${(nonWorkflowOutput.parts || []).length}`,
         );
         const err = await runToolMutatingBefore(instance.handlers, {
           sessionID: nonWorkflowSessionID,
@@ -11734,7 +12308,7 @@ async function verifyStory45WrapperBuiltMutatingToolGuardParity() {
         assert.equal(
           err,
           null,
-          `verifyStory45WrapperBuiltMutatingToolGuardParity: ${label} mutating-tool guard must NOT fire after a non-workflow command; got error: ${err?.message}`,
+          `verifyStory45WrapperBuiltMutatingToolPassThroughParity: ${label} mutating before-hook must allow after a non-workflow command; got error: ${err?.message}`,
         );
       }
     } finally {
@@ -12384,49 +12958,88 @@ async function verifyStartInstructionTextSimplified() {
 /**
  * AC8: mutating-tool guard throw message must match byte-for-byte.
  */
-async function verifyMutatingToolThrowMessagePreserved() {
-  const wrapperMod = await import(`${wrapperModuleUrl}?ac8=${Date.now()}`);
-  const tempRoot = createTempWorkspace();
-  try {
-    const mock = createMockClient();
-    const handlers = await wrapperMod.DevaiAiddGuardPlugin({
-      client: mock.client,
-      directory: tempRoot,
-    });
-    await handlers["command.execute.before"](
-      { command: "/bmad-bmm-quick-dev", arguments: "", sessionID: "ac8-session" },
-      { parts: [] },
-    );
+async function verifyMutatingToolBeforeAllowsAndAdvancesPhase() {
+  const [{ createWorkflowStateStore }, { createToolExecuteBeforeHook }] = await Promise.all([
+    import(`${workflowStateModuleUrl}?mut-before=${Date.now()}`),
+    import(`${toolExecuteBeforeModuleUrl}?mut-before=${Date.now()}`),
+  ]);
 
-    let thrown = null;
-    try {
-      await handlers["tool.execute.before"](
-        { sessionID: "ac8-session", tool: "write", args: {} },
-        { args: {} },
-      );
-    } catch (error) {
-      thrown = error;
-    }
-    assert.ok(thrown, "verifyMutatingToolThrowMessagePreserved: mutating tool must throw");
-    // strengthen-approval-prompt-instructions follow-up: when an approval is
-    // active for this session, Layer 0 (approval-pending block) supersedes
-    // Layer 3 (mutating-tool guard) -- the legacy "create or switch to
-    // branch" message is no longer the first line of defense. Verify the new
-    // Layer 0 contract instead. Layer 3 message remains in source as a
-    // fallback for the "workflow in progress, no active approval" case.
-    assert.match(
-      thrown.message,
-      /^Git workflow guard: a startup approval chain is pending and you must call the native `question` tool/,
-      `verifyMutatingToolThrowMessagePreserved: Layer 0 must fire first; got ${JSON.stringify(thrown.message)}`,
+  for (const tool of MUTATING_TOOL_NAMES) {
+    const sessionID = `mutating-before-${tool}`;
+    const store = createWorkflowStateStore();
+    store.set(sessionID, {
+      commandName: "bmad-bmm-quick-dev",
+      arguments: "",
+      sessionID,
+      detectedAt: "2026-05-14T00:00:00.000Z",
+      phase: "start",
+    });
+    const hook = createToolExecuteBeforeHook({
+      workflowState: store,
+      pluginContext: { directory: projectRoot },
+    });
+
+    await hook({ sessionID, tool, args: {} }, { args: {} });
+    const state = store.get(sessionID);
+    assert.equal(
+      state?.phase,
+      "in-progress",
+      `verifyMutatingToolBeforeAllowsAndAdvancesPhase: ${tool} must advance to in-progress before after-hook; got ${state?.phase}`,
     );
-    assert.match(
-      thrown.message,
-      /staged question batch BEFORE any other tool/,
-      "verifyMutatingToolThrowMessagePreserved: Layer 0 message must point to the native question batch",
-    );
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
   }
+}
+
+async function verifyMutatingToolLayer0StillWins() {
+  const [{ createWorkflowStateStore }, { createToolExecuteBeforeHook }] = await Promise.all([
+    import(`${workflowStateModuleUrl}?mut-layer0=${Date.now()}`),
+    import(`${toolExecuteBeforeModuleUrl}?mut-layer0=${Date.now()}`),
+  ]);
+
+  const approvalSessionID = "mutating-before-approval-pending";
+  const approvalStore = createWorkflowStateStore();
+  approvalStore.set(approvalSessionID, {
+    commandName: "bmad-bmm-quick-dev",
+    sessionID: approvalSessionID,
+    phase: "in-progress",
+    approvalCurrent: {
+      id: "approval-1",
+      actionType: "branch/create",
+      workflow: "bmad-bmm-quick-dev",
+      proposal: { name: "workflow" },
+    },
+  });
+  const approvalHook = createToolExecuteBeforeHook({
+    workflowState: approvalStore,
+    pluginContext: { directory: projectRoot },
+  });
+  await assert.rejects(
+    () => approvalHook({ sessionID: approvalSessionID, tool: "write", args: {} }, { args: {} }),
+    /Git workflow guard: an approval is pending/,
+    "verifyMutatingToolLayer0StillWins: approval Layer 0 must still block mutating tools",
+  );
+
+  const startupSessionID = "mutating-before-startup-pending";
+  const startupStore = createWorkflowStateStore();
+  startupStore.set(startupSessionID, {
+    commandName: "bmad-bmm-quick-dev",
+    sessionID: startupSessionID,
+    phase: "in-progress",
+    startupChainCurrent: {
+      sessionID: startupSessionID,
+      commandName: "bmad-bmm-quick-dev",
+      startupChainId: "startup-chain-test",
+      steps: [{ key: "branch", action: "create", proposal: { name: "workflow" } }],
+    },
+  });
+  const startupHook = createToolExecuteBeforeHook({
+    workflowState: startupStore,
+    pluginContext: { directory: projectRoot },
+  });
+  await assert.rejects(
+    () => startupHook({ sessionID: startupSessionID, tool: "write", args: {} }, { args: {} }),
+    /Git workflow guard: a startup approval chain is pending/,
+    "verifyMutatingToolLayer0StillWins: startup-chain Layer 0 must still block mutating tools",
+  );
 }
 
 /**
@@ -12636,30 +13249,32 @@ async function verifyMutatingToolAdvancesPhase() {
     pathToFileURL(path.join(projectRoot, "src", "hooks", "tool-execute-after.js")).href,
   );
 
-  const sessionID = "ac13-session";
-  const store = createWorkflowStateStore();
-  store.set(sessionID, {
-    commandName: "bmad-bmm-quick-dev",
-    arguments: "",
-    sessionID,
-    detectedAt: "2026-05-11T00:00:00.000Z",
-    phase: "in-progress",
-  });
+  for (const tool of MUTATING_TOOL_NAMES) {
+    const sessionID = `ac13-session-${tool}`;
+    const store = createWorkflowStateStore();
+    store.set(sessionID, {
+      commandName: "bmad-bmm-quick-dev",
+      arguments: "",
+      sessionID,
+      detectedAt: "2026-05-11T00:00:00.000Z",
+      phase: "in-progress",
+    });
 
-  const hook = createToolExecuteAfterHook({ workflowState: store });
-  await hook({ sessionID, tool: "write", args: {} }, { args: {} });
+    const hook = createToolExecuteAfterHook({ workflowState: store });
+    await hook({ sessionID, tool, args: {} }, { args: {} });
 
-  const state = store.get(sessionID);
-  assert.equal(
-    state?.phase,
-    "mutating",
-    `verifyMutatingToolAdvancesPhase: phase must be "mutating" after mutating tool; got ${state?.phase}`,
-  );
-  assert.equal(
-    Object.keys(state || {}).includes("lifecycle"),
-    false,
-    "verifyMutatingToolAdvancesPhase: state must NOT contain a 'lifecycle' key",
-  );
+    const state = store.get(sessionID);
+    assert.equal(
+      state?.phase,
+      "mutating",
+      `verifyMutatingToolAdvancesPhase: phase must be "mutating" after ${tool}; got ${state?.phase}`,
+    );
+    assert.equal(
+      Object.keys(state || {}).includes("lifecycle"),
+      false,
+      `verifyMutatingToolAdvancesPhase: ${tool} state must NOT contain a 'lifecycle' key`,
+    );
+  }
 
   // Quiet unused-import warning.
   void wrapperMod;
@@ -13122,7 +13737,7 @@ main()
   // Story 4.5 — wrapper/built regression gate
   .then(() => verifyStory45WrapperBuiltHandlerShapesMatch())
   .then(() => verifyStory45WrapperBuiltCommandPromptParity())
-  .then(() => verifyStory45WrapperBuiltMutatingToolGuardParity())
+  .then(() => verifyStory45WrapperBuiltMutatingToolPassThroughParity())
   .then(() => verifyStory45BuiltArtifactExportContract())
   .then(() => verifyStory45BuiltArtifactPromptParityWithWrapper())
   .then(() => verifyStory45RegressionGateAbortsWithoutBuiltArtifact())
@@ -13135,7 +13750,8 @@ main()
   .then(() => verifyAuditWireFormatModernService())
   .then(() => verifyAliasExportRemoved())
   .then(() => verifyStartInstructionTextSimplified())
-  .then(() => verifyMutatingToolThrowMessagePreserved())
+  .then(() => verifyMutatingToolBeforeAllowsAndAdvancesPhase())
+  .then(() => verifyMutatingToolLayer0StillWins())
   // strengthen-git-init-proposal — bash+git block contract
   .then(() => verifyBashGitBlockMessagePreserved())
   .then(() => verifyBashGitBlockFiresWithoutWorkflowSession())
@@ -13149,6 +13765,10 @@ main()
   .then(() => verifyNativeEventHandlerExists())
   .then(() => verifyStartupChainRegressionContracts())
   .then(() => verifyStartupChainReadinessSkipContracts())
+  .then(() => verifyReadinessStatePolicyContracts())
+  .then(() => verifyUnavailableReadinessPreservesKnownGoodState())
+  .then(() => verifyEffectiveCurrentBranchFallbackContracts())
+  .then(() => verifyStartupChainRefreshUnavailablePreservesReadyState())
   // strengthen-approval-prompt-instructions — promptAsync instruction strengthening
   .then(() => verifyQuestionInstructionBuilderContract())
   // question-header guard — force model to use the exact header we staged

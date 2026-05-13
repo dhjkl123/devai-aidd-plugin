@@ -190,6 +190,12 @@ export function createWorkflowStateStore() {
       if (copy.readinessGate !== null && copy.readinessGate !== undefined) {
         copy.readinessGate = structuredClone(copy.readinessGate);
       }
+      if (copy.readiness !== null && copy.readiness !== undefined) {
+        copy.readiness = structuredClone(copy.readiness);
+      }
+      if (copy.latestReadinessError !== null && copy.latestReadinessError !== undefined) {
+        copy.latestReadinessError = structuredClone(copy.latestReadinessError);
+      }
       return copy;
     },
 

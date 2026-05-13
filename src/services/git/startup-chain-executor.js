@@ -10,6 +10,10 @@ import {
   computeCandidateBranchName,
   evaluateBranchStrategy,
 } from "./branch-service.js";
+import {
+  buildAssumedRepositoryReadyReadiness,
+  resolveReadinessStateUpdate,
+} from "./readiness-state-policy.js";
 
 export async function executeStartupChain({
   workflowState,
@@ -78,7 +82,18 @@ export async function executeStartupChain({
         await auditResolved({ audit, sessionID, workflowContext, chain, answers, resolved });
         return { outcome: "failed", envelope, resolved };
       }
-      readiness = refreshReadiness({ pluginContext, fallback: readiness, branch: null });
+      readiness = resolveRefreshedReadiness({
+        workflowState,
+        sessionID,
+        previousReadiness: readiness,
+        rawReadiness: refreshReadiness({ pluginContext, fallback: readiness, branch: null }),
+        unavailableFallbackReadiness: buildAssumedRepositoryReadyReadiness({
+          previousReadiness: readiness,
+          directory: pluginContext?.directory,
+          hasCommit: false,
+          branch: null,
+        }),
+      });
       repositorySnapshot = buildRepositorySnapshot(readiness);
       updateState(workflowState, sessionID, { readiness, initProposal: null });
     }
@@ -143,7 +158,17 @@ export async function executeStartupChain({
         await auditResolved({ audit, sessionID, workflowContext, chain, answers, resolved });
         return { outcome: "failed", envelope, resolved };
       }
-      readiness = refreshReadiness({ pluginContext, fallback: readiness });
+      readiness = resolveRefreshedReadiness({
+        workflowState,
+        sessionID,
+        previousReadiness: readiness,
+        rawReadiness: refreshReadiness({ pluginContext, fallback: readiness }),
+        unavailableFallbackReadiness: buildAssumedRepositoryReadyReadiness({
+          previousReadiness: readiness,
+          directory: pluginContext?.directory,
+          hasCommit: true,
+        }),
+      });
       repositorySnapshot = buildRepositorySnapshot(readiness);
       updateState(workflowState, sessionID, { readiness, commitProposal: null });
     }
@@ -189,10 +214,21 @@ export async function executeStartupChain({
         await auditResolved({ audit, sessionID, workflowContext, chain, answers, resolved });
         return { outcome: "failed", envelope, resolved };
       }
-      readiness = refreshReadiness({
-        pluginContext,
-        fallback: readiness,
-        branch: envelope.details?.observedState?.headBranch ?? plan.targetBranch,
+      readiness = resolveRefreshedReadiness({
+        workflowState,
+        sessionID,
+        previousReadiness: readiness,
+        rawReadiness: refreshReadiness({
+          pluginContext,
+          fallback: readiness,
+          branch: envelope.details?.observedState?.headBranch ?? plan.targetBranch,
+        }),
+        unavailableFallbackReadiness: buildAssumedRepositoryReadyReadiness({
+          previousReadiness: readiness,
+          directory: pluginContext?.directory,
+          hasCommit: true,
+          branch: envelope.details?.observedState?.headBranch ?? plan.targetBranch,
+        }),
       });
       updateState(workflowState, sessionID, { readiness, branchProposal: null });
     }
@@ -251,11 +287,28 @@ function buildRepositorySnapshot(readiness) {
 
 function refreshReadiness({ pluginContext, fallback, branch = undefined }) {
   try {
-    return checkRepositoryReadiness({
+    const readiness = checkRepositoryReadiness({
       directory: pluginContext?.directory,
       gitRunner: pluginContext?.gitRunner,
       policy: null,
     });
+    pluginContext?.debug?.log?.("startup-chain-executor", "readiness refresh completed", {
+      outcome: readiness?.outcome,
+      reason: readiness?.reason,
+      isGitRepository: readiness?.details?.isGitRepository ?? null,
+      hasCommit: readiness?.details?.hasCommit ?? null,
+      branch: readiness?.details?.branch ?? null,
+      errorCode: readiness?.details?.errorCode ?? null,
+      errorName: readiness?.details?.errorName ?? null,
+      errorStatus: readiness?.details?.errorStatus ?? null,
+      errorSignal: readiness?.details?.errorSignal ?? null,
+      errorMessage: readiness?.details?.errorMessage ?? null,
+      stderrSummary: readiness?.details?.stderrSummary ?? null,
+      failedProbe: readiness?.details?.failedProbe ?? null,
+      failedProbeDurationMs: readiness?.details?.failedProbeDurationMs ?? null,
+      probeTrace: readiness?.details?.probeTrace ?? null,
+    });
+    return readiness;
   } catch {
     if (branch === undefined) return fallback;
     return {
@@ -268,6 +321,25 @@ function refreshReadiness({ pluginContext, fallback, branch = undefined }) {
       },
     };
   }
+}
+
+function resolveRefreshedReadiness({
+  workflowState,
+  sessionID,
+  previousReadiness,
+  rawReadiness,
+  unavailableFallbackReadiness,
+}) {
+  const stateUpdate = resolveReadinessStateUpdate({
+    previousReadiness,
+    nextReadiness: rawReadiness,
+    unavailableFallbackReadiness,
+  });
+  updateState(workflowState, sessionID, {
+    readiness: stateUpdate.readiness,
+    latestReadinessError: stateUpdate.latestReadinessError,
+  });
+  return stateUpdate.readiness;
 }
 
 function safeListChangedFiles(pluginContext) {

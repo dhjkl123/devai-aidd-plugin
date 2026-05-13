@@ -34,7 +34,13 @@ function normalizeRemoteNames(remoteOutput) {
   return [...names];
 }
 
-function buildUnavailableResult(directory, checkedAt, error) {
+function truncateDiagnostic(value, maxLength = 500) {
+  const text = typeof value === "string" ? value : value == null ? "" : String(value);
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function buildUnavailableResult(directory, checkedAt, error, probeTrace = []) {
   return {
     outcome: "skip",
     reason: "readiness-check-unavailable",
@@ -43,6 +49,15 @@ function buildUnavailableResult(directory, checkedAt, error) {
       ...createBaseDetails(directory, checkedAt),
       errorCode: error?.code || null,
       errorName: error?.name || null,
+      errorStatus: typeof error?.status === "number" ? error.status : null,
+      errorSignal: error?.signal || null,
+      errorMessage: error?.message ? truncateDiagnostic(error.message) : null,
+      stderrSummary: error?.stderr ? truncateDiagnostic(error.stderr) : null,
+      stdoutSummary: error?.stdout ? truncateDiagnostic(error.stdout) : null,
+      failedProbe: error?.readinessProbe || null,
+      failedProbeDurationMs:
+        typeof error?.readinessProbeDurationMs === "number" ? error.readinessProbeDurationMs : null,
+      probeTrace,
     },
   };
 }
@@ -66,6 +81,23 @@ export function checkRepositoryReadiness({
   const checkedAt = new Date().toISOString();
   const baseDetails = createBaseDetails(directory, checkedAt);
   const gateEnabled = readinessGate?.enabled !== false;
+  const probeTrace = [];
+
+  function runProbe(command) {
+    const startedAt = process.hrtime.bigint();
+    try {
+      const output = gitRunner({ directory, command });
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      probeTrace.push({ command, outcome: "ok", durationMs });
+      return output;
+    } catch (error) {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      probeTrace.push({ command, outcome: "error", durationMs });
+      error.readinessProbe = command;
+      error.readinessProbeDurationMs = durationMs;
+      throw error;
+    }
+  }
 
   try {
     const hasDirectory = typeof directory === "string" && directory.length > 0;
@@ -100,10 +132,7 @@ export function checkRepositoryReadiness({
 
     try {
       repositoryResult = String(
-        gitRunner({
-          directory,
-          command: "rev-parse-inside-work-tree",
-        }) || "",
+        runProbe("rev-parse-inside-work-tree") || "",
       ).trim();
     } catch (error) {
       if (!isNotRepositoryError(error)) {
@@ -141,10 +170,7 @@ export function checkRepositoryReadiness({
 
     try {
       branch = String(
-        gitRunner({
-          directory,
-          command: "symbolic-ref-short-head",
-        }) || "",
+        runProbe("symbolic-ref-short-head") || "",
       ).trim() || null;
     } catch (error) {
       if (!isDetachedHeadError(error)) {
@@ -155,10 +181,7 @@ export function checkRepositoryReadiness({
     const shouldCheckRemotes = policy?.requiresRemote !== false;
     const remoteNames = shouldCheckRemotes
       ? normalizeRemoteNames(
-          gitRunner({
-            directory,
-            command: "remote-verbose",
-          }),
+          runProbe("remote-verbose"),
         )
       : [];
 
@@ -175,10 +198,7 @@ export function checkRepositoryReadiness({
     let hasCommit = false;
     try {
       const headOutput = String(
-        gitRunner({
-          directory,
-          command: "rev-parse-head",
-        }) || "",
+        runProbe("rev-parse-head") || "",
       ).trim();
       hasCommit = headOutput.length > 0;
     } catch {
@@ -205,6 +225,6 @@ export function checkRepositoryReadiness({
       },
     };
   } catch (error) {
-    return buildUnavailableResult(directory, checkedAt, error);
+    return buildUnavailableResult(directory, checkedAt, error, probeTrace);
   }
 }

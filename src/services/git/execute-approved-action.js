@@ -7,6 +7,10 @@ import { checkRepositoryReadiness } from "./check-repository-readiness.js";
 import { planBranchProposal } from "./plan-branch-proposal.js";
 import { buildBranchAction, executeBranch } from "./branch-action-service.js";
 import { resolveBaselineCommitFiles } from "./baseline-commit-service.js";
+import {
+  buildAssumedRepositoryReadyReadiness,
+  resolveReadinessStateUpdate,
+} from "./readiness-state-policy.js";
 
 function buildRepositorySnapshot(state) {
   const details = state?.readiness?.details ?? {};
@@ -271,15 +275,32 @@ export async function executeApprovedAction({
           gitRunner: pluginContext?.gitRunner,
           policy: null,
         });
+        pluginContext?.debug?.log?.("execute-approved-action", "post-init readiness refresh completed", {
+          outcome: refreshedReadiness?.outcome,
+          reason: refreshedReadiness?.reason,
+          isGitRepository: refreshedReadiness?.details?.isGitRepository ?? null,
+          hasCommit: refreshedReadiness?.details?.hasCommit ?? null,
+          branch: refreshedReadiness?.details?.branch ?? null,
+          errorCode: refreshedReadiness?.details?.errorCode ?? null,
+          errorName: refreshedReadiness?.details?.errorName ?? null,
+          errorStatus: refreshedReadiness?.details?.errorStatus ?? null,
+          errorSignal: refreshedReadiness?.details?.errorSignal ?? null,
+          errorMessage: refreshedReadiness?.details?.errorMessage ?? null,
+          stderrSummary: refreshedReadiness?.details?.stderrSummary ?? null,
+          failedProbe: refreshedReadiness?.details?.failedProbe ?? null,
+          failedProbeDurationMs: refreshedReadiness?.details?.failedProbeDurationMs ?? null,
+          probeTrace: refreshedReadiness?.details?.probeTrace ?? null,
+        });
       } catch (error) {
         refreshedReadiness = {
           outcome: "allow",
-          reason: "post-init-fallback",
+          reason: "repository-ready",
           message: "Assumed ready after successful git init.",
           details: {
             directory: pluginContext?.directory ?? "",
             isGitRepository: true,
             branch: null,
+            hasCommit: false,
             hasRemote: false,
             remoteNames: [],
             checkedAt: new Date().toISOString(),
@@ -320,9 +341,20 @@ export async function executeApprovedAction({
       });
 
       const stateAfterInit = workflowState.get(sessionID) ?? {};
+      const readinessState = resolveReadinessStateUpdate({
+        previousReadiness: stateAfterInit.readiness ?? state.readiness ?? null,
+        nextReadiness: refreshedReadiness,
+        unavailableFallbackReadiness: buildAssumedRepositoryReadyReadiness({
+          previousReadiness: stateAfterInit.readiness ?? state.readiness ?? null,
+          directory: pluginContext?.directory,
+          hasCommit: false,
+          branch: null,
+        }),
+      });
       workflowState.set(sessionID, {
         ...stateAfterInit,
-        readiness: refreshedReadiness,
+        readiness: readinessState.readiness,
+        latestReadinessError: readinessState.latestReadinessError,
         initProposal: null,
         commitProposal: baseline,
       });
@@ -507,10 +539,21 @@ export async function executeApprovedAction({
         };
       }
       const nextState = workflowState.get(sessionID) ?? {};
+      const readinessState = resolveReadinessStateUpdate({
+        previousReadiness: nextState.readiness ?? state.readiness ?? null,
+        nextReadiness: refreshedReadiness,
+        unavailableFallbackReadiness: buildAssumedRepositoryReadyReadiness({
+          previousReadiness: nextState.readiness ?? state.readiness ?? null,
+          directory: pluginContext?.directory,
+          hasCommit: true,
+          branch: envelope.details?.observedState?.headBranch ?? plan.targetBranch,
+        }),
+      });
       workflowState.set(sessionID, {
         ...nextState,
         branchProposal: null,
-        readiness: refreshedReadiness,
+        readiness: readinessState.readiness,
+        latestReadinessError: readinessState.latestReadinessError,
       });
     }
   } else if (

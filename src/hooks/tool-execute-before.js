@@ -1,7 +1,7 @@
 /**
  * tool-execute-before.js
  *
- * Wrapper hook for `tool.execute.before`. Two guard layers:
+ * Wrapper hook for `tool.execute.before`. Guard layers:
  *
  *   1. block-until-init (strengthen-git-init-proposal):
  *      When the working directory is not a git repository, or an init proposal
@@ -10,19 +10,15 @@
  *      gate so the model's pre-workflow `git rev-parse` race no longer leaks
  *      a `fatal: not a git repository` stderr through to the user.
  *
- *   2. mutating-tool guard (existing):
- *      For tracked workflow sessions, throws the contract message when a
- *      mutating tool is requested while the workflow guard is active.
- *
- * Both guard messages are frozen contract strings (regression suite compares
- * byte-for-byte). Renaming or rewording is a contract break.
+ * File-mutating tools are intentionally allowed here. Git workflow automation
+ * tracks those changes after execution instead of blocking the edit/write
+ * tool call up front.
  */
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { advancePhaseIfWorkflowSession } from "../services/workflow/detect-workflow-context.js";
-import { MUTATING_TOOLS, SAFE_READ_TOOLS } from "../services/workflow/mutating-tools.js";
 import { looksLikeGitCommand } from "../services/workflow/looks-like-git-command.js";
 import { buildQuestionInstruction } from "../services/approval/build-question-instruction.js";
 import {
@@ -384,19 +380,5 @@ export function createToolExecuteBeforeHook({
 
     advancePhaseIfWorkflowSession(workflowState, input?.sessionID, "in-progress");
 
-    // Layer 3: mutating-tool guard (existing).
-    const state = workflowState?.get?.(input?.sessionID);
-    if (state && state.commandName && input?.tool) {
-      if (
-        input.tool === "question" ||
-        SAFE_READ_TOOLS.has(input.tool)
-      ) {
-        // safe — no guard
-      } else if (MUTATING_TOOLS.has(input.tool)) {
-        throw new Error(
-          `Git workflow guard: create or switch to branch \`workflow\` before editing files for /${state.commandName}.`,
-        );
-      }
-    }
   };
 }

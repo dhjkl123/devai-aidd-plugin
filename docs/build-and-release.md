@@ -15,7 +15,7 @@ npm run release     # release/devai-aidd-plugin/{latest,versions/<version>}/ 채
 npm run pack        # build + release 체인 (메인테이너 배포 흐름 한 번에)
 ```
 
-리팩터링·릴리스 전에는 항상 `npm run build && npm test` 조합이 회귀 게이트로 동작한다. `npm test`는 wrapper / built 두 변형의 hook 셰이프, 명령 프롬프트, mutating-tool 가드 메시지를 비교하므로(`verifyStory45WrapperBuiltHandlerShapesMatch` 외 N종), 빌드 산출물 부재나 호환성 드리프트가 조용히 통과되지 않는다.
+리팩터링·릴리스 전에는 항상 `npm run build && npm test` 조합이 회귀 게이트로 동작한다. `npm test`는 wrapper / built 두 변형의 hook 셰이프, 명령 프롬프트, mutating before-hook pass-through, mutating phase 추적을 비교하므로(`verifyStory45WrapperBuiltHandlerShapesMatch` 외 N종), 빌드 산출물 부재나 호환성 드리프트가 조용히 통과되지 않는다.
 
 ## 메인테이너 흐름
 

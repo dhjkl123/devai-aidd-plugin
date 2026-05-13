@@ -3,6 +3,7 @@ import {
   computeCandidateBranchName,
   evaluateBranchStrategy,
 } from "./branch-service.js";
+import { isReadinessUnavailable } from "./readiness-state-policy.js";
 
 export function buildStartupChainPlan({
   readiness,
@@ -25,8 +26,13 @@ export function buildStartupChainPlan({
   const isGitRepository = details.isGitRepository === true;
   const hasCommit = details.hasCommit === true;
   const gateEnabled = readinessGate?.enabled !== false;
+  const needsInit =
+    readiness?.outcome === "ask" && readiness?.reason === "git-not-initialized";
+  const unavailable = isReadinessUnavailable(readiness);
+  const repositoryKnownInitialized =
+    readiness?.outcome === "allow" && isGitRepository;
 
-  if (gateEnabled && (!isGitRepository || readiness?.reason === "git-not-initialized")) {
+  if (gateEnabled && needsInit) {
     steps.push({
       key: "init",
       kind: "init",
@@ -36,7 +42,11 @@ export function buildStartupChainPlan({
     });
   }
 
-  if (gateEnabled && !hasCommit) {
+  if (
+    gateEnabled &&
+    !unavailable &&
+    (needsInit || (repositoryKnownInitialized && !hasCommit))
+  ) {
     steps.push({
       key: "baseline",
       kind: "commit",
@@ -46,13 +56,15 @@ export function buildStartupChainPlan({
   }
 
   let branchPreview = null;
-  if (workflowPolicy?.branchRequired === true) {
+  if (
+    workflowPolicy?.branchRequired === true &&
+    !unavailable &&
+    (needsInit || repositoryKnownInitialized)
+  ) {
     const branchCurrent =
       typeof currentBranch === "string" && currentBranch.length > 0
         ? currentBranch
-        : typeof details.branch === "string" && details.branch.length > 0
-          ? details.branch
-          : null;
+        : null;
     const strategy = evaluateBranchStrategy({
       workflowContext,
       workflowPolicy,

@@ -470,5 +470,9 @@ test_patterns:
 - **F4 / lifecycle vs phase 통합**: legacy의 `state.lifecycle = "mutating"`을 wrapper의 `advancePhaseIfWorkflowSession(workflowState, sessionID, "mutating")`로 흡수. 별도 `lifecycle` 필드 미신설. AC13으로 검증.
 - **F4 / `plugin bootstrap registered no-op hooks` audit emission**: 비대칭이 사라지므로 emission 자체를 제거. AC4로 검증.
 - **F8 / MUTATING_TOOLS 공유 모듈**: 신규 파일 `src/services/workflow/mutating-tools.js`에 단일 source — drift 방지.
+
+## Superseded Contract Note - 2026-05-14
+
+`tool.execute.before`의 mutating-tool branch-switch throw 보존 계약은 `tech-spec-remove-layer-3-mutating-tool-guard.md`에 의해 폐기되었다. 현재 계약은 workflow session에서도 `edit`/`write`/`patch`/`multiedit`를 before-hook에서 차단하지 않고, `tool.execute.after`에서 `MUTATING_TOOLS` 기반으로 `workflowState.phase === "mutating"`을 기록하는 것이다. Layer 0 pending approval/startup chain 차단과 Layer 1 bash+git block-until-init 차단은 계속 유지된다.
 - **F21 / `src/policies/` 부모 디렉터리**: `legacy/`만 하위에 있으므로 본 작업 후 `src/policies/`도 삭제. 미래 새 policies 필요 시 다시 생성.
 - **모든 line 번호 anchor**: token-anchored grep guidance로 대체(F7/F17). Task 본문에서 라인 번호 직접 인용 없음.

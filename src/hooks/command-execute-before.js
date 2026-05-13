@@ -17,6 +17,10 @@ import { buildBaselineCommitProposal } from "../services/git/build-init-proposal
 import { buildStartupChainPlan } from "../services/git/startup-chain-planner.js";
 import { resolveReadinessGate } from "../services/git/resolve-readiness-gate.js";
 import {
+  isReadinessUnavailable,
+  resolveReadinessStateUpdate,
+} from "../services/git/readiness-state-policy.js";
+import {
   buildStartupChainQuestionInstruction,
 } from "../services/approval/build-startup-chain-question-instruction.js";
 
@@ -39,7 +43,33 @@ function resolveCurrentBranch(input, context, pluginContext) {
   return null;
 }
 
+function trustedReadinessBranch(effectiveReadiness) {
+  const details = effectiveReadiness?.details ?? {};
+  if (
+    effectiveReadiness?.outcome !== "allow" ||
+    effectiveReadiness?.reason !== "repository-ready" ||
+    details.isGitRepository !== true ||
+    details.hasCommit !== true ||
+    typeof details.branch !== "string" ||
+    details.branch.length === 0
+  ) {
+    return null;
+  }
+
+  return details.branch;
+}
+
+function resolveEffectiveCurrentBranch(input, context, pluginContext, effectiveReadiness) {
+  return (
+    resolveCurrentBranch(input, context, pluginContext) ??
+    trustedReadinessBranch(effectiveReadiness)
+  );
+}
+
 function shouldSkipBranchPlanning(readiness, state) {
+  if (!readiness || isReadinessUnavailable(readiness)) {
+    return true;
+  }
   if (readiness?.outcome === "ask" && readiness?.reason === "git-not-initialized") {
     return true;
   }
@@ -163,7 +193,8 @@ export function createCommandExecuteBeforeHook(
             : [],
           lastContinuationDecision: priorState?.lastContinuationDecision ?? null,
           readinessGate: undefined,
-          readiness: undefined,
+          readiness: priorState?.readiness ?? undefined,
+          latestReadinessError: priorState?.latestReadinessError ?? null,
           branchProposal: undefined,
           initProposal: undefined,
         });
@@ -205,29 +236,49 @@ export function createCommandExecuteBeforeHook(
           });
         }
         const readinessStartedAt = process.hrtime.bigint();
-        const readiness = checkRepositoryReadiness({
+        const rawReadiness = checkRepositoryReadiness({
           directory: pluginContext?.directory,
           gitRunner: pluginContext?.gitRunner,
           policy: workflowPolicy,
           readinessGate,
         });
         pluginContext?.debug?.log?.("command-execute-before", "readiness check completed", {
-          outcome: readiness?.outcome,
-          reason: readiness?.reason,
-          isGitRepository: readiness?.details?.isGitRepository ?? null,
-          hasProposal: Boolean(readiness?.details?.proposal),
+          outcome: rawReadiness?.outcome,
+          reason: rawReadiness?.reason,
+          isGitRepository: rawReadiness?.details?.isGitRepository ?? null,
+          hasProposal: Boolean(rawReadiness?.details?.proposal),
           readinessGateEnabled: readinessGate.enabled === true,
+          errorCode: rawReadiness?.details?.errorCode ?? null,
+          errorName: rawReadiness?.details?.errorName ?? null,
+          errorStatus: rawReadiness?.details?.errorStatus ?? null,
+          errorSignal: rawReadiness?.details?.errorSignal ?? null,
+          errorMessage: rawReadiness?.details?.errorMessage ?? null,
+          stderrSummary: rawReadiness?.details?.stderrSummary ?? null,
+          failedProbe: rawReadiness?.details?.failedProbe ?? null,
+          failedProbeDurationMs: rawReadiness?.details?.failedProbeDurationMs ?? null,
+          probeTrace: rawReadiness?.details?.probeTrace ?? null,
         });
         const readinessDurationMs = Number(process.hrtime.bigint() - readinessStartedAt) / 1e6;
+        const readinessState = resolveReadinessStateUpdate({
+          previousReadiness: priorState?.readiness ?? null,
+          nextReadiness: rawReadiness,
+        });
+        const readiness = readinessState.readiness;
 
         workflowState.set(context.sessionID, {
           ...workflowState.get(context.sessionID),
           readinessGate,
           readiness,
+          latestReadinessError: readinessState.latestReadinessError,
         });
 
         const stateForStartupChain = workflowState.get(context.sessionID);
-        const currentBranchForStartup = resolveCurrentBranch(input, context, pluginContext);
+        const currentBranchForStartup = resolveEffectiveCurrentBranch(
+          input,
+          context,
+          pluginContext,
+          readiness,
+        );
         const startupChainPlan = buildStartupChainPlan({
           readiness,
           readinessGate,
@@ -332,11 +383,11 @@ export function createCommandExecuteBeforeHook(
                 workflow: context.commandName,
                 command: context.commandName,
                 sessionID: context.sessionID,
-                outcome: readiness.outcome,
+                outcome: readiness?.outcome ?? rawReadiness?.outcome ?? "skip",
                 details: {
-                  isGitRepository: readiness.details?.isGitRepository === true,
-                  hasRemote: readiness.details?.hasRemote === true,
-                  branch: readiness.details?.branch || null,
+                  isGitRepository: readiness?.details?.isGitRepository === true,
+                  hasRemote: readiness?.details?.hasRemote === true,
+                  branch: readiness?.details?.branch || null,
                   durationMs: readinessDurationMs,
                 },
               });
@@ -494,11 +545,11 @@ export function createCommandExecuteBeforeHook(
               workflow: context.commandName,
               command: context.commandName,
               sessionID: context.sessionID,
-              outcome: readiness.outcome,
+              outcome: readiness?.outcome ?? rawReadiness?.outcome ?? "skip",
               details: {
-                isGitRepository: readiness.details?.isGitRepository === true,
-                hasRemote: readiness.details?.hasRemote === true,
-                branch: readiness.details?.branch || null,
+                isGitRepository: readiness?.details?.isGitRepository === true,
+                hasRemote: readiness?.details?.hasRemote === true,
+                branch: readiness?.details?.branch || null,
                 durationMs: readinessDurationMs,
               },
             });
@@ -509,7 +560,12 @@ export function createCommandExecuteBeforeHook(
 
         const stateForBranchGate = workflowState.get(context.sessionID);
         if (!shouldSkipBranchPlanning(readiness, stateForBranchGate)) {
-          const currentBranch = resolveCurrentBranch(input, context, pluginContext);
+          const currentBranch = resolveEffectiveCurrentBranch(
+            input,
+            context,
+            pluginContext,
+            readiness,
+          );
           await planBranchProposal({
             workflowContext: context,
             workflowPolicy,

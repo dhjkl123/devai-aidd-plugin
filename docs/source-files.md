@@ -114,7 +114,7 @@ git 작업 계획·실행·실패 분류를 담당한다. 모든 git 실행은 `
 | `evaluate-workflow-finalization.js` | 마무리 가능한 출력 감지, 커밋 제안 빌드, 푸시 제안 평가. | `evaluateWorkflowFinalization` |
 | `finalization-artifacts.js` | 파일 경로 정규화·분류(코드/기술 문서/계획 산출물)와 싱글톤 아티팩트 경로 추적. | `normalizeTrackedFileEntry`, `splitFinalizableFiles`, `mergeTrackedFiles`, `summarizeArtifactKinds`, `artifactScopeMatches` |
 | `looks-like-git-command.js` | bash 명령 문자열이 git 호출인지 감지(6가지 패턴). 도구 실행 전 가드용. | `looksLikeGitCommand` |
-| `mutating-tools.js` | 변경 도구(edit/write/patch/multiedit)와 안전 읽기 도구(read/glob/grep 등) 집합 정의. | `MUTATING_TOOLS`, `SAFE_READ_TOOLS` |
+| `mutating-tools.js` | 변경 도구(edit/write/patch/multiedit) 집합 정의. `tool.execute.after`가 변경 도구 실행 후 workflow phase를 `"mutating"`으로 기록할 때 사용한다. | `MUTATING_TOOLS` |
 | `parse-status-porcelain.js` | `git status --short` 출력 파싱. C-이스케이프 디코딩, 이름 변경 확장, 경로 정규화. | `parseStatusPorcelainPaths` |
 | `resolve-workflow-policy.js` | 워크플로우 컨텍스트·런타임 설정에서 유효 정책(category, identityStrategy, branchRequired, finalization)을 결정하고 폴백 제공. | `resolveWorkflowPolicy`, `buildSafeDefaultPolicy` |
 | `workflow-state.js` | 세션 범위 인메모리 워크플로우 상태 저장소. 승인·실행 결과·복구·추적 파일·스타트업 체인 추적. | `createWorkflowStateStore` |
