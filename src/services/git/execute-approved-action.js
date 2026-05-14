@@ -167,6 +167,7 @@ export async function executeApprovedAction({
   resolution = null,
   pluginContext = null,
   audit = null,
+  suppressPush = false,
 } = {}) {
   if (!workflowState || !sessionID || !approvalRequest) {
     return { outcome: "skip", reason: "missing-context" };
@@ -274,6 +275,14 @@ export async function executeApprovedAction({
           directory: pluginContext?.directory,
           gitRunner: pluginContext?.gitRunner,
           policy: null,
+          trace: {
+            hook: "execute-approved-action",
+            stage: "post-init-readiness-refresh",
+            sessionID,
+            workflow: workflowContext.commandName,
+            phase: workflowContext.phase ?? null,
+            actionType: approvalRequest.actionType,
+          },
         });
         pluginContext?.debug?.log?.("execute-approved-action", "post-init readiness refresh completed", {
           outcome: refreshedReadiness?.outcome,
@@ -328,7 +337,14 @@ export async function executeApprovedAction({
 
       let files = [];
       try {
-        const listed = pluginContext?.listChangedFiles?.();
+        const listed = pluginContext?.listChangedFiles?.({
+          hook: "execute-approved-action",
+          stage: "post-init-baseline-files",
+          sessionID,
+          workflow: workflowContext.commandName,
+          phase: workflowContext.phase ?? null,
+          actionType: approvalRequest.actionType,
+        });
         files = Array.isArray(listed) ? listed : [];
       } catch {
         files = [];
@@ -418,7 +434,18 @@ export async function executeApprovedAction({
         answer: approvalRequest.userAnswer,
         proposal: approvalRequest.proposal,
         directory: pluginContext?.directory ?? "",
-        listChangedFiles: pluginContext?.listChangedFiles?.bind(pluginContext),
+        listChangedFiles:
+          typeof pluginContext?.listChangedFiles === "function"
+            ? () =>
+                pluginContext.listChangedFiles({
+                  hook: "execute-approved-action",
+                  stage: "baseline-resolve-files",
+                  sessionID,
+                  workflow: workflowContext.commandName,
+                  phase: workflowContext.phase ?? null,
+                  actionType: approvalRequest.actionType,
+                })
+            : null,
         audit,
         workflowContext,
         sessionID,
@@ -432,6 +459,7 @@ export async function executeApprovedAction({
       branchName: repositorySnapshot?.headBranch ?? null,
       correlationId: approvalRequest.proposal.correlationId ?? null,
       files: baselineFiles,
+      allFiles: approvalRequest.proposal?.allFiles === true,
       // Baseline commit on a freshly initialized repo may have no working tree
       // changes. Propagate the flag so the executor uses `commit --allow-empty`.
       allowEmpty: baselineAllowEmpty,
@@ -448,7 +476,7 @@ export async function executeApprovedAction({
       workflowState,
     });
 
-    if (envelope.ok) {
+    if (envelope.ok && suppressPush !== true) {
       // Executor envelope places observed post-action state under details
       // (see git-executor.js); reach for it there instead of envelope root.
       await publishPushApprovalIfNeeded({
@@ -528,6 +556,14 @@ export async function executeApprovedAction({
           directory: pluginContext?.directory,
           gitRunner: pluginContext?.gitRunner,
           policy: null,
+          trace: {
+            hook: "execute-approved-action",
+            stage: "post-branch-readiness-refresh",
+            sessionID,
+            workflow: workflowContext.commandName,
+            phase: workflowContext.phase ?? null,
+            actionType: approvalRequest.actionType,
+          },
         });
       } catch {
         refreshedReadiness = {

@@ -14,6 +14,8 @@
  */
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -24,6 +26,9 @@ const toolExecuteAfterUrl = pathToFileURL(
 ).href;
 const toolExecuteBeforeUrl = pathToFileURL(
   path.join(projectRoot, "src", "hooks", "tool-execute-before.js"),
+).href;
+const commandExecuteBeforeUrl = pathToFileURL(
+  path.join(projectRoot, "src", "hooks", "command-execute-before.js"),
 ).href;
 const sentinelBuilderUrl = pathToFileURL(
   path.join(
@@ -37,7 +42,13 @@ const sentinelBuilderUrl = pathToFileURL(
 
 const { createToolExecuteAfterHook } = await import(toolExecuteAfterUrl);
 const { createToolExecuteBeforeHook } = await import(toolExecuteBeforeUrl);
-const { FINALIZATION_SENTINEL_HEADER, buildFinalizationSentinelInstruction } =
+const { createCommandExecuteBeforeHook } = await import(commandExecuteBeforeUrl);
+const {
+  FINALIZATION_SENTINEL_HEADER,
+  FINALIZATION_SENTINEL_MESSAGE_PLACEHOLDER,
+  FINALIZATION_SENTINEL_TITLE_TEMPLATE,
+  buildFinalizationSentinelInstruction,
+} =
   await import(sentinelBuilderUrl);
 
 function createStubStore() {
@@ -76,7 +87,6 @@ function createAudit() {
 
 function createCommitReadyPluginContext({
   listChangedFilesReturn = ["index.html"],
-  gitActionCalls = [],
 } = {}) {
   return {
     debug: { log: () => {} },
@@ -96,34 +106,10 @@ function createCommitReadyPluginContext({
         },
       };
     },
-    gitActionRunner({ action }) {
-      gitActionCalls.push({
-        kind: action?.kind ?? null,
-        operation: action?.operation ?? null,
-      });
-      return {
-        ok: true,
-        status: "executed",
-        action: {
-          kind: action?.kind ?? "commit",
-          operation: action?.operation ?? "commit",
-          branchName: null,
-          targetBranch: null,
-          remoteName: null,
-          correlationId: action?.correlationId ?? null,
-          approvedAt: new Date().toISOString(),
-        },
-        code: null,
-        message: null,
-        details: { observedState: null },
-        audit: { attempted: false, logged: false, loggingError: null },
-        next: { continueWorkflow: true, requiresRecoveryChoice: false },
-      };
-    },
   };
 }
 
-const minimalPluginContext = { debug: { log: () => {} } };
+const minimalPluginContext = { debug: { log: () => {} }, directory: projectRoot };
 
 // ───────────────────────────────────────────────────────────────────────────
 // Verify 1: sentinel injection (builder output is the canonical part shape)
@@ -145,6 +131,8 @@ const minimalPluginContext = { debug: { log: () => {} } };
   assert.ok(part.text.includes(FINALIZATION_SENTINEL_HEADER));
   assert.ok(part.text.includes('"Commit"'));
   assert.ok(part.text.includes('"Skip"'));
+  assert.ok(part.text.includes(FINALIZATION_SENTINEL_TITLE_TEMPLATE));
+  assert.ok(part.text.includes(FINALIZATION_SENTINEL_MESSAGE_PLACEHOLDER));
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -154,8 +142,7 @@ const minimalPluginContext = { debug: { log: () => {} } };
   const workflowState = createStubStore();
   const audit = createAudit();
   const sessionID = "session-commit";
-  const gitActionCalls = [];
-  const pluginContext = createCommitReadyPluginContext({ gitActionCalls });
+  const pluginContext = createCommitReadyPluginContext();
   workflowState.set(sessionID, {
     commandName: "bmad-bmm-quick-dev",
     arguments: "",
@@ -194,21 +181,8 @@ const minimalPluginContext = { debug: { log: () => {} } };
   const skipped = audit.countOf("workflow.finalization.sentinel.skipped");
   assert.equal(skipped, 0, "sentinel.skipped MUST NOT emit on commit path");
 
-  const approvalRequested = audit.findOf("approval.requested");
-  assert.ok(
-    approvalRequested.length >= 1,
-    "approval.requested audit emitted on commit path",
-  );
-  assert.equal(
-    approvalRequested[0].payload?.details?.sentinelPreApproved,
-    true,
-    "approval.requested marks details.sentinelPreApproved === true",
-  );
-  assert.equal(
-    approvalRequested[0].payload?.details?.actionType,
-    "commit",
-    "approval.requested actionType === 'commit'",
-  );
+  const delegated = audit.findOf("workflow.finalization.delegated");
+  assert.equal(delegated.length, 1, "delegated finalization audit emitted once");
 
   assert.equal(
     workflowState.get(sessionID).finalizationTriggered,
@@ -216,11 +190,15 @@ const minimalPluginContext = { debug: { log: () => {} } };
     "finalizationTriggered flag set true",
   );
 
-  const commitCalls = gitActionCalls.filter((entry) => entry.kind === "commit");
   assert.equal(
-    commitCalls.length,
-    1,
-    "gitActionRunner invoked exactly once for commit",
+    workflowState.get(sessionID).delegatedFinalization?.stage,
+    "awaiting-commit",
+    "delegated finalization state opened",
+  );
+  assert.ok(
+    typeof workflowState.get(sessionID).delegatedFinalization?.commitMessage === "string" &&
+      workflowState.get(sessionID).delegatedFinalization.commitMessage.length > 0,
+    "delegated finalization must carry a suggested commit message",
   );
 }
 
@@ -231,8 +209,7 @@ const minimalPluginContext = { debug: { log: () => {} } };
   const workflowState = createStubStore();
   const audit = createAudit();
   const sessionID = "session-skip";
-  const gitActionCalls = [];
-  const pluginContext = createCommitReadyPluginContext({ gitActionCalls });
+  const pluginContext = createCommitReadyPluginContext();
   workflowState.set(sessionID, {
     commandName: "bmad-bmm-quick-dev",
     arguments: "",
@@ -275,20 +252,15 @@ const minimalPluginContext = { debug: { log: () => {} } };
     "evaluateWorkflowFinalization MUST NOT be called on skip path",
   );
   assert.equal(
-    audit.countOf("approval.requested"),
-    0,
-    "approval.requested MUST NOT emit on skip path",
-  );
-  assert.equal(
-    gitActionCalls.length,
-    0,
-    "gitActionRunner MUST NOT be called on skip path",
-  );
-  assert.equal(
     workflowState.get(sessionID).finalizationTriggered,
-    true,
-    "finalizationTriggered flag set true so re-fire is blocked",
+    false,
+    "skip terminal cleanup clears finalizationTriggered",
   );
+  assert.equal(
+    workflowState.get(sessionID).delegatedFinalization ?? null,
+    null,
+  );
+  assert.equal(workflowState.get(sessionID).finalizationCompletion?.outcome, "skip");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -298,8 +270,7 @@ const minimalPluginContext = { debug: { log: () => {} } };
   const workflowState = createStubStore();
   const audit = createAudit();
   const sessionID = "session-unknown";
-  const gitActionCalls = [];
-  const pluginContext = createCommitReadyPluginContext({ gitActionCalls });
+  const pluginContext = createCommitReadyPluginContext();
   workflowState.set(sessionID, {
     commandName: "bmad-bmm-quick-dev",
     arguments: "",
@@ -334,11 +305,52 @@ const minimalPluginContext = { debug: { log: () => {} } };
     "unrecognized-answer",
     "skipped reason flags the answer as unrecognized",
   );
-  assert.equal(gitActionCalls.length, 0);
   assert.equal(
     workflowState.get(sessionID).finalizationTriggered,
-    true,
+    false,
   );
+}
+
+// Verify 2-d: "Commit" with no remaining changes is downgraded to a skip
+{
+  const workflowState = createStubStore();
+  const audit = createAudit();
+  const sessionID = "session-no-changes";
+  const pluginContext = createCommitReadyPluginContext({
+    listChangedFilesReturn: [],
+  });
+  workflowState.set(sessionID, {
+    commandName: "bmad-bmm-quick-dev",
+    arguments: "",
+    detectedAt: new Date().toISOString(),
+    phase: "mutating",
+    touchedFiles: [],
+    finalizationTriggered: false,
+  });
+
+  const hook = createToolExecuteAfterHook({
+    workflowState,
+    audit,
+    pluginContext,
+  });
+
+  const input = {
+    tool: "question",
+    sessionID,
+    args: {
+      questions: [
+        { header: FINALIZATION_SENTINEL_HEADER, options: ["Commit", "Skip"] },
+      ],
+    },
+  };
+  const output = { metadata: { answers: [["Commit"]] } };
+  await hook(input, output);
+
+  const skipped = audit.findOf("workflow.finalization.sentinel.skipped");
+  assert.equal(skipped.length, 1, "no-change commit answer is downgraded to skip");
+  assert.equal(skipped[0].payload?.details?.reason, "no-working-tree-changes");
+  assert.equal(workflowState.get(sessionID).delegatedFinalization ?? null, null);
+  assert.equal(workflowState.get(sessionID).finalizationCompletion?.reason, "no-working-tree-changes");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -348,8 +360,7 @@ const minimalPluginContext = { debug: { log: () => {} } };
   const workflowState = createStubStore();
   const audit = createAudit();
   const sessionID = "session-dup";
-  const gitActionCalls = [];
-  const pluginContext = createCommitReadyPluginContext({ gitActionCalls });
+  const pluginContext = createCommitReadyPluginContext();
   workflowState.set(sessionID, {
     commandName: "bmad-bmm-quick-dev",
     arguments: "",
@@ -392,7 +403,7 @@ const minimalPluginContext = { debug: { log: () => {} } };
     0,
     "sentinel.skipped NOT emitted on duplicate either",
   );
-  assert.equal(gitActionCalls.length, 0, "no git execution on duplicate");
+  assert.equal(workflowState.get(sessionID).delegatedFinalization ?? null, null);
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -405,6 +416,13 @@ const minimalPluginContext = { debug: { log: () => {} } };
   workflowState.set(sessionID, {
     commandName: "bmad-bmm-quick-dev",
     phase: "in-progress",
+    readiness: {
+      outcome: "allow",
+      reason: "repository-ready",
+      details: {
+        isGitRepository: true,
+      },
+    },
     approvalCurrent: {
       actionType: "branch/create",
       proposal: { name: "feat/foo" },
@@ -445,6 +463,13 @@ const minimalPluginContext = { debug: { log: () => {} } };
   workflowState.set(sessionID, {
     commandName: "bmad-bmm-quick-dev",
     phase: "in-progress",
+    readiness: {
+      outcome: "allow",
+      reason: "repository-ready",
+      details: {
+        isGitRepository: true,
+      },
+    },
     startupChainCurrent: {
       startupChainId: "startup-chain:abc",
       steps: [{ key: "init" }, { key: "baseline" }],
@@ -478,8 +503,7 @@ const minimalPluginContext = { debug: { log: () => {} } };
   const workflowState = createStubStore();
   const audit = createAudit();
   const sessionID = "session-premature";
-  const gitActionCalls = [];
-  const pluginContext = createCommitReadyPluginContext({ gitActionCalls });
+  const pluginContext = createCommitReadyPluginContext();
   workflowState.set(sessionID, {
     commandName: "bmad-bmm-quick-dev",
     arguments: "",
@@ -521,16 +545,104 @@ const minimalPluginContext = { debug: { log: () => {} } };
     "sentinel.received NOT emitted on premature",
   );
   assert.equal(
-    audit.countOf("approval.requested"),
+    audit.countOf("workflow.finalization.delegated"),
     0,
-    "approval.requested NOT emitted on premature",
+    "delegated finalization NOT emitted on premature",
   );
-  assert.equal(gitActionCalls.length, 0);
   assert.equal(
     workflowState.get(sessionID).finalizationTriggered,
     false,
     "finalizationTriggered remains false on premature",
   );
+}
+
+// Verify 6: sentinel blocked when readiness says the workspace is not a git repo
+{
+  const workflowState = createStubStore();
+  const audit = createAudit();
+  const sessionID = "session-passthrough-non-git";
+  const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "devai-non-git-question-"));
+  workflowState.set(sessionID, {
+    commandName: "bmad-bmm-quick-dev",
+    phase: "in-progress",
+    readiness: {
+      outcome: "allow",
+      reason: "readiness-gate-skipped",
+      details: {
+        isGitRepository: false,
+      },
+    },
+  });
+
+  const beforeHook = createToolExecuteBeforeHook({
+    workflowState,
+    audit,
+    pluginContext: { debug: { log: () => {} }, directory: tempWorkspace },
+  });
+
+  const input = {
+    tool: "question",
+    sessionID,
+    args: {
+      questions: [
+        { header: FINALIZATION_SENTINEL_HEADER, options: ["Commit", "Skip"] },
+      ],
+    },
+  };
+  try {
+    await assert.rejects(
+      () => beforeHook(input, {}),
+      /do not call the workflow finalization question in a non-git workspace/i,
+    );
+  } finally {
+    fs.rmSync(tempWorkspace, { force: true, recursive: true });
+  }
+}
+
+// Verify 7: command-execute-before does not inject sentinel in non-git workspace
+{
+  const workflowState = createStubStore();
+  const audit = createAudit();
+  const tempWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "devai-sentinel-gate-"));
+  const output = { parts: [] };
+
+  const hook = createCommandExecuteBeforeHook({
+    workflowCommands: new Set(["policy-light"]),
+    workflowState,
+    audit,
+    branchConfig: {},
+    pluginContext: {
+      directory: tempWorkspace,
+      runtimeConfig: { config: { readiness: { skipInitAndBaseline: true } } },
+      resolvePolicy() {
+        return {
+          outcome: "allow",
+          details: {
+            policy: {
+              category: "docs",
+              identityStrategy: "ticket-or-args",
+              branchRequired: false,
+              finalization: "no-forced-finalization",
+            },
+          },
+        };
+      },
+      debug: { log: () => {} },
+    },
+  });
+
+  try {
+    await hook({ command: "/policy-light", arguments: "", sessionID: "no-git-sentinel" }, output);
+    assert.equal(
+      output.parts.some(
+        (part) => typeof part?.text === "string" && part.text.includes(FINALIZATION_SENTINEL_HEADER),
+      ),
+      false,
+      "non-git workspace must not receive finalization sentinel instruction",
+    );
+  } finally {
+    fs.rmSync(tempWorkspace, { force: true, recursive: true });
+  }
 }
 
 console.log("sentinel-finalization-trigger.test.js: PASS");

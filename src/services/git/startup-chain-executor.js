@@ -86,7 +86,14 @@ export async function executeStartupChain({
         workflowState,
         sessionID,
         previousReadiness: readiness,
-        rawReadiness: refreshReadiness({ pluginContext, fallback: readiness, branch: null }),
+        rawReadiness: refreshReadiness({
+          pluginContext,
+          fallback: readiness,
+          branch: null,
+          sessionID,
+          workflowContext,
+          stage: "startup-chain-post-init-readiness-refresh",
+        }),
         unavailableFallbackReadiness: buildAssumedRepositoryReadyReadiness({
           previousReadiness: readiness,
           directory: pluginContext?.directory,
@@ -121,7 +128,13 @@ export async function executeStartupChain({
         return { outcome: "resolved", resolved };
       }
 
-      const listed = safeListChangedFiles(pluginContext);
+      const listed = safeListChangedFiles(pluginContext, {
+        hook: "startup-chain-executor",
+        stage: "startup-chain-baseline-files",
+        sessionID,
+        workflow: workflowContext?.commandName ?? null,
+        phase: workflowContext?.phase ?? null,
+      });
       const proposal = buildBaselineCommitProposal({
         directory: pluginContext?.directory ?? "",
         files: listed,
@@ -132,7 +145,17 @@ export async function executeStartupChain({
         answer,
         proposal,
         directory: pluginContext?.directory ?? "",
-        listChangedFiles: pluginContext?.listChangedFiles?.bind(pluginContext),
+        listChangedFiles:
+          typeof pluginContext?.listChangedFiles === "function"
+            ? () =>
+                pluginContext.listChangedFiles({
+                  hook: "startup-chain-executor",
+                  stage: "startup-chain-baseline-resolve-files",
+                  sessionID,
+                  workflow: workflowContext?.commandName ?? null,
+                  phase: workflowContext?.phase ?? null,
+                })
+            : null,
         audit,
         workflowContext,
         sessionID,
@@ -162,7 +185,13 @@ export async function executeStartupChain({
         workflowState,
         sessionID,
         previousReadiness: readiness,
-        rawReadiness: refreshReadiness({ pluginContext, fallback: readiness }),
+        rawReadiness: refreshReadiness({
+          pluginContext,
+          fallback: readiness,
+          sessionID,
+          workflowContext,
+          stage: "startup-chain-post-baseline-readiness-refresh",
+        }),
         unavailableFallbackReadiness: buildAssumedRepositoryReadyReadiness({
           previousReadiness: readiness,
           directory: pluginContext?.directory,
@@ -222,6 +251,9 @@ export async function executeStartupChain({
           pluginContext,
           fallback: readiness,
           branch: envelope.details?.observedState?.headBranch ?? plan.targetBranch,
+          sessionID,
+          workflowContext,
+          stage: "startup-chain-post-branch-readiness-refresh",
         }),
         unavailableFallbackReadiness: buildAssumedRepositoryReadyReadiness({
           previousReadiness: readiness,
@@ -285,12 +317,26 @@ function buildRepositorySnapshot(readiness) {
   };
 }
 
-function refreshReadiness({ pluginContext, fallback, branch = undefined }) {
+function refreshReadiness({
+  pluginContext,
+  fallback,
+  branch = undefined,
+  sessionID = null,
+  workflowContext = null,
+  stage = "startup-chain-readiness-refresh",
+} = {}) {
   try {
     const readiness = checkRepositoryReadiness({
       directory: pluginContext?.directory,
       gitRunner: pluginContext?.gitRunner,
       policy: null,
+      trace: {
+        hook: "startup-chain-executor",
+        stage,
+        sessionID,
+        workflow: workflowContext?.commandName ?? null,
+        phase: workflowContext?.phase ?? null,
+      },
     });
     pluginContext?.debug?.log?.("startup-chain-executor", "readiness refresh completed", {
       outcome: readiness?.outcome,
@@ -342,10 +388,10 @@ function resolveRefreshedReadiness({
   return stateUpdate.readiness;
 }
 
-function safeListChangedFiles(pluginContext) {
+function safeListChangedFiles(pluginContext, trace = null) {
   if (typeof pluginContext?.listChangedFiles !== "function") return [];
   try {
-    const files = pluginContext.listChangedFiles();
+    const files = pluginContext.listChangedFiles(trace);
     return Array.isArray(files) ? files : [];
   } catch {
     return [];

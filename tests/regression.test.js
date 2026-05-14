@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -105,11 +105,11 @@ function verifyBuiltArtifactExists({
   assert.equal(
     existsSyncFn(builtPath),
     true,
-    "missing dist/devai-aidd-plugin.js — run `npm run build` before `npm test`",
+    "missing dist/devai-aidd-plugin.js ??run `npm run build` before `npm test`",
   );
 }
 
-// `DEFAULT_PLUGIN_CONFIG` no longer carries field values — branch/workflow/
+// `DEFAULT_PLUGIN_CONFIG` no longer carries field values ??branch/workflow/
 // audit/debug live in installer-shipped templates. Service-direct tests that
 // pass branch + workflowPolicy fixtures inline use these constants instead of
 // reading from `DEFAULT_PLUGIN_CONFIG.{branch,workflowPolicy}`.
@@ -213,7 +213,7 @@ function defaultPolicyWithLegacyBranchRequired(commandName /*, defaults */) {
 }
 
 // Project JSONC fixture used by full-bootstrap tests. `DEFAULT_PLUGIN_CONFIG`
-// no longer carries any field values — branch.* / workflowPolicy.* / audit.* /
+// no longer carries any field values ??branch.* / workflowPolicy.* / audit.* /
 // debug.* all live in the installer-shipped templates. Tests that exercise the
 // full bootstrap pipeline write this fixture into the temp workspace's
 // project JSONC so the bootstrap reads it like a real user project would.
@@ -527,7 +527,7 @@ async function main() {
 
     assert.equal(builtError?.message, wrapperError?.message, "built mutating-tool error differs from wrapper");
 
-    // ── Non-workflow command path ───────────────────────────────────────────
+    // ?? Non-workflow command path ???????????????????????????????????????????
     const freshWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
     const nonWorkflowOutput = { parts: [] };
     await freshWrapper.handlers["command.execute.before"](
@@ -562,7 +562,7 @@ async function main() {
       "non-workflow command: must emit no workflow.detected audit event",
     );
 
-    // ── Audit payload shape (workflow.detected contract) ───────────────────
+    // ?? Audit payload shape (workflow.detected contract) ???????????????????
     const wfDetectedLogs = wrapper.mock.logs.filter(
       (l) => l.body?.message === "workflow.detected",
     );
@@ -596,8 +596,8 @@ async function main() {
       "audit payload details: source must be command.execute.before",
     );
 
-    // ── Phase advance idempotency ──────────────────────────────────────────
-    // workflow command was already executed → phase is 'start'; first read advances it to 'in-progress'
+    // ?? Phase advance idempotency ??????????????????????????????????????????
+    // workflow command was already executed ??phase is 'start'; first read advances it to 'in-progress'
     const logCountBefore = wrapper.mock.logs.filter(
       (l) => l.body?.message === "workflow.detected",
     ).length;
@@ -611,7 +611,7 @@ async function main() {
       "phase advance: additional read tool calls must not emit extra workflow.detected events (idempotent)",
     );
 
-    // ── Workflow state contract (unit-style assertions) ────────────────────
+    // ?? Workflow state contract (unit-style assertions) ????????????????????
     const { createWorkflowStateStore } = await import(workflowStateModuleUrl);
     const { detectWorkflowContext, advancePhaseIfWorkflowSession } = await import(
       detectWorkflowContextModuleUrl
@@ -652,7 +652,7 @@ async function main() {
     assert.equal(
       store.get("s-unit")?.phase,
       "in-progress",
-      "advancePhaseIfWorkflowSession must transition start → in-progress",
+      "advancePhaseIfWorkflowSession must transition start ??in-progress",
     );
     advancePhaseIfWorkflowSession(store, "s-unit", "in-progress");
     assert.equal(
@@ -666,7 +666,7 @@ async function main() {
     assert.equal(store.get("unknown-session"), undefined);
     advancePhaseIfWorkflowSession(store, undefined, "in-progress");
 
-    // get() returns a copy — external mutations must not leak back
+    // get() returns a copy ??external mutations must not leak back
     const snapshot = store.get("s-unit");
     snapshot.phase = "tampered";
     assert.equal(
@@ -679,7 +679,7 @@ async function main() {
     store.clear("s-unit");
     assert.equal(store.get("s-unit"), undefined, "clear must remove the entry");
 
-    // ── tool.execute.after path advances phase via wrapper hook ────────────
+    // ?? tool.execute.after path advances phase via wrapper hook ????????????
     const afterWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
     const afterCmdOutput = { parts: [] };
     await afterWrapper.handlers["command.execute.before"](
@@ -702,7 +702,7 @@ async function main() {
       "tool.execute.after: must not emit additional workflow.detected events",
     );
 
-    // ── tool.execute.after wrapper directly advances phase (factory-level) ──
+    // ?? tool.execute.after wrapper directly advances phase (factory-level) ??
     // Exercises the wrapper hook factory against an inspectable workflowState so
     // we can directly assert phase === "in-progress" after the after-hook runs,
     // closing the gap left by the bootstrap-level test above.
@@ -726,7 +726,7 @@ async function main() {
       "tool.execute.after wrapper must advance phase from start to in-progress",
     );
 
-    // ── Re-detection on same sessionID resets state and re-emits audit ─────
+    // ?? Re-detection on same sessionID resets state and re-emits audit ?????
     const reWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
     await reWrapper.handlers["command.execute.before"](
       { command: "/bmad-bmm-quick-dev", arguments: "first", sessionID: "s-re" },
@@ -788,7 +788,7 @@ async function main() {
       "set on existing sessionID must reset phase (overwrites prior context)",
     );
 
-    // ── advancePhase rejects invalid phase values (typo guard) ─────────────
+    // ?? advancePhase rejects invalid phase values (typo guard) ?????????????
     const phaseGuardStore = createWorkflowStateStore();
     phaseGuardStore.set("s-guard", {
       commandName: "x",
@@ -808,7 +808,7 @@ async function main() {
       "rejected advancePhase call must not mutate stored phase",
     );
 
-    // ── session.deleted clears state — subsequent tool events do not throw ──
+    // ?? session.deleted clears state ??subsequent tool events do not throw ??
     const delWrapper = await instantiate(wrapperModule.DevaiAiddGuardPlugin, wrapperWorkspace);
     const delCmdOutput = { parts: [] };
     await delWrapper.handlers["command.execute.before"](
@@ -1013,7 +1013,7 @@ async function verifyValidationFallbackLowerLayer() {
     const projectDir = path.join(tempRoot, "project");
     const result = loadRuntimeConfig(projectDir, fsAdapter);
 
-    // (a) projectConfig must NOT be in droppedLayers — its value must survive.
+    // (a) projectConfig must NOT be in droppedLayers ??its value must survive.
     assert.equal(
       result.validation.droppedLayers.includes("projectConfig"),
       false,
@@ -1209,13 +1209,13 @@ async function verifySchemaVersionEnforcement() {
 
 /**
  * Story 1.3: Verify resolveWorkflowPolicy behavior.
- * - Matched command → outcome: "allow", policy keys present
- * - Unmatched command → outcome: "ask", fallback policy shape
- * - null context → outcome: "skip"
+ * - Matched command ??outcome: "allow", policy keys present
+ * - Unmatched command ??outcome: "ask", fallback policy shape
+ * - null context ??outcome: "skip"
  */
 async function verifyResolveWorkflowPolicy() {
   const { resolveWorkflowPolicy } = await import(resolveWorkflowPolicyModuleUrl);
-  // `DEFAULT_PLUGIN_CONFIG` no longer ships field values — build a synthetic
+  // `DEFAULT_PLUGIN_CONFIG` no longer ships field values ??build a synthetic
   // runtime config from the test fixtures to exercise the resolver contract.
   const runtimeConfig = {
     branch: TEST_BRANCH_CONFIG,
@@ -1301,14 +1301,14 @@ async function verifyResolveWorkflowPolicy() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Story 4.1 — Define and Normalize Branch and Workflow Policy Configuration
+// ?????????????????????????????????????????????????????????????????????????????
+// Story 4.1 ??Define and Normalize Branch and Workflow Policy Configuration
 // Story 4.1 introduces a single normalization entry point in
 // `src/config/load-config.js#normalizeConfig` so downstream services
 // (branch-service, resolve-workflow-policy) consume an already-normalized
 // effective config and stop redoing per-field `|| <default>` fallbacks.
 // These tests lock that contract in place.
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
 
 function buildStory41FsAdapter(homedir) {
   return {
@@ -1442,7 +1442,7 @@ async function verifyEffectiveConfigNormalizationContract() {
       );
     }
 
-    // Lock value equivalence on the global ↔ defaults axis (project template
+    // Lock value equivalence on the global ??defaults axis (project template
     // ships intentional overrides so we exclude it from this assertion).
     const VALUE_EQUIVALENT_KEYS = [
       "pattern",
@@ -1488,7 +1488,7 @@ async function verifyMissingOptionalValuesFallback() {
   fs.mkdirSync(projectConfigDir, { recursive: true });
 
   try {
-    // Only one tiny override — every other branch.* and workflowPolicy[*] key
+    // Only one tiny override ??every other branch.* and workflowPolicy[*] key
     // is intentionally missing.
     fs.writeFileSync(
       path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
@@ -1530,7 +1530,7 @@ async function verifyMissingOptionalValuesFallback() {
         !Array.isArray(result.config.branch.commandTypeMap),
       "verifyMissingOptionalValuesFallback: missing commandTypeMap must default to plain object",
     );
-    // No layers should have been dropped — this is a "missing optional" path,
+    // No layers should have been dropped ??this is a "missing optional" path,
     // not an "invalid value" path.
     assert.deepEqual(
       result.validation.droppedLayers,
@@ -1548,7 +1548,7 @@ async function verifyMissingOptionalValuesFallback() {
  * - Known vocabulary must NOT generate any vocabulary warning.
  * - Unknown vocabulary (typo on `category` or `finalization`) must surface
  *   as a `params.source === "vocabulary"` entry, but must NOT cause the
- *   layer to be dropped or `valid` to flip — Story 1.3's forward-compat
+ *   layer to be dropped or `valid` to flip ??Story 1.3's forward-compat
  *   invariant (`additionalProperties: true`) is preserved.
  *
  * Also asserts the inline schema in `validate-config.js` and the JSON
@@ -1561,7 +1561,7 @@ async function verifyWorkflowPolicyVocabularySchema() {
     `${pathToFileURL(path.join(projectRoot, "src", "config", "validate-config.js")).href}?s41c=${Date.now()}`
   );
 
-  // ── A) Known vocabulary path: silent.
+  // ?? A) Known vocabulary path: silent.
   const tempRootOk = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-s41-vocab-ok-"));
   const projectOkDir = path.join(tempRootOk, "project", ".opencode");
   fs.mkdirSync(projectOkDir, { recursive: true });
@@ -1599,7 +1599,7 @@ async function verifyWorkflowPolicyVocabularySchema() {
     fs.rmSync(tempRootOk, { recursive: true, force: true });
   }
 
-  // ── B) Unknown vocabulary path: warning surfaces, layer survives.
+  // ?? B) Unknown vocabulary path: warning surfaces, layer survives.
   const tempRootBad = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-s41-vocab-bad-"));
   const projectBadDir = path.join(tempRootBad, "project", ".opencode");
   fs.mkdirSync(projectBadDir, { recursive: true });
@@ -1665,11 +1665,11 @@ async function verifyWorkflowPolicyVocabularySchema() {
     fs.rmSync(tempRootBad, { recursive: true, force: true });
   }
 
-  // ── C) Inline schema vs JSON file: full deep-equality sync.
+  // ?? C) Inline schema vs JSON file: full deep-equality sync.
   // Story 1.3 R2 LOW: the two copies are intentionally separate (bundle
   // compatibility) and we accept the manual sync obligation. Round 2
-  // follow-up (AI-2): Task 2.4 explicitly requires "동일 객체임을 직접
-  // 비교" — so we now deep-compare the entire schema objects, not just
+  // follow-up (AI-2): Task 2.4 explicitly requires "?숈씪 媛앹껜?꾩쓣 吏곸젒
+  // 鍮꾧탳" ??so we now deep-compare the entire schema objects, not just
   // top-level/branch property keys. This catches drift in
   // `additionalProperties` flags, `type` declarations, descriptions, and
   // every other node both copies must agree on.
@@ -1729,7 +1729,7 @@ async function verifyEffectivePolicyDeterminism() {
           longLivedBranches: ["main", "develop"],
           commandTypeMap: { "bmad-bmm-dev-story": "feat" },
         },
-        // `DEFAULT_PLUGIN_CONFIG.workflowPolicy` is now empty — the test
+        // `DEFAULT_PLUGIN_CONFIG.workflowPolicy` is now empty ??the test
         // exercises the "matched policy" branch of resolveWorkflowPolicy, so
         // the project JSONC must supply an explicit entry for the command
         // under test.
@@ -1805,7 +1805,7 @@ async function verifyEffectivePolicyDeterminism() {
 }
 
 /**
- * Story 4.1 (Task 5) — AC2: latest-policy reflection across runs.
+ * Story 4.1 (Task 5) ??AC2: latest-policy reflection across runs.
  *
  * Same process, project jsonc edited between runs. The next
  * `loadRuntimeConfig` + `resolveWorkflowPolicy` must return the new value.
@@ -1856,7 +1856,7 @@ async function verifyLatestPolicyChangesReflectedAcrossRuns() {
       "verifyLatestPolicyChangesReflectedAcrossRuns: pre-edit must reflect commit-and-push",
     );
 
-    // Edit the project jsonc — change finalization to a different known value.
+    // Edit the project jsonc ??change finalization to a different known value.
     fs.writeFileSync(
       cfgPath,
       JSON.stringify({
@@ -1881,7 +1881,7 @@ async function verifyLatestPolicyChangesReflectedAcrossRuns() {
     );
 
     // Also assert that calling load twice in a row on the SAME disk state
-    // produces deepEqual results — proves no in-memory persistent cache.
+    // produces deepEqual results ??proves no in-memory persistent cache.
     const after2 = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
     assert.deepEqual(
       after.config,
@@ -3502,9 +3502,9 @@ async function verifyBootstrapFailureShape() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
 // Story 2.1: Present Approval Requests for Planned Git Actions
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
 
 const approvalServiceModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "services", "approval", "approval-policy-service.js"),
@@ -3535,7 +3535,7 @@ const permissionAskedModuleUrl = pathToFileURL(
 ).href;
 
 /**
- * Story 2.1: classifyGitAction — unit contract tests.
+ * Story 2.1: classifyGitAction ??unit contract tests.
  * Verifies that proposals map to the correct actionType.
  */
 async function verifyClassifyGitActionContracts() {
@@ -3572,7 +3572,7 @@ async function verifyClassifyGitActionContracts() {
     "classifyGitAction: init kind must map to init actionType",
   );
 
-  // Unknown kind → null
+  // Unknown kind ??null
   const unknown = classifyGitAction({ kind: "unknown-future" });
   assert.equal(
     unknown,
@@ -3580,7 +3580,7 @@ async function verifyClassifyGitActionContracts() {
     "classifyGitAction: unknown proposal kind must return null",
   );
 
-  // Null / missing proposal → null
+  // Null / missing proposal ??null
   assert.equal(classifyGitAction(null), null, "classifyGitAction: null must return null");
   assert.equal(classifyGitAction(undefined), null, "classifyGitAction: undefined must return null");
 
@@ -3594,7 +3594,7 @@ async function verifyClassifyGitActionContracts() {
 }
 
 /**
- * Story 2.1: buildApprovalRequest — unit contract tests.
+ * Story 2.1: buildApprovalRequest ??unit contract tests.
  * Verifies the output shape and deterministic ID.
  */
 async function verifyBuildApprovalRequestContracts() {
@@ -3627,7 +3627,7 @@ async function verifyBuildApprovalRequestContracts() {
   assert.equal(req.metadata.proposalKind, "branch", "buildApprovalRequest: metadata.proposalKind preserved");
   assert.equal(typeof req.createdAt, "string", "buildApprovalRequest: createdAt must be a string");
 
-  // Deterministic ID — same inputs produce the same id
+  // Deterministic ID ??same inputs produce the same id
   const req2 = buildApprovalRequest({
     sessionID: "s-approval-1",
     workflow: "bmad-bmm-quick-dev",
@@ -3639,7 +3639,7 @@ async function verifyBuildApprovalRequestContracts() {
   });
   assert.equal(req.id, req2.id, "buildApprovalRequest: same inputs must produce the same deterministic id");
 
-  // Different proposal → different ID
+  // Different proposal ??different ID
   const req3 = buildApprovalRequest({
     sessionID: "s-approval-1",
     workflow: "bmad-bmm-quick-dev",
@@ -3651,7 +3651,7 @@ async function verifyBuildApprovalRequestContracts() {
   });
   assert.notEqual(req.id, req3.id, "buildApprovalRequest: different proposals must produce different ids");
 
-  // L5: same target name but different `current` (starting branch) → different ids.
+  // L5: same target name but different `current` (starting branch) ??different ids.
   const reqFromMain = buildApprovalRequest({
     sessionID: "s-approval-1",
     workflow: "bmad-bmm-quick-dev",
@@ -3678,7 +3678,7 @@ async function verifyBuildApprovalRequestContracts() {
 }
 
 /**
- * Story 2.1: approvalPolicyService — unit contract tests.
+ * Story 2.1: approvalPolicyService ??unit contract tests.
  */
 async function verifyApprovalPolicyServiceContracts() {
   const { getPendingApproval, selectNextPlannedAction, evaluateRequestGate } = await import(
@@ -3741,24 +3741,24 @@ async function verifyApprovalPolicyServiceContracts() {
   );
 
   // evaluateRequestGate
-  // Case: no proposals → skip
+  // Case: no proposals ??skip
   const noProposals = evaluateRequestGate({});
   assert.equal(noProposals.outcome, "skip", "evaluateRequestGate: no proposals must skip");
   assert.equal(noProposals.reason, "no-planned-git-action");
 
-  // Case: pending approval → skip
+  // Case: pending approval ??skip
   const withPending = evaluateRequestGate({ approvalCurrent: fakeRequest, branchProposal });
   assert.equal(withPending.outcome, "skip", "evaluateRequestGate: pending approval must skip");
   assert.equal(withPending.reason, "approval-already-pending");
 
-  // Case: proposal available, no pending → allow
+  // Case: proposal available, no pending ??allow
   const withProposal = evaluateRequestGate({ branchProposal });
   assert.equal(withProposal.outcome, "allow", "evaluateRequestGate: available proposal must allow");
   assert.equal(withProposal.reason, "ready-to-publish");
 }
 
 /**
- * Story 2.1: workflowState approval fields — isolation tests.
+ * Story 2.1: workflowState approval fields ??isolation tests.
  * Verifies that get() returns copies of approvalCurrent and approvalHistory.
  */
 async function verifyWorkflowStateApprovalIsolation() {
@@ -3793,7 +3793,7 @@ async function verifyWorkflowStateApprovalIsolation() {
     "workflowState: external mutation of returned approvalHistory must not reach the store",
   );
 
-  // approvalHistory append — previous snapshot must not be contaminated
+  // approvalHistory append ??previous snapshot must not be contaminated
   const snapBefore = store.get("s-iso");
   const newRequest = { id: "req-iso-2", status: "awaitingApproval" };
   store.set("s-iso", {
@@ -3814,7 +3814,7 @@ async function verifyWorkflowStateApprovalIsolation() {
 }
 
 /**
- * Story 2.1: hook integration — branchProposal only → approvalCurrent.actionType.
+ * Story 2.1: hook integration ??branchProposal only ??approvalCurrent.actionType.
  * Tests implementation workflow where only a branch proposal exists.
  */
 async function verifyApprovalRequestFromBranchProposal() {
@@ -3925,7 +3925,7 @@ async function verifyApprovalRequestFromBranchProposal() {
 }
 
 /**
- * Story 2.1: hook integration — initProposal only → approvalCurrent.actionType === "init".
+ * Story 2.1: hook integration ??initProposal only ??approvalCurrent.actionType === "init".
  * Also: branch approval request must NOT be created when initProposal is present.
  */
 async function verifyApprovalRequestFromInitProposal() {
@@ -3936,7 +3936,7 @@ async function verifyApprovalRequestFromInitProposal() {
       import(pathToFileURL(path.join(projectRoot, "src", "config", "defaults.js")).href),
     ]);
 
-  const noGitWorkspace = createGitWorkspace(); // non-git → initProposal
+  const noGitWorkspace = createGitWorkspace(); // non-git ??initProposal
   const workflowState = createWorkflowStateStore();
   const logs = [];
 
@@ -4052,7 +4052,7 @@ async function verifyApprovalIdempotency() {
   );
 
   try {
-    // First call → should emit approval.requested
+    // First call ??should emit approval.requested
     await hook(
       { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 idem-test", sessionID: "s-idem" },
       { parts: [] },
@@ -4068,7 +4068,7 @@ async function verifyApprovalIdempotency() {
     assert.ok(stateAfterFirst?.approvalCurrent, "verifyApprovalIdempotency: approvalCurrent must be set after first call");
     const firstRequestId = stateAfterFirst.approvalCurrent.id;
 
-    // Second call with same sessionID — pending approval exists → must NOT emit again
+    // Second call with same sessionID ??pending approval exists ??must NOT emit again
     await hook(
       { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 idem-test", sessionID: "s-idem" },
       { parts: [] },
@@ -4099,7 +4099,7 @@ async function verifyApprovalIdempotency() {
 }
 
 /**
- * Story 2.1: non-workflow and planning commands → no approval state created.
+ * Story 2.1: non-workflow and planning commands ??no approval state created.
  */
 async function verifyNoApprovalForNonWorkflowAndPlanning() {
   const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
@@ -4136,7 +4136,7 @@ async function verifyNoApprovalForNonWorkflowAndPlanning() {
   );
 
   try {
-    // Non-workflow command → no workflow state → no approval
+    // Non-workflow command ??no workflow state ??no approval
     await hook(
       { command: "/non-workflow-command", arguments: "", sessionID: "s-nwf-approval" },
       { parts: [] },
@@ -4153,7 +4153,7 @@ async function verifyNoApprovalForNonWorkflowAndPlanning() {
       "verifyNoApprovalForNonWorkflowAndPlanning: non-workflow command must not emit approval.requested",
     );
 
-    // Planning workflow (branchRequired=false) → no branch proposal → no approval
+    // Planning workflow (branchRequired=false) ??no branch proposal ??no approval
     await hook(
       { command: "/bmad-bmm-create-prd", arguments: "", sessionID: "s-planning-approval" },
       { parts: [] },
@@ -4176,7 +4176,7 @@ async function verifyNoApprovalForNonWorkflowAndPlanning() {
 }
 
 /**
- * Story 2.1: approval request payload shape — sessionID, workflow, actionType, proposal.kind.
+ * Story 2.1: approval request payload shape ??sessionID, workflow, actionType, proposal.kind.
  */
 async function verifyApprovalRequestPayloadShape() {
   const [{ createWorkflowStateStore }, commandBeforeModule, { DEFAULT_PLUGIN_CONFIG }] =
@@ -4307,9 +4307,9 @@ async function verifyApprovalBuiltArtifactParity() {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Story 2.1 — Code Review Fixes (H1, H2, M1)
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
+// Story 2.1 ??Code Review Fixes (H1, H2, M1)
+// ?????????????????????????????????????????????????????????????????????????????
 
 /**
  * H1: requestApproval throw must emit approval.prompt.delivery.failed audit
@@ -4413,7 +4413,7 @@ async function verifyApprovalPromptDeliveryFailureAudit() {
 }
 
 /**
- * H2: full priorState carry-over — arbitrary fields stashed by future stories
+ * H2: full priorState carry-over ??arbitrary fields stashed by future stories
  * (e.g., Story 2.3's approvalResolved/approvalDecision) must survive a second
  * command.execute.before invocation on the same sessionID.
  */
@@ -4460,7 +4460,7 @@ async function verifyPriorStateCarryOver() {
       futureCustomField: { story: "2.3", marker: "must-survive" },
     });
 
-    // Second command.execute.before — must spread priorState first so the
+    // Second command.execute.before ??must spread priorState first so the
     // injected fields persist through re-entry.
     await hook(
       { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 h2", sessionID: "s-h2" },
@@ -5371,8 +5371,8 @@ async function verifyPermissionAskedPushFailureOpensRecovery() {
     // Story 3.3 review round 2 (Medium): seed a commit-success traceability
     // record (approvalHistory entry with `actionType: "commit"` resolution)
     // so this test can positively assert that the push failure path does NOT
-    // invalidate the local commit log — the AC2 sub-clause "嫄곕??섍굅???ㅽ뙣
-    // ???몄떆???대? 湲곕줉??濡쒖뺄 而ㅻ컠??臾댄슚?뷀븯吏 ?딆븘???쒕떎" was previously
+    // invalidate the local commit log ??the AC2 sub-clause "椰꾧퀡???띻탢????쎈솭
+    // ???紐꾨뻻????? 疫꿸퀡以??嚥≪뮇類??뚣끇而???얜똾??酉釉?릯 ??녿툡????뺣뼄" was previously
     // only asserted by the absence of a clear-commit operation, never by
     // positive evidence in the post-state.
     approvalHistory: [
@@ -5470,7 +5470,7 @@ async function verifyPermissionAskedPushFailureOpensRecovery() {
 
 /**
  * L4 (Story 2.1 second review): stale Git-evaluation fields (branchProposal /
- * initProposal / readiness) must NOT survive re-entry — they are recomputed
+ * initProposal / readiness) must NOT survive re-entry ??they are recomputed
  * every call. Approval state and arbitrary future fields still carry over.
  */
 async function verifyStaleGitFieldsInvalidatedOnReentry() {
@@ -5511,14 +5511,14 @@ async function verifyStaleGitFieldsInvalidatedOnReentry() {
     assert.ok(seeded?.branchProposal, "verifyStaleGitFieldsInvalidatedOnReentry: branchProposal must seed on first call");
     assert.ok(seeded?.readiness, "verifyStaleGitFieldsInvalidatedOnReentry: readiness must seed on first call");
 
-    // Inject a stale phantom proposal — must NOT survive next entry.
+    // Inject a stale phantom proposal ??must NOT survive next entry.
     workflowState.set("s-l4", {
       ...seeded,
       branchProposal: { kind: "branch", action: "create", name: "feat/STALE-PHANTOM", reason: "stale" },
       futureCustomField: { story: "2.3", marker: "must-survive" },
     });
 
-    // Second entry recomputes — stale phantom must be wiped, future field preserved.
+    // Second entry recomputes ??stale phantom must be wiped, future field preserved.
     await hook(
       { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 l4-second", sessionID: "s-l4" },
       { parts: [] },
@@ -5543,12 +5543,12 @@ async function verifyStaleGitFieldsInvalidatedOnReentry() {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
 // Story 2.2: Explain Intent and Expected Impact in Approval Prompts
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
 
 /**
- * Story 2.2: redaction helpers — branch label, directory label, remote label.
+ * Story 2.2: redaction helpers ??branch label, directory label, remote label.
  * These are pure helpers and the only place URL/path filtering should live
  * before reaching prompt body or audit metadata.
  */
@@ -5558,9 +5558,9 @@ async function verifyApprovalRedactionHelpers() {
 
   // Branch label: only string + non-empty allowed; passes through otherwise.
   assert.equal(redactBranchLabel("feat/ABC-1"), "feat/ABC-1", "redactBranchLabel: passes safe slug");
-  assert.equal(redactBranchLabel(""), null, "redactBranchLabel: empty → null");
-  assert.equal(redactBranchLabel(null), null, "redactBranchLabel: null → null");
-  assert.equal(redactBranchLabel(undefined), null, "redactBranchLabel: undefined → null");
+  assert.equal(redactBranchLabel(""), null, "redactBranchLabel: empty ??null");
+  assert.equal(redactBranchLabel(null), null, "redactBranchLabel: null ??null");
+  assert.equal(redactBranchLabel(undefined), null, "redactBranchLabel: undefined ??null");
 
   // Directory label: never returns the raw path.
   const safeDir = redactDirectoryLabel("/Users/secret/private/project");
@@ -5587,12 +5587,12 @@ async function verifyApprovalRedactionHelpers() {
     null,
     "redactRemoteLabel: must reject SSH URL",
   );
-  assert.equal(redactRemoteLabel(""), null, "redactRemoteLabel: empty → null");
-  assert.equal(redactRemoteLabel(null), null, "redactRemoteLabel: null → null");
+  assert.equal(redactRemoteLabel(""), null, "redactRemoteLabel: empty ??null");
+  assert.equal(redactRemoteLabel(null), null, "redactRemoteLabel: null ??null");
 }
 
 /**
- * Story 2.2: explanation builder — canonical payload contract.
+ * Story 2.2: explanation builder ??canonical payload contract.
  * Verifies:
  *   - all categories produce intent/impact/workflow/policy fields
  *   - sensitivity = "sanitized", detailLevel = "concise" are fixed
@@ -5643,8 +5643,8 @@ async function verifyApprovalExplanationContracts() {
     "explanation: branch reason code preserved",
   );
   assert.ok(
-    branchCreate.policyRationale.includes("전용 브랜치 정책") ||
-      branchCreate.policyRationale.includes("브랜치 정책"),
+    branchCreate.policyRationale.includes("?꾩슜 釉뚮옖移??뺤콉") ||
+      branchCreate.policyRationale.includes("釉뚮옖移??뺤콉"),
     "explanation: branchRequired=true must surface in policyRationale",
   );
 
@@ -5692,7 +5692,7 @@ async function verifyApprovalExplanationContracts() {
   );
   assert.equal(initExplanation.fields.repoStateCode, "git-not-initialized");
   assert.ok(
-    initExplanation.policyRationale.includes("초기화") ||
+    initExplanation.policyRationale.includes("Initialize") ||
       initExplanation.policyRationale.includes("Git"),
     "explanation: init rationale must mention initialization",
   );
@@ -5749,7 +5749,7 @@ async function verifyApprovalExplanationContracts() {
 }
 
 /**
- * Story 2.2: buildApprovalRequest — body/metadata derived from a single
+ * Story 2.2: buildApprovalRequest ??body/metadata derived from a single
  * canonical explanation payload, with full Story 2.2 fields populated.
  */
 async function verifyBuildApprovalRequestStory22Fields() {
@@ -5788,7 +5788,7 @@ async function verifyBuildApprovalRequestStory22Fields() {
     readiness: { outcome: "allow", reason: "ready" },
   });
 
-  // Prompt body — Story 2.2 fields
+  // Prompt body ??Story 2.2 fields
   assert.equal(typeof req.prompt.title, "string", "prompt.title must be a string");
   assert.equal(typeof req.prompt.summary, "string", "prompt.summary must remain a string (backward compat)");
   assert.ok(Array.isArray(req.prompt.lines), "prompt.lines must be an array");
@@ -5801,7 +5801,7 @@ async function verifyBuildApprovalRequestStory22Fields() {
     "prompt.lines must follow Intent/Impact/Context/Why approval is needed ordering",
   );
 
-  // Metadata — schema + canonical explanation
+  // Metadata ??schema + canonical explanation
   assert.equal(req.metadata.event, "approval.requested", "metadata.event must equal approval.requested");
   assert.equal(req.metadata.actionCategory, "branch/create", "metadata.actionCategory");
   assert.equal(req.metadata.proposalKind, "branch", "metadata.proposalKind preserved");
@@ -5833,7 +5833,7 @@ async function verifyBuildApprovalRequestStory22Fields() {
 }
 
 /**
- * Story 2.2: redaction at the request level — sensitive inputs in the proposal
+ * Story 2.2: redaction at the request level ??sensitive inputs in the proposal
  * must NOT leak into prompt text or metadata.
  */
 async function verifyApprovalRedactionThroughRequest() {
@@ -5841,7 +5841,7 @@ async function verifyApprovalRedactionThroughRequest() {
     `${buildApprovalRequestModuleUrl}?v22redact=${Date.now()}`
   );
 
-  // init proposal carrying an absolute path — must NOT surface in prompt or metadata
+  // init proposal carrying an absolute path ??must NOT surface in prompt or metadata
   const sensitivePath = "/Users/secret/private-project";
   const initReq = buildApprovalRequest({
     sessionID: "s-22-redact-init",
@@ -5886,7 +5886,7 @@ async function verifyApprovalRedactionThroughRequest() {
     "redaction: directoryLabel must be the safe label",
   );
 
-  // push proposal carrying a full remote URL — must NOT surface anywhere
+  // push proposal carrying a full remote URL ??must NOT surface anywhere
   const sensitiveUrl = "https://corp.example.com/team/secret-repo.git";
   const pushReq = buildApprovalRequest({
     sessionID: "s-22-redact-push",
@@ -5962,7 +5962,7 @@ async function verifyApprovalRedactionThroughRequest() {
 }
 
 /**
- * Story 2.2: hook integration — explanation flows from command-execute-before
+ * Story 2.2: hook integration ??explanation flows from command-execute-before
  * through to the workflow state without losing fields and stays sanitized in
  * the audit pipeline.
  */
@@ -6042,7 +6042,7 @@ async function verifyApprovalExplanationHookIntegration() {
 }
 
 /**
- * Story 2.2: graceful degradation — when proposal data is malformed enough to
+ * Story 2.2: graceful degradation ??when proposal data is malformed enough to
  * break explanation building, the request still ships with a safe fallback
  * explanation rather than throwing.
  */
@@ -6051,7 +6051,7 @@ async function verifyApprovalExplanationFallback() {
     `${buildApprovalRequestModuleUrl}?v22fallback=${Date.now()}`
   );
 
-  // (1) Missing-policy path — canonical builder still produces a payload, so
+  // (1) Missing-policy path ??canonical builder still produces a payload, so
   // fallback flag must be FALSE here.
   const reqMissingPolicy = buildApprovalRequest({
     sessionID: "s-22-fallback",
@@ -6076,7 +6076,7 @@ async function verifyApprovalExplanationFallback() {
     "fallback flag must be false when canonical builder succeeds",
   );
 
-  // (2) Forced builder failure — proposal.reason getter throws. Fingerprint
+  // (2) Forced builder failure ??proposal.reason getter throws. Fingerprint
   // building only reads kind/action/name/current/directory so it succeeds; the
   // explanation builder reads `proposal.reason` which throws, so the
   // safeBuildExplanation catch must engage and produce fallback=true.
@@ -6119,9 +6119,9 @@ async function verifyApprovalExplanationFallback() {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
 // Story 2.3: Support Accept, Deny, and Ignore-and-Continue Outcomes
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
 
 /**
  * Story 2.3: approval-resolution-state pure helpers.
@@ -6447,7 +6447,7 @@ async function verifyConsumeApprovalOutcomeIgnoreAndContinue() {
 }
 
 /**
- * Story 2.3: idempotency — duplicate resolve / unknown outcome / no-active /
+ * Story 2.3: idempotency ??duplicate resolve / unknown outcome / no-active /
  * unknown session must all return outcome:"skip" without throwing or
  * mutating anything beyond what the first call did.
  */
@@ -6585,7 +6585,7 @@ async function verifyConsumeApprovalOutcomeLeavesQueueIntact() {
   assert.equal(
     finalState.pendingActions.length,
     1,
-    "resolver must not advance the queue — that is command.execute.before's job",
+    "resolver must not advance the queue ??that is command.execute.before's job",
   );
   assert.equal(
     finalState.pendingActions[0].actionId,
@@ -6715,7 +6715,7 @@ async function verifyCommandExecuteBeforePromotesQueueHead() {
 }
 
 /**
- * Story 2.3: permission.asked hook ingress — runtime payload echoing the
+ * Story 2.3: permission.asked hook ingress ??runtime payload echoing the
  * approval requestId and "approve"/"deny"/"ignore" outcome must drive
  * consumeApprovalOutcome and emit audit events. Unrelated permission events
  * (no requestId echo) must not touch approval state.
@@ -6768,7 +6768,7 @@ async function verifyPermissionAskedHookFlow() {
     },
   );
 
-  // (1) Unrelated permission event — no requestId/actionId echo. Must not
+  // (1) Unrelated permission event ??no requestId/actionId echo. Must not
   // resolve our approval.
   await hook({ sessionID: "s-23-hook", tool: "write", arguments: {} });
   assert.equal(
@@ -6782,7 +6782,7 @@ async function verifyPermissionAskedHookFlow() {
     "no approval.resolved event for unrelated permission",
   );
 
-  // (2) Echoed requestId + outcome="deny" → resolve with deny.
+  // (2) Echoed requestId + outcome="deny" ??resolve with deny.
   await hook({
     sessionID: "s-23-hook",
     tool: "write",
@@ -6803,7 +6803,7 @@ async function verifyPermissionAskedHookFlow() {
   assert.equal(skippedLogs.length, 1);
   assert.equal(skippedLogs[0].extra.details.reason, "approval-denied");
 
-  // (3) Replay same payload — already-resolved branch is idempotent (no new
+  // (3) Replay same payload ??already-resolved branch is idempotent (no new
   // audit events).
   await hook({
     sessionID: "s-23-hook",
@@ -6839,7 +6839,7 @@ async function verifyPermissionAskedHookFlow() {
 }
 
 /**
- * Story 2.3: session.deleted cleanup — clearing the session removes
+ * Story 2.3: session.deleted cleanup ??clearing the session removes
  * approvalCurrent/approvalHistory/pendingActions/lastContinuationDecision.
  */
 async function verifySessionDeletedClearsAllApprovalState() {
@@ -7132,7 +7132,7 @@ async function verifyPermissionAskedHookEmitsResolutionFailedOnUnknownOutcome() 
     outcome: "frobnicate",
   });
 
-  // Active approval must remain — resolver must not have run.
+  // Active approval must remain ??resolver must not have run.
   const after = store.get("s-23-low5");
   assert.equal(after.approvalCurrent?.id, request.id, "unknown outcome must not resolve");
 
@@ -7303,7 +7303,7 @@ async function verifyPermissionAskedHookIgnoresGenericActionField() {
 
   // Runtime echoes the requestId AND populates `action: "allow"` (the tool's
   // intent, not an outcome decision). Without the LOW fix, "allow" would map
-  // through OUTCOME_ALIASES → "accept" and silently close the approval.
+  // through OUTCOME_ALIASES ??"accept" and silently close the approval.
   await hook({
     sessionID: "s-23-low-action",
     tool: "write",
@@ -7317,7 +7317,7 @@ async function verifyPermissionAskedHookIgnoresGenericActionField() {
     request.id,
     "input.action='allow' must NOT resolve the active approval",
   );
-  // Parser returns null → unknown-outcome surfaces via approval.resolution.failed.
+  // Parser returns null ??unknown-outcome surfaces via approval.resolution.failed.
   const failureLogs = logs.filter((l) => l.message === "approval.resolution.failed");
   assert.equal(
     failureLogs.length,
@@ -7349,12 +7349,12 @@ async function verifyPermissionAskedHookIgnoresGenericActionField() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Story 2.4 — detect and report Git conflicts and execution failures
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
+// Story 2.4 ??detect and report Git conflicts and execution failures
+// ?????????????????????????????????????????????????????????????????????????????
 
 /**
- * Story 2.4: classifier contract — canonical FAILURE_CODES set, public
+ * Story 2.4: classifier contract ??canonical FAILURE_CODES set, public
  * signature, and per-action-kind mapping for the documented taxonomy.
  */
 async function verifyClassifyGitExecutionFailureContract() {
@@ -7362,7 +7362,7 @@ async function verifyClassifyGitExecutionFailureContract() {
     `${classifyGitExecutionFailureModuleUrl}?contract=${Date.now()}`
   );
 
-  // Frozen canonical code set — only-extend-do-not-narrow rule from Story 2.4.
+  // Frozen canonical code set ??only-extend-do-not-narrow rule from Story 2.4.
   assert.deepEqual(
     Object.values(FAILURE_CODES).sort(),
     [
@@ -7381,7 +7381,7 @@ async function verifyClassifyGitExecutionFailureContract() {
     "classifier: FAILURE_CODES must be frozen so callers cannot mutate the taxonomy",
   );
 
-  // Branch / create / "already exists" → branch-conflict.
+  // Branch / create / "already exists" ??branch-conflict.
   const branchConflict = classifyGitExecutionFailure({
     action: { kind: "branch", operation: "create", branchName: "feat/X" },
     error: { status: 128, stderr: "fatal: A branch named 'feat/X' already exists." },
@@ -7398,7 +7398,7 @@ async function verifyClassifyGitExecutionFailureContract() {
     "classifier: stderr must be summarized, never raw passthrough",
   );
 
-  // Branch post-condition mismatch → branch-switch-mismatch (no preflightDrift
+  // Branch post-condition mismatch ??branch-switch-mismatch (no preflightDrift
   // assertion, so the executor-side post-condition path is reachable).
   const switchMismatch = classifyGitExecutionFailure({
     action: { kind: "branch", operation: "switch", targetBranch: "feat/X" },
@@ -7419,7 +7419,7 @@ async function verifyClassifyGitExecutionFailureContract() {
   });
   assert.equal(detached.code, FAILURE_CODES.BRANCH_SWITCH_MISMATCH);
 
-  // Commit / nothing-to-commit → commit-failure.
+  // Commit / nothing-to-commit ??commit-failure.
   const commitNothing = classifyGitExecutionFailure({
     action: { kind: "commit", operation: "commit" },
     error: { status: 1, stdout: "nothing to commit, working tree clean" },
@@ -7427,7 +7427,7 @@ async function verifyClassifyGitExecutionFailureContract() {
   assert.equal(commitNothing.code, FAILURE_CODES.COMMIT_FAILURE);
   assert.equal(commitNothing.details.recoverable, true);
 
-  // Push / non-fast-forward → push-rejection.
+  // Push / non-fast-forward ??push-rejection.
   const pushReject = classifyGitExecutionFailure({
     action: { kind: "push", operation: "push", branchName: "feat/X", remoteName: "origin" },
     error: { status: 1, stderr: "! [rejected] feat/X -> feat/X (non-fast-forward)" },
@@ -7436,7 +7436,7 @@ async function verifyClassifyGitExecutionFailureContract() {
   assert.equal(pushReject.details.recoverable, true);
   assert.equal(pushReject.details.suggestedRecoveryKind, "retry-after-sync");
 
-  // Push / protected branch → push-rejection (non-recoverable hint).
+  // Push / protected branch ??push-rejection (non-recoverable hint).
   const pushProtected = classifyGitExecutionFailure({
     action: { kind: "push", operation: "push", branchName: "main", remoteName: "origin" },
     error: { status: 1, stderr: "remote: error: GH006: Protected branch update failed" },
@@ -7452,7 +7452,7 @@ async function verifyClassifyGitExecutionFailureContract() {
   assert.equal(execMissing.code, FAILURE_CODES.EXECUTION_UNAVAILABLE);
   assert.equal(execMissing.details.recoverable, false);
 
-  // Subprocess timeout → execution-unavailable.
+  // Subprocess timeout ??execution-unavailable.
   const execTimeout = classifyGitExecutionFailure({
     action: { kind: "commit", operation: "commit" },
     error: { killed: true, signal: "SIGTERM" },
@@ -7469,7 +7469,7 @@ async function verifyClassifyGitExecutionFailureContract() {
   });
   assert.equal(drift.code, FAILURE_CODES.REPOSITORY_STATE_MISMATCH);
 
-  // Unknown action kind → unknown-git-failure.
+  // Unknown action kind ??unknown-git-failure.
   const unknown = classifyGitExecutionFailure({
     action: { kind: "weird", operation: "?" },
     error: { status: 1 },
@@ -7478,7 +7478,7 @@ async function verifyClassifyGitExecutionFailureContract() {
 }
 
 /**
- * Story 2.4: executor envelope shape — ok/status/action/code/message/details/
+ * Story 2.4: executor envelope shape ??ok/status/action/code/message/details/
  * audit/next must always be present.
  */
 async function verifyGitExecutorEnvelopeShape() {
@@ -7612,7 +7612,7 @@ async function verifyGitExecutorSubprocessFailureMapping() {
   });
   assert.equal(branchEnvelope.code, "branch-conflict");
 
-  // Subprocess spawn failure → execution-unavailable wins.
+  // Subprocess spawn failure ??execution-unavailable wins.
   const execEnvelope = await executeGitAction({
     plan: { kind: "push", operation: "push", correlationId: "corr-spawn" },
     workflowContext: { sessionID: "s-exec", commandName: "bmad-bmm-quick-dev", phase: "start" },
@@ -7633,7 +7633,7 @@ async function verifyGitExecutorSubprocessFailureMapping() {
 
 /**
  * Story 2.4: post-condition mismatch on a successful subprocess run still
- * produces a failure envelope — branch landed on the wrong head.
+ * produces a failure envelope ??branch landed on the wrong head.
  */
 async function verifyGitExecutorPostConditionFailure() {
   const { executeGitAction } = await import(
@@ -7649,7 +7649,7 @@ async function verifyGitExecutorPostConditionFailure() {
     gitRunner: async () => ({ observedState: { headBranch: "main" } }),
   });
 
-  // Preflight runs first — expected vs repositorySnapshot already disagree —
+  // Preflight runs first ??expected vs repositorySnapshot already disagree ??
   // so this case actually short-circuits as repository-state-mismatch. That is
   // the correct contract: drift dominates, so the runner never gets invoked.
   assert.equal(envelope.ok, false);
@@ -7670,7 +7670,7 @@ async function verifyGitExecutorPostConditionFailure() {
 }
 
 /**
- * Story 2.4: structured `git.action.executed` audit event payload — required
+ * Story 2.4: structured `git.action.executed` audit event payload ??required
  * fields plus best-effort behavior when the audit sink throws.
  */
 async function verifyGitExecutorAuditEventPayload() {
@@ -7766,7 +7766,7 @@ async function verifyGitExecutorAuditEventPayload() {
 }
 
 /**
- * Story 2.4: workflowState mirror — executor persists lastGitAction /
+ * Story 2.4: workflowState mirror ??executor persists lastGitAction /
  * lastGitResult / lastGitFailure / pendingRecoveryContext, and get() deep
  * clones each so external mutations cannot leak back into the store.
  */
@@ -7862,7 +7862,7 @@ async function verifyWorkflowStateExecutionMirror() {
 }
 
 /**
- * Story 2.4: commit-service / push-service produce normalized envelopes only —
+ * Story 2.4: commit-service / push-service produce normalized envelopes only ??
  * no ad-hoc throws, no raw stderr leakage, and the action.kind is fixed.
  */
 async function verifyCommitAndPushServicesSurfaceEnvelopes() {
@@ -7909,9 +7909,9 @@ async function verifyCommitAndPushServicesSurfaceEnvelopes() {
   assert.equal(pushEnvelope.status, "succeeded");
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// Story 2.5 — recovery paths without failing the workflow
-// ─────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????
+// Story 2.5 ??recovery paths without failing the workflow
+// ?????????????????????????????????????????????????????????????????????
 
 /**
  * Story 2.5: recovery-state state-machine guarantees.
@@ -7934,7 +7934,7 @@ async function verifyRecoveryStateMachineContracts() {
     defaultBlockingScopeFor,
   } = await import(`${recoveryStateModuleUrl}?v25-state=${Date.now()}`);
 
-  // Vocabulary completeness — the spec calls out exactly these states.
+  // Vocabulary completeness ??the spec calls out exactly these states.
   for (const expected of [
     "planned",
     "awaitingApproval",
@@ -7992,7 +7992,7 @@ async function verifyRecoveryStateMachineContracts() {
   assert.equal(garbage.ok, false);
   assert.equal(garbage.reason, "invalid-previous-state");
 
-  // Choice → intent state mapping.
+  // Choice ??intent state mapping.
   assert.equal(intentStateForChoice(RECOVERY_CHOICES.RETRY), RECOVERY_STATES.RETRY_REQUESTED);
   assert.equal(
     intentStateForChoice(RECOVERY_CHOICES.CONTINUE_WITHOUT_AUTOMATION),
@@ -8016,12 +8016,12 @@ async function verifyRecoveryStateMachineContracts() {
 
 /**
  * Story 2.5: recoverable vs non-recoverable classification.
- * - approval deny / ignore → recoverable, recommends continue-without-automation
+ * - approval deny / ignore ??recoverable, recommends continue-without-automation
  * - branch-conflict / push-rejection (recoverable=true on Story 2.4 envelope)
- *   → recoverable; recommendedChoice mapped from suggestedRecoveryKind
- * - execution-unavailable → non-recoverable, session-git blocked
- * - unknown-git-failure → non-recoverable
- * - invariant violation (cross-session, missing kind) → non-recoverable
+ *   ??recoverable; recommendedChoice mapped from suggestedRecoveryKind
+ * - execution-unavailable ??non-recoverable, session-git blocked
+ * - unknown-git-failure ??non-recoverable
+ * - invariant violation (cross-session, missing kind) ??non-recoverable
  */
 async function verifyClassifyRecoveryContracts() {
   const {
@@ -8030,7 +8030,7 @@ async function verifyClassifyRecoveryContracts() {
     classifyInvariantViolation,
   } = await import(`${classifyRecoveryModuleUrl}?v25-classify=${Date.now()}`);
 
-  // Approval deny — recoverable continue-without-automation, GIT_ONLY scope
+  // Approval deny ??recoverable continue-without-automation, GIT_ONLY scope
   // for non-init actions.
   const denyClass = classifyApprovalRecovery({
     approvalOutcome: "deny",
@@ -8043,7 +8043,7 @@ async function verifyClassifyRecoveryContracts() {
   assert.equal(denyClass.recommendedChoice, "continue-without-automation");
   assert.equal(denyClass.blockingScope, "git-only");
 
-  // Approval ignore on init — session-git scope.
+  // Approval ignore on init ??session-git scope.
   const ignoreInit = classifyApprovalRecovery({
     approvalOutcome: "ignore-and-continue",
     actionKind: "init",
@@ -8053,7 +8053,7 @@ async function verifyClassifyRecoveryContracts() {
   assert.equal(ignoreInit.reason, "approval-ignored");
   assert.equal(ignoreInit.blockingScope, "session-git");
 
-  // Approval accept must NOT be classified as recovery — it is a successful path.
+  // Approval accept must NOT be classified as recovery ??it is a successful path.
   const accept = classifyApprovalRecovery({
     approvalOutcome: "accept",
     actionKind: "branch",
@@ -8437,7 +8437,7 @@ async function verifySelectRetryIncrementsAttempt() {
   );
 
   // A fresh approval cycle can re-open a gate on the same session immediately
-  // after retry — i.e. retry truly closed the previous gate, it did not just
+  // after retry ??i.e. retry truly closed the previous gate, it did not just
   // mute the gating check.
   const reopen = await orch.openRecoveryFromApproval({
     workflowState: store,
@@ -8681,7 +8681,7 @@ async function verifyInvariantViolationsAreBlockedNotThrown() {
 }
 
 /**
- * Story 2.5: workflowState mirror — recoveryGate is deep-cloned on get so
+ * Story 2.5: workflowState mirror ??recoveryGate is deep-cloned on get so
  * external mutations cannot leak back into the store, AND session.deleted
  * cleanup (workflowState.clear) wipes the gate alongside other session data.
  */
@@ -8701,7 +8701,7 @@ async function verifyRecoveryGateIsolatedAndCleanedUp() {
   const snap1 = store.get("s-25-iso");
   assert.equal(snap1.recoveryGate.state, "awaitingRecovery");
 
-  // Tamper with the snapshot — must not affect the store.
+  // Tamper with the snapshot ??must not affect the store.
   snap1.recoveryGate.state = "tampered";
   snap1.recoveryGate.options[0].instructions = "tampered";
   const snap2 = store.get("s-25-iso");
@@ -8714,7 +8714,7 @@ async function verifyRecoveryGateIsolatedAndCleanedUp() {
 }
 
 /**
- * Story 2.5 — integration: a denied approval must NOT hard-fail the workflow
+ * Story 2.5 ??integration: a denied approval must NOT hard-fail the workflow
  * session. The wrapper plugin instance routes through permission-asked, and
  * after the resolver fires the orchestrator opens a recovery gate so future
  * planning passes can release it explicitly.
@@ -8754,7 +8754,7 @@ async function verifyDeniedApprovalDoesNotHardFailWorkflow() {
       "denied approval must NOT throw out of the permission.asked hook",
     );
 
-    // After the deny, subsequent tool execution must continue working — the
+    // After the deny, subsequent tool execution must continue working ??the
     // wrapper does not enter a hard-fail state for this session.
     let toolError = null;
     try {
@@ -8841,7 +8841,7 @@ async function verifyRecoveryPromptDeliveredAfterDeny() {
       return;
     }
 
-    // The newest prompt is the recovery prompt — its metadata must carry the
+    // The newest prompt is the recovery prompt ??its metadata must carry the
     // recoveryGateId so the user's response can be matched back to the gate.
     const recoveryPrompt = mock.prompts[mock.prompts.length - 1];
     const recoveryMeta = recoveryPrompt?.parts?.[0]?.metadata;
@@ -9038,7 +9038,7 @@ async function verifyBuildRecoveryPromptContracts() {
  * audit events must carry workflow + command attribution. Before the round-2
  * fix, `_openRecoverableGate` did not persist workflow/command on the gate,
  * so when `permission-asked` later called `selectRecoveryChoice` it could
- * only pass `gate.workflow ?? null` (always undefined → null) and audit
+ * only pass `gate.workflow ?? null` (always undefined ??null) and audit
  * consumers grouping by workflow saw the entire `selected` / `completed`
  * stream as null while `offered` (emitted directly with full params) was
  * correctly attributed. The fix persists workflow/command on the gate AND
@@ -9328,7 +9328,7 @@ async function verifyPermissionAskedAliasDisjointness() {
   }
 
   // Story 2.5 (LOW review round 3): _openBlockedGate history must contain
-  // exactly one entry — the gate's actual lifecycle was a direct open into
+  // exactly one entry ??the gate's actual lifecycle was a direct open into
   // `abandoned`. A synthetic `awaitingRecovery` precursor would mislead audit
   // consumers reconstructing the timeline from `gate.history`.
   const orchModuleUrl = pathToFileURL(
@@ -9353,7 +9353,7 @@ async function verifyPermissionAskedAliasDisjointness() {
     workflowState: store,
     sessionID: "s-25-history",
     approvalOutcome: "deny",
-    actionKind: null, // intentionally invalid → invariant-violation → blocked
+    actionKind: null, // intentionally invalid ??invariant-violation ??blocked
   });
   assert.equal(blocked.outcome, "blocked");
   assert.ok(Array.isArray(blocked.gate.history));
@@ -9399,7 +9399,7 @@ function listLastCommitFiles(directory) {
     .filter((line) => line.length > 0)
     .map((line) => {
       const parts = line.split("\t");
-      // Rename / copy lines look like "R100\told\tnew" — surface both paths
+      // Rename / copy lines look like "R100\told\tnew" ??surface both paths
       // so callers asserting on `paths` can match either endpoint.
       if (parts.length >= 3 && /^[RC]/i.test(parts[0])) {
         return { status: parts[0], path: parts[2], fromPath: parts[1] };
@@ -9488,6 +9488,135 @@ async function verifyBuildCommitArgsScopesPathspecToProposal() {
   );
   assert.equal(empty.addArgs, null);
   assert.deepEqual(empty.commitArgs, ["commit", "--allow-empty", "-m", "Initial commit"]);
+
+  const wholeTree = buildCommitArgs({
+    message: "Finalize workflow outputs",
+    files: ["src/a.js"],
+    allFiles: true,
+  });
+  assert.deepEqual(
+    wholeTree.addArgs,
+    ["add", "-A"],
+    "allFiles mode must stage the entire working tree without a pathspec",
+  );
+  assert.deepEqual(
+    wholeTree.commitArgs,
+    ["commit", "-m", "Finalize workflow outputs"],
+    "allFiles mode must commit the entire working tree without a pathspec",
+  );
+}
+
+async function verifyBuildGitFailureDiagnosticsPreservesRawEvidence() {
+  const { buildGitFailureDiagnostics } = await import(
+    `${runGitCommandModuleUrl}?git-failure-diag=${Date.now()}`
+  );
+
+  const error = new Error("spawnSync git ETIMEDOUT");
+  error.name = "SystemError";
+  error.code = "ETIMEDOUT";
+  error.errno = -4039;
+  error.status = null;
+  error.signal = "SIGTERM";
+  error.syscall = "spawnSync git";
+  error.path = "git";
+  error.spawnargs = ["rev-parse", "--is-inside-work-tree"];
+  error.stdout = "";
+  error.stderr = "fatal: detected dubious ownership in repository";
+  const startedAt = process.hrtime.bigint();
+
+  const diagnostics = buildGitFailureDiagnostics(error, {
+    directory: "C:/repo",
+    args: ["rev-parse", "--is-inside-work-tree"],
+    timeoutMs: 1500,
+    command: "rev-parse-inside-work-tree",
+    operation: "runGitCommand",
+    startedAt,
+    trace: {
+      hook: "command-execute-before",
+      stage: "workflow-readiness-check",
+      sessionID: "sess-1",
+    },
+  });
+
+  assert.equal(diagnostics.gitExecutable, "git");
+  assert.equal(diagnostics.cwd, "C:/repo");
+  assert.deepEqual(diagnostics.args, ["rev-parse", "--is-inside-work-tree"]);
+  assert.equal(diagnostics.timeoutMs, 1500);
+  assert.equal(diagnostics.command, "rev-parse-inside-work-tree");
+  assert.equal(diagnostics.operation, "runGitCommand");
+  assert.equal(diagnostics.errorName, "SystemError");
+  assert.equal(diagnostics.errorCode, "ETIMEDOUT");
+  assert.equal(diagnostics.errorErrno, -4039);
+  assert.equal(diagnostics.errorSignal, "SIGTERM");
+  assert.equal(diagnostics.errorSyscall, "spawnSync git");
+  assert.equal(diagnostics.errorPath, "git");
+  assert.deepEqual(diagnostics.errorSpawnargs, ["rev-parse", "--is-inside-work-tree"]);
+  assert.match(diagnostics.errorMessage, /spawnSync git ETIMEDOUT/);
+  assert.match(diagnostics.stderr, /dubious ownership/);
+  assert.equal(typeof diagnostics.pathEnv, "string");
+  assert.deepEqual(diagnostics.trace, {
+    hook: "command-execute-before",
+    stage: "workflow-readiness-check",
+    sessionID: "sess-1",
+  });
+  assert.equal(typeof diagnostics.durationMs, "number");
+  assert.ok(
+    diagnostics.durationMs >= 0,
+    "verifyBuildGitFailureDiagnosticsPreservesRawEvidence: durationMs must be numeric",
+  );
+}
+
+async function verifyRunGitCommandLogsRawFailureEvidence() {
+  const { runGitCommand } = await import(`${runGitCommandModuleUrl}?git-failure-log=${Date.now()}`);
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-failure-log-"));
+  const debugCalls = [];
+  try {
+    assert.throws(
+      () =>
+        runGitCommand({
+          directory: root,
+          command: "status-porcelain",
+          trace: {
+            hook: "tool-execute-after",
+            stage: "sentinel-finalization",
+            sessionID: "sess-log",
+          },
+          debug: {
+            log(scope, message, payload) {
+              debugCalls.push({ scope, message, payload });
+            },
+          },
+        }),
+      /git/,
+      "verifyRunGitCommandLogsRawFailureEvidence: non-repo status must throw",
+    );
+
+    assert.equal(
+      debugCalls.length,
+      1,
+      "verifyRunGitCommandLogsRawFailureEvidence: failed git call must emit one raw diagnostics entry",
+    );
+    assert.equal(debugCalls[0].scope, "git-subprocess");
+    assert.equal(debugCalls[0].message, "git readiness command failed");
+    assert.equal(debugCalls[0].payload.operation, "runGitCommand");
+    assert.equal(debugCalls[0].payload.command, "status-porcelain");
+    assert.equal(debugCalls[0].payload.cwd, root);
+    assert.deepEqual(debugCalls[0].payload.args, ["status", "--short", "--untracked-files=all"]);
+    assert.equal(debugCalls[0].payload.timeoutMs, 1500);
+    assert.deepEqual(debugCalls[0].payload.trace, {
+      hook: "tool-execute-after",
+      stage: "sentinel-finalization",
+      sessionID: "sess-log",
+    });
+    assert.match(
+      debugCalls[0].payload.stderr || "",
+      /not a git repository/i,
+      "verifyRunGitCommandLogsRawFailureEvidence: stderr must preserve raw git failure text",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }
 
 async function verifyRunGitActionRejectsStagedFilesOutsideProposal() {
@@ -9582,18 +9711,18 @@ async function verifyRunGitActionHandlesWhitespaceAndQuotedPaths() {
   configureGitIdentity(repo);
 
   // Set core.quotepath=false so git status / show emit literal UTF-8 instead
-  // of C-style \xxx escaped path bytes — both states must be commit-safe.
+  // of C-style \xxx escaped path bytes ??both states must be commit-safe.
   execFileSync("git", ["config", "core.quotepath", "false"], { cwd: repo, stdio: "pipe" });
 
   fs.mkdirSync(path.join(repo, "docs"), { recursive: true });
   // Windows reserves `"` `<` `>` `:` `|` `?` `*` `\\` `/` in filenames; we
-  // exercise (a) whitespace and (b) non-ASCII (한글), which already produce
+  // exercise (a) whitespace and (b) non-ASCII (?쒓?), which already produce
   // C-quoted output from `git status` when core.quotepath stays default. The
   // pathspec must round-trip identically through `git add -A -- <files>` and
   // the matching `git commit -- <files>` so approval metadata stays in sync.
   const trickyFiles = [
     "docs/with space.md",
-    "docs/한글파일.md",
+    "docs/?쒓??뚯씪.md",
   ];
   for (const relativePath of trickyFiles) {
     fs.writeFileSync(path.join(repo, relativePath), "x\n", "utf8");
@@ -9634,7 +9763,7 @@ async function verifyRunGitActionCommitsRenamedFile() {
   // index (from seed) but missing from the working tree, src/new-name.js is
   // present in the working tree but untracked. `git add -A -- old new` must
   // stage the deletion of old AND the addition of new, then the pathspec-
-  // restricted commit must record both — which is the rename invariant.
+  // restricted commit must record both ??which is the rename invariant.
   fs.renameSync(
     path.join(repo, "src", "old-name.js"),
     path.join(repo, "src", "new-name.js"),
@@ -9669,7 +9798,7 @@ async function verifyRunGitActionCommitsRenamedFile() {
 }
 
 async function verifyCommitProposalCorrelationIdIsUniquePerAttempt() {
-  const { buildCommitProposal } = await import(
+  const { buildCommitProposal, buildDirectCommitProposal } = await import(
     `${commitProposalModuleUrl}?correlation=${Date.now()}`
   );
 
@@ -9701,13 +9830,13 @@ async function verifyCommitProposalCorrelationIdIsUniquePerAttempt() {
   assert.notEqual(
     first.correlationId,
     second.correlationId,
-    "retries with the same session and matched-file count must NOT reuse correlationId — audit lines need to separate per attempt",
+    "retries with the same session and matched-file count must NOT reuse correlationId ??audit lines need to separate per attempt",
   );
   assert.match(first.correlationId, /^commit:s-correlation:1:/);
 }
 
 async function verifyCommitProposalMessageUsesKoreanTemplate() {
-  const { buildCommitProposal } = await import(
+  const { buildCommitProposal, buildDirectCommitProposal } = await import(
     `${commitProposalModuleUrl}?korean=${Date.now()}`
   );
 
@@ -9734,8 +9863,27 @@ async function verifyCommitProposalMessageUsesKoreanTemplate() {
   assert.ok(proposal, "proposal must be produced when finalization is allowed");
   assert.equal(
     proposal.message,
-    "워크플로우 완료(bmad-bmm-quick-dev): implementation 산출물 업데이트",
+    "?뚰겕?뚮줈???꾨즺(bmad-bmm-quick-dev): implementation ?곗텧臾??낅뜲?댄듃",
     "commit message must use the Korean template aligned with document_output_language",
+  );
+
+  const directProposal = buildDirectCommitProposal({
+    workflowContext: {
+      sessionID: "s-korean-direct",
+      commandName: "bmad-bmm-quick-dev",
+      phase: "finish",
+    },
+    workflowPolicy: {
+      category: "implementation",
+      finalization: "commit-and-push",
+    },
+    changedFiles: [{ path: "src/index.js", kind: "code" }],
+  });
+  assert.equal(directProposal?.allFiles, true);
+  assert.equal(
+    directProposal?.message,
+    "?뚰겕?뚮줈???꾨즺(bmad-bmm-quick-dev): implementation ?곗텧臾??낅뜲?댄듃",
+    "direct commit proposal must reuse the same Korean message template",
   );
 }
 
@@ -9836,7 +9984,7 @@ async function verifyToolExecuteAfterCommitFailureClassifiesAsCommitFailure() {
   });
 
   const state = store.get("s-precommit-fail");
-  assert.equal(state.lastGitResult.code, "commit-failure", "pre-commit hook rejection → commit-failure envelope");
+  assert.equal(state.lastGitResult.code, "commit-failure", "pre-commit hook rejection ??commit-failure envelope");
   assert.equal(state.lastGitFailure.suggestedRecoveryKind, "fix-and-retry");
   assert.equal(state.recoveryGate?.actionKind, "commit");
   assert.equal(prompts.length, 1, "pre-commit hook rejection must deliver a recovery prompt");
@@ -9869,7 +10017,7 @@ async function verifyExecuteApprovedCommitPreflightDriftReportsRepositoryStateMi
     plan,
     approval: { resolvedAt: "2026-05-09T00:00:00.000Z" },
     // Approval was granted against branch "feat/story-3-2" with staged changes,
-    // but the observed snapshot at execution time disagrees → preflight drift.
+    // but the observed snapshot at execution time disagrees ??preflight drift.
     expectedState: { headBranch: "feat/story-3-2", hasRemote: true, hasStagedChanges: true },
     repositorySnapshot: { headBranch: "main", hasRemote: true, hasStagedChanges: false },
     workflowContext: {
@@ -10047,7 +10195,7 @@ async function verifyOutOfScopeOnlyFinalizationDoesNotPublishCommit() {
   assert.equal(
     approvals.length,
     0,
-    "out-of-scope-only changes must not request any commit approval — workflow stays non-blocking",
+    "out-of-scope-only changes must not request any commit approval ??workflow stays non-blocking",
   );
   assert.equal(snapshot.finalizationAssessment.reason, "no-finalizable-outputs");
   assert.ok(
@@ -10066,7 +10214,7 @@ async function verifyToolExecuteAfterFinishSkipsPublishWhenStaleBranchProposalLi
   const events = [];
   const store = createWorkflowStateStore();
   // Lingering branchProposal would otherwise be surfaced again by
-  // selectNextPlannedAction at finish — Story 3.2 review (MEDIUM) requires
+  // selectNextPlannedAction at finish ??Story 3.2 review (MEDIUM) requires
   // the finish hook to gate on commitProposal/allow-outcome.
   store.set("s-finish-no-publish", {
     sessionID: "s-finish-no-publish",
@@ -10131,9 +10279,9 @@ async function verifyToolExecuteAfterFinishSkipsPublishWhenStaleBranchProposalLi
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
 // Story 3.1 review round 1 follow-ups
-// ─────────────────────────────────────────────────────────────────────────────
+// ?????????????????????????????????????????????????????????????????????????????
 
 async function verifyEvaluateWorkflowFinalizationSwallowsAuditFailures() {
   const [
@@ -10161,7 +10309,7 @@ async function verifyEvaluateWorkflowFinalizationSwallowsAuditFailures() {
   };
 
   let assessment;
-  // The throwing audit sink must NOT propagate out of the finish path —
+  // The throwing audit sink must NOT propagate out of the finish path ??
   // assessment is already persisted to workflowState by this point and
   // downstream stories depend on it being available regardless of audit.
   await assert.doesNotReject(async () => {
@@ -10319,7 +10467,7 @@ async function verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace() {
     "rename line must expand to both old and new paths",
   );
 
-  // Path with embedded whitespace — the previous parser stripped it via
+  // Path with embedded whitespace ??the previous parser stripped it via
   // `.trim()` on the payload. The corrected parser preserves every byte
   // after the 3-char status prefix verbatim.
   assert.deepEqual(
@@ -10328,14 +10476,14 @@ async function verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace() {
     "path with significant embedded whitespace must be preserved (no trim)",
   );
 
-  // C-quoted UTF-8 octal sequence — git encodes non-ASCII bytes as octal
+  // C-quoted UTF-8 octal sequence ??git encodes non-ASCII bytes as octal
   // when `core.quotePath=true`. The decoder must reassemble UTF-8.
-  // "한글" in UTF-8: e9 95 9c eb b6 84? Actually 한 = e6 95 9c (no, 한=ED 95 9C). Let's verify:
-  //   "한" is U+D55C; UTF-8 = ED 95 9C → octal: \355\225\234
-  //   "글" is U+AE00; UTF-8 = EA B8 80 → octal: \352\270\200
+  // "?쒓?" in UTF-8: e9 95 9c eb b6 84? Actually ??= e6 95 9c (no, ??ED 95 9C). Let's verify:
+  //   "?? is U+D55C; UTF-8 = ED 95 9C ??octal: \355\225\234
+  //   "湲" is U+AE00; UTF-8 = EA B8 80 ??octal: \352\270\200
   assert.deepEqual(
     parseStatusPorcelainPaths('?? "\\355\\225\\234\\352\\270\\200.md"\n'),
-    ["한글.md"],
+    ["?쒓?.md"],
     "octal-escaped UTF-8 path must decode back to its original characters",
   );
 
@@ -10355,14 +10503,14 @@ async function verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace() {
 }
 
 /* ----------------------------------------------------------------------- */
-/*                       Story 3.4 — audit traceability                     */
+/*                       Story 3.4 ??audit traceability                     */
 /* ----------------------------------------------------------------------- */
 
 /**
  * Story 3.4 (AC1): every audit event on the commit/push finalization path
  * must carry the same minimal correlation axes (workflow, command, sessionID,
- * outcome, details.actionKind, details.correlationId, details.phase, and —
- * where applicable — details.finalizationMode) so an auditor can re-assemble
+ * outcome, details.actionKind, details.correlationId, details.phase, and ??
+ * where applicable ??details.finalizationMode) so an auditor can re-assemble
  * one finalization flow from disparate event names.
  */
 async function verifyStory34ApprovalRequestedCarriesCorrelationAxes() {
@@ -10504,7 +10652,7 @@ async function verifyStory34ApprovalResolvedAndSkippedCarryCorrelationAxes() {
   assert.equal(skipped.sessionID, "s-34");
   assert.equal(skipped.outcome, "deny");
   assert.equal(skipped.details.actionKind, "push");
-  assert.equal(skipped.details.reason, "approval-denied", "deny → reason=approval-denied");
+  assert.equal(skipped.details.reason, "approval-denied", "deny ??reason=approval-denied");
   assert.equal(skipped.details.correlationId, "corr-push-axes", "git.action.skipped must carry the same correlationId as approval.resolved");
   assert.equal(skipped.details.finalizationMode, "commit-and-push", "git.action.skipped must carry the same finalizationMode");
   assert.equal(skipped.details.phase, "finish", "git.action.skipped must carry the resolution phase");
@@ -10564,7 +10712,7 @@ async function verifyStory34GitActionExecutedCarriesCorrelationAxes() {
 /**
  * Story 3.4 (AC2): a throwing audit sink on git.action.executed MUST NOT
  * abort the executor envelope. The envelope is the load-bearing return
- * value — primary failure code (or success) must reach the caller even if
+ * value ??primary failure code (or success) must reach the caller even if
  * the logger explodes.
  */
 async function verifyStory34GitExecutorEnvelopeSurvivesAuditThrow() {
@@ -10698,7 +10846,7 @@ async function verifyStory34CommitSuccessThenPushDenyPreservesAuditChain() {
           };
         },
         async requestApproval() {
-          // Simulate the runtime publishing the push prompt — no-op for the
+          // Simulate the runtime publishing the push prompt ??no-op for the
           // assertions; we only care about audit trail correlation here.
         },
       },
@@ -10758,7 +10906,7 @@ async function verifyStory34CommitSuccessThenPushDenyPreservesAuditChain() {
   assert.equal(commitEvt.outcome, "succeeded", "commit succeeded must be preserved");
   assert.equal(pushEvt.outcome, "deny", "push deny outcome must be recorded");
 
-  // Story 3.4 contract: minimum-data logging — no raw stderr / remote URL
+  // Story 3.4 contract: minimum-data logging ??no raw stderr / remote URL
   // leaks into either payload.
   assert.equal(commitEvt.details.stderrSummary, null, "commit succeeded must not carry stderr");
   assert.equal(
@@ -10774,7 +10922,7 @@ async function verifyStory34CommitSuccessThenPushDenyPreservesAuditChain() {
  * must STILL return a usable hook map (so the runtime can register hooks)
  * instead of crashing. R1 wrapped the bootstrap audit emissions
  * (`config.validation.failed`, `plugin bootstrap`, `plugin bootstrap
- * registered no-op hooks`, `compat.bridge.evaluated`) in try/catch — without
+ * registered no-op hooks`, `compat.bridge.evaluated`) in try/catch ??without
  * this mutation test, a future regression that drops one of those wrappers
  * could slip past the existing Story 1.3 / 4.2 happy-path coverage which
  * only asserts emission shape, not throw-resilience.
@@ -10798,7 +10946,7 @@ async function verifyStory34BootstrapAuditFailureDoesNotAbortRegistration() {
   );
 
   // Force every bootstrap audit emission to throw. The single instrumented
-  // logger covers all bootstrap audit sites — each one must be independently
+  // logger covers all bootstrap audit sites ??each one must be independently
   // wrapped or this test fails the registration assertion below.
   const throwingClient = {
     app: {
@@ -10826,7 +10974,7 @@ async function verifyStory34BootstrapAuditFailureDoesNotAbortRegistration() {
     assert.equal(
       bootstrapError,
       null,
-      "bootstrap must NOT throw when every audit emission fails — Story 3.4 AC2 best-effort applies to bootstrap audit too",
+      "bootstrap must NOT throw when every audit emission fails ??Story 3.4 AC2 best-effort applies to bootstrap audit too",
     );
     assert.ok(
       handlers && typeof handlers === "object",
@@ -10850,10 +10998,10 @@ async function verifyStory34BootstrapAuditFailureDoesNotAbortRegistration() {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────────────── */
-/*           Story 3.5 — preserve reviewer traceability through            */
+/* ??????????????????????????????????????????????????????????????????????? */
+/*           Story 3.5 ??preserve reviewer traceability through            */
 /*                       standard Git history                              */
-/* ─────────────────────────────────────────────────────────────────────── */
+/* ??????????????????????????????????????????????????????????????????????? */
 
 /**
  * Story 3.5 (AC1, AC2): a code-only commit proposal must surface artifactKinds
@@ -10863,7 +11011,7 @@ async function verifyStory34BootstrapAuditFailureDoesNotAbortRegistration() {
  * outside the proposal's `files` field.
  */
 async function verifyStory35CommitProposalCodeOnlyScope() {
-  const { buildCommitProposal } = await import(
+  const { buildCommitProposal, buildDirectCommitProposal } = await import(
     `${commitProposalModuleUrl}?s35-code-only=${Date.now()}`
   );
 
@@ -10925,7 +11073,7 @@ async function verifyStory35CommitProposalCodeOnlyScope() {
  * reviewers can paste into `git log -- <prefix>`.
  */
 async function verifyStory35CommitProposalDocsOnlyScope() {
-  const { buildCommitProposal } = await import(
+  const { buildCommitProposal, buildDirectCommitProposal } = await import(
     `${commitProposalModuleUrl}?s35-docs-only=${Date.now()}`
   );
 
@@ -10983,11 +11131,11 @@ async function verifyStory35CommitProposalDocsOnlyScope() {
 /**
  * Story 3.5 (AC2): mixed code+docs proposals must roll up both families into a
  * single proposal whose path-scope summary cleanly separates code buckets from
- * doc buckets — the reviewer can then walk both `git log -- src/` and
+ * doc buckets ??the reviewer can then walk both `git log -- src/` and
  * `git log -- _bmad-output/...` from the same commit.
  */
 async function verifyStory35CommitProposalMixedScope() {
-  const { buildCommitProposal } = await import(
+  const { buildCommitProposal, buildDirectCommitProposal } = await import(
     `${commitProposalModuleUrl}?s35-mixed=${Date.now()}`
   );
 
@@ -11072,7 +11220,7 @@ async function verifyStory35CommitExplanationSurfacesScopeWithoutSensitiveData()
     commitProposal: {
       kind: "commit",
       action: "commit",
-      message: "워크플로우 완료(bmad-bmm-quick-dev): implementation 산출물 업데이트",
+      message: "?뚰겕?뚮줈???꾨즺(bmad-bmm-quick-dev): implementation ?곗텧臾??낅뜲?댄듃",
       artifactScope: "implementation",
       artifactKinds: ["code", "technical-doc"],
       changeCountSummary: "2 code files, 1 technical-doc file",
@@ -11081,7 +11229,7 @@ async function verifyStory35CommitExplanationSurfacesScopeWithoutSensitiveData()
         { prefix: "_bmad-output/implementation-artifacts/", label: "doc/implementation-artifact", count: 1 },
       ],
       // The proposal carries explicit files for git pathspec assembly, but the
-      // explanation must NEVER copy them out — pathScopeSummary is the only
+      // explanation must NEVER copy them out ??pathScopeSummary is the only
       // reviewer-facing surface.
       files: ["src/index.js", "src/hooks/permission-asked.js", "_bmad-output/implementation-artifacts/3-5.md"],
     },
@@ -11142,7 +11290,7 @@ async function verifyStory35CommitExplanationSurfacesScopeWithoutSensitiveData()
  * already-recorded local commit must remain reviewable via standard Git tools.
  * The audit log must keep the commit's git.action.executed entry, the workflow
  * state must keep the commit recorded in lastGitAction/lastGitResult, and the
- * push proposal/state machine must be the only thing that gets rolled back —
+ * push proposal/state machine must be the only thing that gets rolled back ??
  * never the commit traceability itself.
  */
 async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability() {
@@ -11186,7 +11334,7 @@ async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability(
       proposal: {
         kind: "commit",
         action: "commit",
-        message: "워크플로우 완료(bmad-bmm-quick-dev): implementation 산출물 업데이트",
+        message: "?뚰겕?뚮줈???꾨즺(bmad-bmm-quick-dev): implementation ?곗텧臾??낅뜲?댄듃",
         artifactScope: "implementation",
         artifactKinds: ["code"],
         changeCountSummary: "1 code file",
@@ -11205,7 +11353,7 @@ async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability(
     commitProposal: {
       kind: "commit",
       action: "commit",
-      message: "워크플로우 완료(bmad-bmm-quick-dev): implementation 산출물 업데이트",
+      message: "?뚰겕?뚮줈???꾨즺(bmad-bmm-quick-dev): implementation ?곗텧臾??낅뜲?댄듃",
       artifactScope: "implementation",
       artifactKinds: ["code"],
       changeCountSummary: "1 code file",
@@ -11244,7 +11392,7 @@ async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability(
           if (action.kind === "push") {
             // Push fails after a successful local commit. Story 3.5 contract:
             // the reviewer-facing local commit history must NOT be rolled back
-            // because of a push failure — the commit envelope/audit must stay.
+            // because of a push failure ??the commit envelope/audit must stay.
             const error = new Error("push rejected by remote");
             error.status = 1;
             error.stderr = "remote: rejected (non-fast-forward)\nTo origin\n";
@@ -11253,10 +11401,10 @@ async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability(
           throw new Error(`unexpected action ${action.kind}`);
         },
         async requestApproval() {
-          /* no-op — runtime would deliver the prompt; assertions read state */
+          /* no-op ??runtime would deliver the prompt; assertions read state */
         },
         async requestRecoveryDecision() {
-          /* no-op — recovery prompt delivery exercised in Story 2.5 tests */
+          /* no-op ??recovery prompt delivery exercised in Story 2.5 tests */
         },
       },
     },
@@ -11287,8 +11435,8 @@ async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability(
   });
 
   const afterPush = store.get("s-35-push-fail");
-  // Push failure rewrites lastGitAction/Result to the push attempt — that is
-  // expected by Story 2.5 — but the commit's git.action.executed audit row
+  // Push failure rewrites lastGitAction/Result to the push attempt ??that is
+  // expected by Story 2.5 ??but the commit's git.action.executed audit row
   // must still exist in the audit log so reviewers can reconstruct
   // "local-finalized, remote-not-finalized" exclusively from standard Git
   // history + audit.
@@ -11312,10 +11460,10 @@ async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability(
   assert.equal(pushExecuted[0].payload.outcome, "failed");
 
   // Story 3.5 sensitive-data guard: the audit payload may carry a sanitized,
-  // collapsed stderrSummary (the classifier already trims to ≤240 chars and
+  // collapsed stderrSummary (the classifier already trims to ??40 chars and
   // collapses whitespace into single spaces) but it must NEVER carry the raw
   // multi-line stderr text or any full remote URL. We scan the serialized
-  // payload for embedded newlines and URL prefixes — both would indicate the
+  // payload for embedded newlines and URL prefixes ??both would indicate the
   // sanitization layer was bypassed.
   const pushPayload = JSON.stringify(pushExecuted[0].payload);
   assert.ok(
@@ -11332,7 +11480,7 @@ async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability(
   const stderrSummary = pushExecuted[0].payload?.details?.stderrSummary;
   assert.ok(
     stderrSummary === null || (typeof stderrSummary === "string" && stderrSummary.length <= 240),
-    "push failure stderrSummary must be either null or a sanitized ≤240-char string",
+    "push failure stderrSummary must be either null or a sanitized ??40-char string",
   );
   assert.equal(runnerCall, 2, "exactly two runner invocations: one commit, one push");
 }
@@ -11366,11 +11514,11 @@ async function verifyStory35RecoveryGateBlocksOnlyFinalizationFollowups() {
     },
   };
 
-  // (a) No gate → finalization is allowed.
+  // (a) No gate ??finalization is allowed.
   const allowed = detectFinalizableOutputs({ ...baseInput });
-  assert.equal(allowed.outcome, "allow", "no recovery gate → finalization must be allowed");
+  assert.equal(allowed.outcome, "allow", "no recovery gate ??finalization must be allowed");
 
-  // (b) Gate with workflow-finalization scope → finalization is blocked.
+  // (b) Gate with workflow-finalization scope ??finalization is blocked.
   const blocked = detectFinalizableOutputs({
     ...baseInput,
     activeRecoveryGate: {
@@ -11387,7 +11535,7 @@ async function verifyStory35RecoveryGateBlocksOnlyFinalizationFollowups() {
   );
 
   // (c) Gate with a non-finalization scope must NOT block finalization (the
-  // gate is unrelated). This is the symmetric guarantee — only the explicit
+  // gate is unrelated). This is the symmetric guarantee ??only the explicit
   // "workflow-finalization" scope is finalization-blocking.
   const unrelated = detectFinalizableOutputs({
     ...baseInput,
@@ -11411,7 +11559,7 @@ async function verifyStory35RecoveryGateBlocksOnlyFinalizationFollowups() {
  * pathScopeSummary must surface the planning-artifact prefix.
  */
 async function verifyStory35PlanningArtifactPathRemainsInScope() {
-  const { buildCommitProposal } = await import(
+  const { buildCommitProposal, buildDirectCommitProposal } = await import(
     `${commitProposalModuleUrl}?s35-planning=${Date.now()}`
   );
 
@@ -11456,7 +11604,7 @@ async function verifyStory35PlanningArtifactPathRemainsInScope() {
 
 
 // =============================================================================
-// Story 4.4 — Build and package release artifacts reliably
+// Story 4.4 ??Build and package release artifacts reliably
 // =============================================================================
 //
 // These contract-level assertions lock the release packaging invariants
@@ -11493,7 +11641,7 @@ function story44GenerateFixtureRelease(label) {
   assert.equal(
     fs.existsSync(bundlePath),
     true,
-    `story44GenerateFixtureRelease[${label}]: dist/devai-aidd-plugin.js missing — run \`npm run build\` before \`npm test\``,
+    `story44GenerateFixtureRelease[${label}]: dist/devai-aidd-plugin.js missing ??run \`npm run build\` before \`npm test\``,
   );
 
   const tempReleaseRoot = fs.mkdtempSync(
@@ -11537,7 +11685,7 @@ function story44ParseChecksumsPwsh(text, name) {
   // Story 4.4 R2 MEDIUM-3: applying the explicit `, 2` limit so this mirror
   // matches PowerShell's `-split "\s{2,}", 2` exactly. Without the limit the
   // JS mirror would over-split file names that contain double-spaces, while
-  // PowerShell would stop at the first boundary — divergent behavior would
+  // PowerShell would stop at the first boundary ??divergent behavior would
   // silently weaken the contract assertion below.
   for (const rawLine of text.split(/\r?\n/)) {
     if (!rawLine.trim()) continue;
@@ -11661,7 +11809,7 @@ async function verifyStory44ReleaseManifestCompleteness() {
 
     // Cross-mirror: latest and versioned manifests must agree per-file on
     // sha256 of published files. (manifest.json itself is NOT in manifest.files
-    // — its hash lives in checksums.txt only; see CRITICAL-1 fix below.)
+    // ??its hash lives in checksums.txt only; see CRITICAL-1 fix below.)
     const versionByName = new Map(versionManifest.files.map((entry) => [entry.name, entry]));
     for (const latestEntry of latestManifest.files) {
       const versionEntry = versionByName.get(latestEntry.name);
@@ -11772,12 +11920,12 @@ async function verifyStory44ReleaseChecksumLinesMatchInstallerParsers() {
         assert.equal(
           pwshHash,
           onDiskHash,
-          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} ${name} — PowerShell installer would fail integrity check; checksums line=${pwshHash}, on-disk=${onDiskHash}`,
+          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} ${name} ??PowerShell installer would fail integrity check; checksums line=${pwshHash}, on-disk=${onDiskHash}`,
         );
         assert.equal(
           awkHash,
           onDiskHash,
-          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} ${name} — bash installer would fail integrity check; checksums line=${awkHash}, on-disk=${onDiskHash}`,
+          `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} ${name} ??bash installer would fail integrity check; checksums line=${awkHash}, on-disk=${onDiskHash}`,
         );
       }
 
@@ -11808,7 +11956,7 @@ async function verifyStory44ReleaseChecksumLinesMatchInstallerParsers() {
  *
  * Note: `manifest.json` is NOT byte-identical between `latest/` and
  * `versions/<version>/` because each is generated with its own
- * `generatedAt` timestamp. That is by design — checksums.txt in each
+ * `generatedAt` timestamp. That is by design ??checksums.txt in each
  * directory references its own manifest's hash, so the installer integrity
  * check is closed within a single download root. This regression
  * therefore mirrors only the 8 published files.
@@ -12033,7 +12181,7 @@ async function verifyStory44ReleaseMissingBundleEmitsBuildHint() {
 }
 
 // =============================================================================
-// Story 4.5 — wrapper/built regression gate
+// Story 4.5 ??wrapper/built regression gate
 // =============================================================================
 //
 // These assertions lock the persistent quality gate that Story 4.5 promised:
@@ -12052,7 +12200,7 @@ async function verifyStory44ReleaseMissingBundleEmitsBuildHint() {
 //
 // Naming convention: `verifyStory45<Behavior>()`. Each new invariant must
 // register one verifier function and one `main().then(() => ...)` line at the
-// chain tail, mirroring the Story 1.x → Story 4.4 cumulative pattern.
+// chain tail, mirroring the Story 1.x ??Story 4.4 cumulative pattern.
 
 async function story45InstantiatePair() {
   const wrapperModule = await import(wrapperModuleUrl);
@@ -12135,7 +12283,7 @@ async function verifyStory45WrapperBuiltHandlerShapesMatch() {
 }
 
 /**
- * Story 4.5: assert wrapper↔built parity for `command.execute.before` parts
+ * Story 4.5: assert wrapper?봟uilt parity for `command.execute.before` parts
  * normalization so future bundle drift surfaces in one place.
  */
 async function verifyStory45WrapperBuiltCommandPromptParity() {
@@ -12166,7 +12314,7 @@ async function verifyStory45WrapperBuiltCommandPromptParity() {
  * across legacy/wrapper/built.
  *
  * Story 4.5 R2 (M-2 mitigation): added the "non-workflow command issued"
- * negative path for all three variants — previous implementation only
+ * negative path for all three variants ??previous implementation only
  * exercised the "no command" sub-case which is a strict subset. Story 4.5
  * R2 (M-3 mitigation): unique sessionIDs per trio so positive vs negative
  * trios cannot cross-contaminate even if a future refactor introduces
@@ -12203,7 +12351,7 @@ async function verifyStory45WrapperBuiltMutatingToolPassThroughParity() {
       );
     }
 
-    // ── Negative cases: must remain silent on both wrapper and built ──
+    // ?? Negative cases: must remain silent on both wrapper and built ??
     const wrapperMod = await import(wrapperModuleUrl);
     const builtMod = await import(`${builtModuleUrl}?t=${Date.now()}`);
     const createdWorkspaces = [];
@@ -12321,7 +12469,7 @@ async function verifyStory45BuiltArtifactExportContract() {
  * approval prompt before deepEqual-ing the summaries. Without this, both
  * sides could degenerate to `[]` (e.g. a future approval-policy regression
  * that silently disables prompt emission) and the parity check would pass
- * vacuously — the very drift this verifier exists to catch.
+ * vacuously ??the very drift this verifier exists to catch.
  */
 async function verifyStory45BuiltArtifactPromptParityWithWrapper() {
   const trio = await story45InstantiatePair();
@@ -12341,7 +12489,7 @@ async function verifyStory45BuiltArtifactPromptParityWithWrapper() {
     // the deepEqual below would pass vacuously.
     assert.ok(
       wrapperPrompts.length >= 1,
-      `verifyStory45BuiltArtifactPromptParityWithWrapper: wrapper must publish at least one approval prompt for /bmad-bmm-quick-dev; got 0 — the deepEqual parity check would pass vacuously without this guard`,
+      `verifyStory45BuiltArtifactPromptParityWithWrapper: wrapper must publish at least one approval prompt for /bmad-bmm-quick-dev; got 0 ??the deepEqual parity check would pass vacuously without this guard`,
     );
     assert.ok(
       builtPrompts.length >= 1,
@@ -12359,14 +12507,14 @@ async function verifyStory45BuiltArtifactPromptParityWithWrapper() {
 
 /**
  * Story 4.5: when the built artifact is absent, the regression gate must
- * abort with a clear message — silent skip is forbidden. This is a meta-guard
+ * abort with a clear message ??silent skip is forbidden. This is a meta-guard
  * for the actual `verifyBuiltArtifactExists()` function defined at the top
  * of this file; the production `dist/devai-aidd-plugin.js` is never touched.
  *
  * Story 4.5 R2 (H-1 mitigation): the original implementation called
  * `assert.equal(false, true, "<MESSAGE>")` directly and verified that the
  * AssertionError contained the literal string the verifier itself just
- * passed in — a tautology that would pass even if `verifyBuiltArtifactExists`
+ * passed in ??a tautology that would pass even if `verifyBuiltArtifactExists`
  * were deleted from the file. The new implementation actually invokes
  * `verifyBuiltArtifactExists()` with an injected `existsSyncFn` returning
  * `false` against a fixture path AND a positive control invocation
@@ -12374,18 +12522,18 @@ async function verifyStory45BuiltArtifactPromptParityWithWrapper() {
  * its error message will trip a real regression assertion.
  *
  * Defenses against drift:
- *   1. Negative path — call `verifyBuiltArtifactExists({ existsSyncFn: () => false, builtPath: <fixture> })`,
+ *   1. Negative path ??call `verifyBuiltArtifactExists({ existsSyncFn: () => false, builtPath: <fixture> })`,
  *      assert it throws, assert the message names the dist path AND the
  *      `npm run build` hint.
- *   2. Positive control — call `verifyBuiltArtifactExists({ existsSyncFn: () => true, builtPath: <fixture> })`,
+ *   2. Positive control ??call `verifyBuiltArtifactExists({ existsSyncFn: () => true, builtPath: <fixture> })`,
  *      assert it does NOT throw. Catches a regression where the gate
  *      always-throws (which would silently break `main()` from any error
  *      surface other than missing-dist).
- *   3. Source contract — `verifyBuiltArtifactExists.toString()` must
+ *   3. Source contract ??`verifyBuiltArtifactExists.toString()` must
  *      reference `assert.equal`, `existsSync`, and the literal error
  *      tokens. Catches a refactor that hollows the function body to a
  *      `return` while preserving the import/call surface.
- *   4. No side effects — fixture dist path stays un-created.
+ *   4. No side effects ??fixture dist path stays un-created.
  */
 async function verifyStory45RegressionGateAbortsWithoutBuiltArtifact() {
   const tempRoot = fs.mkdtempSync(
@@ -12394,7 +12542,7 @@ async function verifyStory45RegressionGateAbortsWithoutBuiltArtifact() {
   try {
     const fixtureDist = path.join(tempRoot, "dist", "devai-aidd-plugin.js");
 
-    // 1. Negative path — exercise the actual `verifyBuiltArtifactExists`
+    // 1. Negative path ??exercise the actual `verifyBuiltArtifactExists`
     //    function via dependency injection, simulating a missing dist.
     let threw = null;
     try {
@@ -12420,7 +12568,7 @@ async function verifyStory45RegressionGateAbortsWithoutBuiltArtifact() {
       `verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() error must include the \`npm run build\` hint; got: ${threw.message}`,
     );
 
-    // 2. Positive control — the gate must NOT throw when existsSync returns
+    // 2. Positive control ??the gate must NOT throw when existsSync returns
     //    true. This catches a regression where the gate always-throws.
     let positiveErr = null;
     try {
@@ -12437,30 +12585,30 @@ async function verifyStory45RegressionGateAbortsWithoutBuiltArtifact() {
       `verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must NOT throw when the bundle is present; got: ${positiveErr?.message}`,
     );
 
-    // 3. Source contract — defend against a hollowed-body refactor.
+    // 3. Source contract ??defend against a hollowed-body refactor.
     const source = verifyBuiltArtifactExists.toString();
     assert.match(
       source,
       /assert\.equal/,
-      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must use assert.equal — body refactored away from the gate",
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must use assert.equal ??body refactored away from the gate",
     );
     assert.match(
       source,
       /existsSync/,
-      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must call an existsSync to check the bundle — body refactored away from the gate",
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must call an existsSync to check the bundle ??body refactored away from the gate",
     );
     assert.match(
       source,
       /missing dist\/devai-aidd-plugin\.js/,
-      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must contain the literal `missing dist/devai-aidd-plugin.js` hint — message rewritten without coordinated update",
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must contain the literal `missing dist/devai-aidd-plugin.js` hint ??message rewritten without coordinated update",
     );
     assert.match(
       source,
       /npm run build/,
-      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must contain the literal `npm run build` hint — message rewritten without coordinated update",
+      "verifyStory45RegressionGateAbortsWithoutBuiltArtifact: verifyBuiltArtifactExists() must contain the literal `npm run build` hint ??message rewritten without coordinated update",
     );
 
-    // 4. No side effects — fixture dist path stayed un-created.
+    // 4. No side effects ??fixture dist path stayed un-created.
     assert.equal(
       fs.existsSync(fixtureDist),
       false,
@@ -12489,11 +12637,11 @@ async function verifyStory45RegressionGateAbortsWithoutBuiltArtifact() {
  * emissions` parenthetical anchor. The error-path emission
  * (`audit.error("plugin bootstrap failed", ...)` on the catch branch) is
  * documented separately in the JSDoc header and is NOT covered by this
- * verifier — it is *not* a "best-effort" emission (it is the canonical
+ * verifier ??it is *not* a "best-effort" emission (it is the canonical
  * failure-mode signal). If a future story adds `audit.warn(...)` or moves
  * `plugin bootstrap` to `audit.error`, that contract change must be
  * coordinated with this verifier explicitly (extend the regex AND the
- * JSDoc anchor name) — silent introduction must trip a new assertion.
+ * JSDoc anchor name) ??silent introduction must trip a new assertion.
  */
 async function verifyStory45SrcIndexAuditEventListMatchesEmissions() {
   const indexPath = path.join(projectRoot, "src", "index.js");
@@ -12547,7 +12695,7 @@ async function verifyStory45SrcIndexAuditEventListMatchesEmissions() {
 }
 
 // =============================================================================
-// BREAKING CHANGE — legacy compatibility removal verifiers (AC1~AC8, AC13~AC15)
+// BREAKING CHANGE ??legacy compatibility removal verifiers (AC1~AC8, AC13~AC15)
 // =============================================================================
 
 function buildLegacyRemovalFsAdapter(homedirPath) {
@@ -12667,7 +12815,7 @@ async function verifyLegacyFilesIgnored() {
     assert.deepEqual(
       experimentResult.config,
       controlResult.config,
-      "verifyLegacyFilesIgnored: experiment config (with legacy files) must deepEqual control config (modern only) — legacy files must be ignored",
+      "verifyLegacyFilesIgnored: experiment config (with legacy files) must deepEqual control config (modern only) ??legacy files must be ignored",
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -13038,7 +13186,7 @@ async function verifyBashGitBlockMessagePreserved() {
 /**
  * strengthen-git-init-proposal AC1b: when the working directory is not a git
  * repository, the block fires even without a workflow session (race-safe path
- * — F2/F3). pluginContext.directory drives the `.git` existence check.
+ * ??F2/F3). pluginContext.directory drives the `.git` existence check.
  */
 async function verifyBashGitBlockFiresWithoutWorkflowSession() {
   const toolBeforeModuleUrl = pathToFileURL(
@@ -13084,7 +13232,7 @@ async function verifyBashGitBlockSkippedInGitRepo() {
 
   const store = createWorkflowStateStore();
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-real-git-"));
-  fs.mkdirSync(path.join(repoDir, ".git")); // synthetic — only existsSync is checked
+  fs.mkdirSync(path.join(repoDir, ".git")); // synthetic ??only existsSync is checked
   try {
     const hook = mod.createToolExecuteBeforeHook({
       workflowState: store,
@@ -13115,9 +13263,9 @@ async function verifyBashNonGitNotBlockedDuringInitPending() {
     workflowState: store,
     pluginContext: { directory: "/no/such/path" },
   });
-  // ls is not git — must pass.
+  // ls is not git ??must pass.
   await hook({ sessionID, tool: "bash", args: { command: "ls -la" } });
-  // digit is not git — must pass.
+  // digit is not git ??must pass.
   await hook({ sessionID, tool: "bash", args: { command: "echo digit gitea" } });
 }
 
@@ -13270,7 +13418,7 @@ async function verifySessionDeletedClearsState() {
 }
 
 // =============================================================================
-// Native event contract — opencode native plugin (.opencode/plugins) entrypoint
+// Native event contract ??opencode native plugin (.opencode/plugins) entrypoint
 // =============================================================================
 //
 // The native event router replaces the legacy `command.execute.before` /
@@ -13282,12 +13430,12 @@ async function verifySessionDeletedClearsState() {
 // recovery, and clear session state. The two assertions below pin the new
 // contract:
 //
-// 1. `verifyNativeEventHandlerExists` — the bootstrap must expose a callable
+// 1. `verifyNativeEventHandlerExists` ??the bootstrap must expose a callable
 //    `event` handler that accepts the native payload envelope (`{ event:
 //    { type, properties } }`) without throwing on malformed inputs.
-// 2. `verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks` — a full
+// 2. `verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks` ??a full
 //    init approval flow driven exclusively through native events (`command.
-//    executed` → `question.asked` → `question.replied`) must produce the
+//    executed` ??`question.asked` ??`question.replied`) must produce the
 //    same approval.requested/resolved audit chain as the legacy path.
 
 async function verifyNativeEventHandlerExists() {
@@ -13337,7 +13485,7 @@ async function verifyNativeQuestionFlowResolvesApprovalWithoutLegacyHooks() {
     });
     const sessionID = "native-event-flow";
 
-    // Drive the entire flow through `handlers.event` only — never call
+    // Drive the entire flow through `handlers.event` only ??never call
     // `command.execute.before` / `permission.asked` / `file.edited`.
     await handlers.event({
       event: {
@@ -13593,7 +13741,7 @@ main()
   .then(() => verifyPermissionAskedHookInjectsReasonCode())
   // Story 2.3 second review fix (LOW)
   .then(() => verifyPermissionAskedHookIgnoresGenericActionField())
-  // Story 2.4 — detect and report Git conflicts and execution failures
+  // Story 2.4 ??detect and report Git conflicts and execution failures
   .then(() => verifyClassifyGitExecutionFailureContract())
   .then(() => verifyGitExecutorEnvelopeShape())
   .then(() => verifyGitExecutorPreflightShortCircuit())
@@ -13602,7 +13750,7 @@ main()
   .then(() => verifyGitExecutorAuditEventPayload())
   .then(() => verifyWorkflowStateExecutionMirror())
   .then(() => verifyCommitAndPushServicesSurfaceEnvelopes())
-  // Story 2.5 — recovery paths without failing the workflow
+  // Story 2.5 ??recovery paths without failing the workflow
   .then(() => verifyRecoveryStateMachineContracts())
   .then(() => verifyClassifyRecoveryContracts())
   .then(() => verifyRecoveryOptionsContracts())
@@ -13623,13 +13771,13 @@ main()
   .then(() => verifyTerminalContinuationPhaseReleasesGate())
   // Story 2.5 review round 3 fixes
   .then(() => verifyPermissionAskedAliasDisjointness())
-  // Story 3.1 — detect finalizable workflow outputs
-  // (verifyFileEditedTracksTouchedFilesAndSessionCleanup removed — the
+  // Story 3.1 ??detect finalizable workflow outputs
+  // (verifyFileEditedTracksTouchedFilesAndSessionCleanup removed ??the
   //  file.edited hook was deleted when finalization switched to a single
   //  git-status source.)
   .then(() => verifyDetectFinalizableOutputs())
   .then(() => verifyToolExecuteAfterFinishEvaluatesFinalization())
-  // Story 3.2 — prepare and execute workflow completion commits
+  // Story 3.2 ??prepare and execute workflow completion commits
   .then(() => verifyToolExecuteAfterFinishPublishesCommitApproval())
   .then(() => verifyPermissionAskedAcceptExecutesCommitProposal())
   .then(() => verifyPermissionAskedCommitFailureOpensRecovery())
@@ -13639,6 +13787,8 @@ main()
   .then(() => verifyPermissionAskedPushFailureOpensRecovery())
   // Story 3.2 review follow-up coverage
   .then(() => verifyBuildCommitArgsScopesPathspecToProposal())
+  .then(() => verifyBuildGitFailureDiagnosticsPreservesRawEvidence())
+  .then(() => verifyRunGitCommandLogsRawFailureEvidence())
   .then(() => verifyRunGitActionRejectsStagedFilesOutsideProposal())
   .then(() => verifyRunGitActionStagesAndCommitsDeletedFiles())
   .then(() => verifyRunGitActionHandlesWhitespaceAndQuotedPaths())
@@ -13656,14 +13806,14 @@ main()
   .then(() => verifySingletonArtifactPolicyRejectsOutOfScopeFiles())
   .then(() => verifyNormalizeTrackedFilePathRejectsOutOfRepoAbsolutePath())
   .then(() => verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace())
-  // Story 3.4 — record approval outcomes and execution results for audit
+  // Story 3.4 ??record approval outcomes and execution results for audit
   .then(() => verifyStory34ApprovalRequestedCarriesCorrelationAxes())
   .then(() => verifyStory34ApprovalResolvedAndSkippedCarryCorrelationAxes())
   .then(() => verifyStory34GitActionExecutedCarriesCorrelationAxes())
   .then(() => verifyStory34GitExecutorEnvelopeSurvivesAuditThrow())
   .then(() => verifyStory34CommitSuccessThenPushDenyPreservesAuditChain())
   .then(() => verifyStory34BootstrapAuditFailureDoesNotAbortRegistration())
-  // Story 3.5 — preserve reviewer traceability through standard Git history
+  // Story 3.5 ??preserve reviewer traceability through standard Git history
   .then(() => verifyStory35CommitProposalCodeOnlyScope())
   .then(() => verifyStory35CommitProposalDocsOnlyScope())
   .then(() => verifyStory35CommitProposalMixedScope())
@@ -13671,20 +13821,20 @@ main()
   .then(() => verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability())
   .then(() => verifyStory35RecoveryGateBlocksOnlyFinalizationFollowups())
   .then(() => verifyStory35PlanningArtifactPathRemainsInScope())
-  // Story 4.1 — define and normalize branch and workflow policy configuration
+  // Story 4.1 ??define and normalize branch and workflow policy configuration
   .then(() => verifyEffectiveConfigNormalizationContract())
   .then(() => verifyMissingOptionalValuesFallback())
   .then(() => verifyWorkflowPolicyVocabularySchema())
   .then(() => verifyEffectivePolicyDeterminism())
   .then(() => verifyLatestPolicyChangesReflectedAcrossRuns())
-  // Story 4.4 — build and package release artifacts reliably
+  // Story 4.4 ??build and package release artifacts reliably
   .then(() => verifyStory44ReleaseManifestCompleteness())
   .then(() => verifyStory44ReleaseChecksumLinesMatchInstallerParsers())
   .then(() => verifyStory44LatestAndVersionedDirsMirrored())
   .then(() => verifyStory44ReleaseMissingSourceFails())
   // Story 4.4 R2 LOW-1: multi-missing + bundle hint
   .then(() => verifyStory44ReleaseMissingBundleEmitsBuildHint())
-  // Story 4.5 — wrapper/built regression gate
+  // Story 4.5 ??wrapper/built regression gate
   .then(() => verifyStory45WrapperBuiltHandlerShapesMatch())
   .then(() => verifyStory45WrapperBuiltCommandPromptParity())
   .then(() => verifyStory45WrapperBuiltMutatingToolPassThroughParity())
@@ -13692,7 +13842,7 @@ main()
   .then(() => verifyStory45BuiltArtifactPromptParityWithWrapper())
   .then(() => verifyStory45RegressionGateAbortsWithoutBuiltArtifact())
   .then(() => verifyStory45SrcIndexAuditEventListMatchesEmissions())
-  // BREAKING CHANGE — legacy compatibility removal (AC1~AC8, AC13~AC15)
+  // BREAKING CHANGE ??legacy compatibility removal (AC1~AC8, AC13~AC15)
   .then(() => verifySourcesShapeIsExactlyTwoBooleans())
   .then(() => verifyLegacyFilesIgnored())
   .then(() => verifyBridgeFilesNeverCreated())
@@ -13702,7 +13852,7 @@ main()
   .then(() => verifyStartInstructionTextSimplified())
   .then(() => verifyMutatingToolBeforeAllowsAndAdvancesPhase())
   .then(() => verifyMutatingToolLayer0StillWins())
-  // strengthen-git-init-proposal — bash+git block contract
+  // strengthen-git-init-proposal ??bash+git block contract
   .then(() => verifyBashGitBlockMessagePreserved())
   .then(() => verifyBashGitBlockFiresWithoutWorkflowSession())
   .then(() => verifyBashGitBlockSkippedInGitRepo())
@@ -13711,7 +13861,7 @@ main()
   .then(() => verifyToolExecuteBeforeReceivesPluginContext())
   .then(() => verifyMutatingToolAdvancesPhase())
   .then(() => verifySessionDeletedClearsState())
-  // Native event contract — opencode native plugin (.opencode/plugins)
+  // Native event contract ??opencode native plugin (.opencode/plugins)
   .then(() => verifyNativeEventHandlerExists())
   .then(() => verifyStartupChainRegressionContracts())
   .then(() => verifyStartupChainReadinessSkipContracts())
@@ -13719,9 +13869,9 @@ main()
   .then(() => verifyUnavailableReadinessPreservesKnownGoodState())
   .then(() => verifyEffectiveCurrentBranchFallbackContracts())
   .then(() => verifyStartupChainRefreshUnavailablePreservesReadyState())
-  // strengthen-approval-prompt-instructions — promptAsync instruction strengthening
+  // strengthen-approval-prompt-instructions ??promptAsync instruction strengthening
   .then(() => verifyQuestionInstructionBuilderContract())
-  // question-header guard — force model to use the exact header we staged
+  // question-header guard ??force model to use the exact header we staged
   .then(() => verifyQuestionHeaderGuardMatchesActiveApproval())
   .then(() => verifyCommandExecuteBeforeReadinessGateOverwrite())
   .catch((error) => {
@@ -13877,7 +14027,7 @@ async function verifyQuestionInstructionBuilderContract() {
  * When an approval is pending (workflowState.approvalCurrent set) and the
  * model calls the native `question` tool, the tool args MUST carry the same
  * header the builder produces for that approval. If the model paraphrases
- * (observed in production: "Initialize Git" -> "초기화 확인"), the hook
+ * (observed in production: "Initialize Git" -> "珥덇린???뺤씤"), the hook
  * throws and forces a retry. We verify both the throw path and the
  * pass-through path here.
  */
@@ -13912,7 +14062,7 @@ async function verifyQuestionHeaderGuardMatchesActiveApproval() {
   });
 
   // pluginContext.directory points to a real path (existsSync(".git") may be
-  // true or false — irrelevant for this layer since `question` is the tool).
+  // true or false ??irrelevant for this layer since `question` is the tool).
   const hook = createToolExecuteBeforeHook({
     workflowState,
     pluginContext: { directory: projectRoot },
@@ -13924,7 +14074,7 @@ async function verifyQuestionHeaderGuardMatchesActiveApproval() {
     await hook({
       tool: "question",
       sessionID,
-      args: { header: "초기화 확인", options: ["이대로 진행", "추가 문서 있음"] },
+      args: { header: "珥덇린???뺤씤", options: ["?대?濡?吏꾪뻾", "異붽? 臾몄꽌 ?덉쓬"] },
     });
   } catch (error) {
     thrown = error;
@@ -14032,3 +14182,5 @@ async function verifyQuestionHeaderGuardMatchesActiveApproval() {
 
   console.log("verifyQuestionHeaderGuardMatchesActiveApproval OK");
 }
+
+

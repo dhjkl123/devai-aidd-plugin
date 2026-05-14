@@ -84,6 +84,8 @@ function normalizeAction(plan, approval) {
     approvedAt: toNullableString(approval?.resolvedAt) ?? toNullableString(approval?.approvedAt),
     message: toNullableString(plan?.message),
     files: Array.isArray(plan?.files) ? [...plan.files] : [],
+    allFiles: plan?.allFiles === true,
+    allowEmpty: plan?.allowEmpty === true,
   };
 }
 
@@ -358,7 +360,18 @@ export async function executeGitAction(params = {}) {
   let runnerError;
   if (typeof gitRunner === "function") {
     try {
-      runnerResult = await gitRunner({ action });
+      runnerResult = await gitRunner({
+        action,
+        trace: {
+          hook: "git-executor",
+          stage: `execute-${action.kind || "unknown"}`,
+          sessionID: workflowContext?.sessionID ?? null,
+          workflow: workflowContext?.commandName ?? null,
+          phase: workflowContext?.phase ?? null,
+          finalizationMode: workflowContext?.finalizationMode ?? null,
+          correlationId: action?.correlationId ?? null,
+        },
+      });
     } catch (error) {
       runnerError = error;
     }

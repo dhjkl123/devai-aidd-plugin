@@ -17,9 +17,7 @@ function formatCount(count, label) {
 export function summarizeChangeCount(files = []) {
   const counts = new Map();
   for (const file of Array.isArray(files) ? files : []) {
-    if (!file?.kind) {
-      continue;
-    }
+    if (!file?.kind) continue;
     counts.set(file.kind, (counts.get(file.kind) || 0) + 1);
   }
 
@@ -30,16 +28,16 @@ export function summarizeChangeCount(files = []) {
   return ordered.length > 0 ? ordered.join(", ") : "0 files";
 }
 
-function buildCommitMessage(workflowContext, artifactScope) {
+export function buildSuggestedCommitMessage(workflowContext, artifactScope) {
   const workflowName =
     typeof workflowContext?.commandName === "string" && workflowContext.commandName.length > 0
       ? workflowContext.commandName
-      : "워크플로우";
+      : "?�크?�로??";
   const scope =
     typeof artifactScope === "string" && artifactScope.length > 0
       ? artifactScope
-      : "워크플로우";
-  return `워크플로우 완료(${workflowName}): ${scope} 산출물 업데이트`;
+      : "?�크?�로??";
+  return `?�크?�로???�료(${workflowName}): ${scope} ?�출�??�데?�트`;
 }
 
 function generateAttemptToken() {
@@ -50,16 +48,33 @@ function generateAttemptToken() {
   }
 }
 
-function buildCorrelationId(workflowContext, matchedFiles) {
-  // The UUID token disambiguates separate proposal generations (e.g. two
-  // finish evaluations on the same session/file count). Within a single
-  // proposal lifecycle, retries reuse the stored correlationId on purpose so
-  // audit consumers can trace all execution attempts back to one proposal.
+function buildCorrelationId(workflowContext, files, prefix = "commit") {
   const sessionID =
     typeof workflowContext?.sessionID === "string" && workflowContext.sessionID.length > 0
       ? workflowContext.sessionID
       : "workflow";
-  return `commit:${sessionID}:${matchedFiles.length}:${generateAttemptToken()}`;
+  return `${prefix}:${sessionID}:${files.length}:${generateAttemptToken()}`;
+}
+
+function buildProposalBase({
+  workflowContext = null,
+  artifactScope = "workflow",
+  files = [],
+  allFiles = false,
+  correlationPrefix = "commit",
+} = {}) {
+  return {
+    kind: "commit",
+    action: "commit",
+    message: buildSuggestedCommitMessage(workflowContext, artifactScope),
+    artifactScope,
+    artifactKinds: summarizeArtifactKinds(files),
+    changeCountSummary: summarizeChangeCount(files),
+    pathScopeSummary: summarizePathScope(files),
+    files: files.map((entry) => entry.path),
+    allFiles,
+    correlationId: buildCorrelationId(workflowContext, files, correlationPrefix),
+  };
 }
 
 export function buildCommitProposal({
@@ -73,7 +88,11 @@ export function buildCommitProposal({
     : [];
   const shouldProposeCommit = finalizationAssessment?.details?.shouldProposeCommit === true;
 
-  if (finalizationAssessment?.outcome !== "allow" || !shouldProposeCommit || matchedFiles.length === 0) {
+  if (
+    finalizationAssessment?.outcome !== "allow" ||
+    !shouldProposeCommit ||
+    matchedFiles.length === 0
+  ) {
     return null;
   }
 
@@ -82,21 +101,30 @@ export function buildCommitProposal({
       ? finalizationAssessment.details.artifactScope
       : workflowPolicy?.category || "workflow";
 
-  return {
-    kind: "commit",
-    action: "commit",
-    message: buildCommitMessage(workflowContext, artifactScope),
+  return buildProposalBase({
+    workflowContext,
     artifactScope,
-    artifactKinds: summarizeArtifactKinds(matchedFiles),
-    changeCountSummary: summarizeChangeCount(matchedFiles),
-    // Story 3.5: pathScopeSummary surfaces a reviewer-friendly path-bucket
-    // summary so the approval prompt and audit metadata can describe the
-    // commit scope using prefixes the reviewer can paste into
-    // `git log -- <prefix>`. The full `files` list stays inside the proposal
-    // for git pathspec assembly only — basenames never reach the approval
-    // explanation or audit payload.
-    pathScopeSummary: summarizePathScope(matchedFiles),
-    files: matchedFiles.map((entry) => entry.path),
-    correlationId: buildCorrelationId(workflowContext, matchedFiles),
-  };
+    files: matchedFiles,
+    allFiles: false,
+  });
 }
+
+export function buildDirectCommitProposal({
+  workflowContext = null,
+  workflowPolicy = null,
+  changedFiles = [],
+} = {}) {
+  const files = Array.isArray(changedFiles) ? changedFiles.filter(Boolean) : [];
+  if (files.length === 0) {
+    return null;
+  }
+
+  return buildProposalBase({
+    workflowContext,
+    artifactScope: workflowPolicy?.category || "workflow",
+    files,
+    allFiles: true,
+    correlationPrefix: "commit-all",
+  });
+}
+

@@ -79,6 +79,48 @@ function directoryIsGitRepo(directory) {
   }
 }
 
+function normalizeShellCommand(command) {
+  return typeof command === "string" ? command.trim() : "";
+}
+
+function hasQuotedCommitMessage(command, message) {
+  if (typeof command !== "string" || typeof message !== "string" || message.length === 0) {
+    return false;
+  }
+  const escapedDouble = message.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const escapedSingle = message.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return (
+    command.includes(`-m "${escapedDouble}"`) ||
+    command.includes(`--message "${escapedDouble}"`) ||
+    command.includes(`-m '${escapedSingle}'`) ||
+    command.includes(`--message '${escapedSingle}'`)
+  );
+}
+
+function isScopedDelegatedFinalizationCommand(command, delegatedFinalization) {
+  if (delegatedFinalization?.stage !== "awaiting-commit") {
+    return false;
+  }
+  const raw = normalizeShellCommand(command);
+  if (raw.length === 0) return false;
+  if (!/\bgit\s+commit\b/i.test(raw)) return false;
+  if (!hasQuotedCommitMessage(raw, delegatedFinalization.commitMessage)) return false;
+  const gitCommands = raw.match(/\bgit\s+/gi) ?? [];
+  if (gitCommands.length > 2) return false;
+  if (gitCommands.length === 2 && !/\bgit\s+add\b/i.test(raw)) return false;
+  return true;
+}
+
+function buildDelegatedFinalizationBlockMessage(delegatedFinalization) {
+  const message = delegatedFinalization?.commitMessage ?? "";
+  return (
+    "Git workflow guard: delegated finalization is active. " +
+    "Only the scoped final commit path is allowed right now. " +
+    `Run a git commit that uses the exact suggested message \`${message}\`, ` +
+    "or complete the skip branch if the user chose Skip."
+  );
+}
+
 export function createToolExecuteBeforeHook({
   workflowState,
   pluginContext,
@@ -213,6 +255,13 @@ export function createToolExecuteBeforeHook({
     // wins over Layer 0's generic approval-pending block.
     if (input?.tool === "bash" && looksLikeGitCommand(toolArgs?.command)) {
       const state = workflowState?.get?.(input?.sessionID);
+      const delegatedFinalization = state?.delegatedFinalization ?? null;
+      if (delegatedFinalization) {
+        if (isScopedDelegatedFinalizationCommand(toolArgs?.command, delegatedFinalization)) {
+          return;
+        }
+        throw new Error(buildDelegatedFinalizationBlockMessage(delegatedFinalization));
+      }
       // When the user has explicitly opted out of git automation for this
       // session — by picking Skip OR a freeform answer on the Initialize Git
       // prompt, or by skipping the baseline commit — we must NOT keep
@@ -244,6 +293,15 @@ export function createToolExecuteBeforeHook({
     // on the promptAsync prompt landing twice.
     if (input?.tool !== "question") {
       const state = workflowState?.get?.(input?.sessionID);
+      const delegatedFinalization = state?.delegatedFinalization ?? null;
+      if (delegatedFinalization?.stage === "awaiting-commit") {
+        const allowedScopedCommit =
+          input?.tool === "bash" &&
+          isScopedDelegatedFinalizationCommand(toolArgs?.command, delegatedFinalization);
+        if (!allowedScopedCommit) {
+          throw new Error(buildDelegatedFinalizationBlockMessage(delegatedFinalization));
+        }
+      }
       const active = state?.approvalCurrent;
       if (active && state?.pendingApprovalQuestion == null) {
         let pendingInstruction = null;
@@ -302,6 +360,22 @@ export function createToolExecuteBeforeHook({
       // workflow action; blocking it would prevent finalization detection.
       const sentinelHeaderFromArgs = readQuestionToolHeader(toolArgs);
       if (sentinelHeaderFromArgs === FINALIZATION_SENTINEL_HEADER) {
+        const state = workflowState?.get?.(input?.sessionID) ?? null;
+        if (!directoryIsGitRepo(pluginContext?.directory)) {
+          pluginContext?.debug?.log?.(
+            "tool-execute-before",
+            "sentinel blocked because repository is not initialized",
+            {
+              sessionID: input?.sessionID,
+              readinessOutcome: state?.readiness?.outcome ?? null,
+              readinessReason: state?.readiness?.reason ?? null,
+              isGitRepository: state?.readiness?.details?.isGitRepository ?? null,
+            },
+          );
+          throw new Error(
+            "Git workflow guard: do not call the workflow finalization question in a non-git workspace. The plugin only allows finalization commit/skip questions after repository readiness confirms `isGitRepository === true`.",
+          );
+        }
         pluginContext?.debug?.log?.(
           "tool-execute-before",
           "sentinel header passthrough",
