@@ -26,7 +26,6 @@ import { createCommandExecuteBeforeHook } from "./hooks/command-execute-before.j
 import { createToolExecuteBeforeHook } from "./hooks/tool-execute-before.js";
 import { createToolExecuteAfterHook } from "./hooks/tool-execute-after.js";
 import { createPermissionAskedHook } from "./hooks/permission-asked.js";
-import { createFileEditedHook } from "./hooks/file-edited.js";
 import { createNativeEventHook } from "./hooks/native-event.js";
 import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-policy.js";
 import { runGitAction, runGitCommand } from "./services/git/run-git-command.js";
@@ -444,7 +443,6 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         audit,
         pluginContext,
       }),
-      "file.edited": createFileEditedHook({ workflowState, pluginContext }),
       // Native event router. `command.executed` delegates to the legacy
       // command-execute-before factory to reuse workflow detection /
       // readiness / branch / init planning. `session.deleted` still clears

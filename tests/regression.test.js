@@ -26,9 +26,6 @@ const toolExecuteBeforeModuleUrl = pathToFileURL(
 const permissionAskedHookModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "hooks", "permission-asked.js"),
 ).href;
-const fileEditedHookModuleUrl = pathToFileURL(
-  path.join(projectRoot, "src", "hooks", "file-edited.js"),
-).href;
 const loadConfigModuleUrl = pathToFileURL(
   path.join(projectRoot, "src", "config", "load-config.js"),
 ).href;
@@ -456,17 +453,6 @@ async function runPermissionAsked(handlers) {
   });
 }
 
-async function runFileEdited(handlers) {
-  if (typeof handlers["file.edited"] !== "function") {
-    return undefined;
-  }
-
-  return handlers["file.edited"]({
-    sessionID: "session-1",
-    filePath: "README.md",
-  });
-}
-
 function summarizePrompt(prompt) {
   return {
     sessionID: prompt.sessionID,
@@ -506,7 +492,6 @@ async function main() {
       assert.equal(typeof instance.handlers["tool.execute.after"], "function");
       assert.equal(typeof instance.handlers.event, "function");
       assert.equal(typeof instance.handlers["permission.asked"], "function");
-      assert.equal(typeof instance.handlers["file.edited"], "function");
     }
 
     const wrapperCommand = await runCommandExecuteBefore(wrapper.handlers);
@@ -539,9 +524,6 @@ async function main() {
 
     await runPermissionAsked(wrapper.handlers);
     await runPermissionAsked(built.handlers);
-
-    await runFileEdited(wrapper.handlers);
-    await runFileEdited(built.handlers);
 
     assert.equal(builtError?.message, wrapperError?.message, "built mutating-tool error differs from wrapper");
 
@@ -4607,50 +4589,6 @@ async function verifyWorkflowStateFinalizationIsolation() {
   assert.equal(reFetched.finalizationArtifacts.matchedFiles[0].kind, "code");
   assert.deepEqual(reFetched.finalizationAssessment.details.artifactKinds, ["code"]);
   assert.deepEqual(reFetched.commitProposal.files, ["src/index.js"]);
-}
-
-async function verifyFileEditedTracksTouchedFilesAndSessionCleanup() {
-  const [{ createWorkflowStateStore }, { createFileEditedHook }] = await Promise.all([
-    import(`${workflowStateModuleUrl}?file-edited=${Date.now()}`),
-    import(`${fileEditedHookModuleUrl}?file-edited=${Date.now()}`),
-  ]);
-
-  const store = createWorkflowStateStore();
-  store.set("s-file-edited", {
-    sessionID: "s-file-edited",
-    commandName: "bmad-bmm-quick-dev",
-    phase: "in-progress",
-  });
-
-  const hook = createFileEditedHook(
-    { workflowState: store, pluginContext: { directory: projectRoot } },
-  );
-
-  await hook({
-    sessionID: "s-file-edited",
-    filePath: path.join(projectRoot, "src", "index.js"),
-  });
-  await hook({
-    sessionID: "s-file-edited",
-    filePath: "README.md",
-  });
-  await hook({
-    sessionID: "s-file-edited",
-    filePath: path.join(projectRoot, "src", "index.js"),
-  });
-
-  const snapshot = store.get("s-file-edited");
-  assert.deepEqual(
-    snapshot.touchedFiles.map((entry) => entry.path),
-    ["src/index.js", "README.md"],
-  );
-  assert.deepEqual(
-    snapshot.touchedFiles.map((entry) => entry.kind),
-    ["code", "technical-doc"],
-  );
-
-  store.clear("s-file-edited");
-  assert.equal(store.get("s-file-edited"), undefined);
 }
 
 async function verifyDetectFinalizableOutputs() {
@@ -10258,7 +10196,13 @@ async function verifyEvaluateWorkflowFinalizationSwallowsAuditFailures() {
   assert.ok(persisted.commitProposal, "commitProposal must still be generated when audit throws");
 }
 
-async function verifySingletonArtifactPolicyIgnoresRepoWideStatusFallback() {
+async function verifySingletonArtifactPolicyRejectsOutOfScopeFiles() {
+  // Post-workflow-finalization-single-source-rework: extractChangedFiles ALWAYS
+  // consults pluginContext.listChangedFiles regardless of policy shape. The
+  // singleton-policy isolation is now enforced downstream by
+  // artifactScopeMatches: unrelated dirty files are merged in but rejected
+  // with outcome=skip / reason=artifact-scope-mismatch. The observable
+  // guarantee (no spurious commit proposal for unrelated files) is preserved.
   const [
     { createWorkflowStateStore },
     { evaluateWorkflowFinalization },
@@ -10268,9 +10212,6 @@ async function verifySingletonArtifactPolicyIgnoresRepoWideStatusFallback() {
   ]);
 
   const store = createWorkflowStateStore();
-  // Singleton workflow with NO touched files; if the repo-wide fallback
-  // were consulted it would pull in unrelated dirty files and the policy
-  // would mis-classify the workflow as `artifact-scope-mismatch`.
   store.set("s-singleton", {
     sessionID: "s-singleton",
     commandName: "bmad-bmm-create-prd",
@@ -10280,8 +10221,7 @@ async function verifySingletonArtifactPolicyIgnoresRepoWideStatusFallback() {
     touchedFiles: [],
   });
 
-  let listChangedFilesCalls = 0;
-  await evaluateWorkflowFinalization({
+  const assessment = await evaluateWorkflowFinalization({
     workflowState: store,
     sessionID: "s-singleton",
     input: { tool: "finish", args: {} },
@@ -10304,18 +10244,26 @@ async function verifySingletonArtifactPolicyIgnoresRepoWideStatusFallback() {
         };
       },
       listChangedFiles() {
-        listChangedFilesCalls += 1;
-        // What the repo-wide fallback would return — files entirely
-        // unrelated to the prd singleton scope.
         return ["src/index.js", "tests/regression.test.js", "node_modules/.bin/x"];
       },
     },
   });
 
   assert.equal(
-    listChangedFilesCalls,
-    0,
-    "singleton artifact policy must NOT consult listChangedFiles fallback (would import unrelated dirty files)",
+    assessment?.outcome,
+    "skip",
+    "out-of-scope files for a singleton policy must yield outcome=skip",
+  );
+  assert.equal(
+    assessment?.reason,
+    "artifact-scope-mismatch",
+    "skip reason must be artifact-scope-mismatch (scope filter, not fallback gating)",
+  );
+  const persisted = store.get("s-singleton");
+  assert.equal(
+    persisted?.commitProposal ?? null,
+    null,
+    "no commit proposal must be generated for out-of-scope singleton files",
   );
 }
 
@@ -12874,8 +12822,8 @@ async function verifyAliasExportRemoved() {
   );
   assert.equal(
     SUPPORTED_HOOK_KEYS.length,
-    7,
-    `verifyAliasExportRemoved: SUPPORTED_HOOK_KEYS.length must be 7; got ${SUPPORTED_HOOK_KEYS.length}`,
+    6,
+    `verifyAliasExportRemoved: SUPPORTED_HOOK_KEYS.length must be 6; got ${SUPPORTED_HOOK_KEYS.length}`,
   );
 }
 
@@ -13676,7 +13624,9 @@ main()
   // Story 2.5 review round 3 fixes
   .then(() => verifyPermissionAskedAliasDisjointness())
   // Story 3.1 — detect finalizable workflow outputs
-  .then(() => verifyFileEditedTracksTouchedFilesAndSessionCleanup())
+  // (verifyFileEditedTracksTouchedFilesAndSessionCleanup removed — the
+  //  file.edited hook was deleted when finalization switched to a single
+  //  git-status source.)
   .then(() => verifyDetectFinalizableOutputs())
   .then(() => verifyToolExecuteAfterFinishEvaluatesFinalization())
   // Story 3.2 — prepare and execute workflow completion commits
@@ -13703,7 +13653,7 @@ main()
   .then(() => verifyToolExecuteAfterFinishSkipsPublishWhenStaleBranchProposalLingers())
   // Story 3.1 review round 1 follow-ups
   .then(() => verifyEvaluateWorkflowFinalizationSwallowsAuditFailures())
-  .then(() => verifySingletonArtifactPolicyIgnoresRepoWideStatusFallback())
+  .then(() => verifySingletonArtifactPolicyRejectsOutOfScopeFiles())
   .then(() => verifyNormalizeTrackedFilePathRejectsOutOfRepoAbsolutePath())
   .then(() => verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace())
   // Story 3.4 — record approval outcomes and execution results for audit

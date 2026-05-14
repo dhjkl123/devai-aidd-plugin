@@ -5,45 +5,36 @@ import {
   normalizeTrackedFileEntry,
 } from "./finalization-artifacts.js";
 
-function extractChangedFiles(input, output, pluginContext, workflowPolicy) {
-  const fallbackFiles = [];
+function extractChangedFiles(input, output, pluginContext) {
+  const collected = [];
 
   if (Array.isArray(output?.changedFiles)) {
-    fallbackFiles.push(...output.changedFiles);
+    collected.push(...output.changedFiles);
   }
   if (Array.isArray(input?.changedFiles)) {
-    fallbackFiles.push(...input.changedFiles);
+    collected.push(...input.changedFiles);
   }
   if (Array.isArray(input?.args?.changedFiles)) {
-    fallbackFiles.push(...input.args.changedFiles);
+    collected.push(...input.args.changedFiles);
   }
 
-  // Story 3.1 review (HIGH): singleton artifact policies must NOT use the
-  // repo-wide `git status` fallback. Otherwise a workflow whose only legit
-  // touched output is e.g. `_bmad-output/planning-artifacts/prd.md` would
-  // capture every unrelated dirty file in the repo and then flunk
-  // `artifactScopeMatches` with `artifact-scope-mismatch`. Singleton workflows
-  // are presumed to only mutate their declared artifact, so we trust
-  // session-scoped touchedFiles + explicit input/output channels exclusively.
-  const isSingletonArtifactPolicy =
-    workflowPolicy?.identityStrategy === "artifact-singleton";
-
-  if (
-    !isSingletonArtifactPolicy &&
-    fallbackFiles.length === 0 &&
-    typeof pluginContext?.listChangedFiles === "function"
-  ) {
+  // Single-source contract (workflow-finalization-single-source-commit-skip-sentinel):
+  // always consult git status via pluginContext.listChangedFiles. Baseline
+  // commit guarantees a clean tree at workflow start, so untracked + modified
+  // files in the working tree are the workflow's outputs. artifactScopeMatches
+  // applies its own scope filter downstream — no per-policy gating here.
+  if (typeof pluginContext?.listChangedFiles === "function") {
     try {
       const pluginFiles = pluginContext.listChangedFiles();
       if (Array.isArray(pluginFiles)) {
-        fallbackFiles.push(...pluginFiles);
+        collected.push(...pluginFiles);
       }
     } catch {
-      // Best effort fallback only.
+      // Best-effort: throwing git is treated as "no files".
     }
   }
 
-  return fallbackFiles;
+  return collected;
 }
 
 export async function evaluateWorkflowFinalization({
@@ -81,7 +72,7 @@ export async function evaluateWorkflowFinalization({
     (Array.isArray(finishedState.touchedFiles) ? finishedState.touchedFiles : [])
       .map((entry) => normalizeTrackedFileEntry(entry, pluginContext?.directory))
       .filter(Boolean),
-    extractChangedFiles(input, output, pluginContext, workflowPolicy)
+    extractChangedFiles(input, output, pluginContext)
       .map((entry) => normalizeTrackedFileEntry(entry, pluginContext?.directory))
       .filter(Boolean),
   );

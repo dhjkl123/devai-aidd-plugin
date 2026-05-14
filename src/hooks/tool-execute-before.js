@@ -24,6 +24,7 @@ import { buildQuestionInstruction } from "../services/approval/build-question-in
 import {
   buildStartupChainQuestionInstruction,
 } from "../services/approval/build-startup-chain-question-instruction.js";
+import { FINALIZATION_SENTINEL_HEADER } from "../services/approval/build-finalization-sentinel-instruction.js";
 import { SKILL_TOOL_TOKENS } from "../utils/constants.js";
 import { adaptAndInvokeCommandHandler } from "./native-event.js";
 
@@ -295,6 +296,19 @@ export function createToolExecuteBeforeHook({
     // `requestApproval` adapter uses, compare to the tool args, and throw a
     // retry-with-exact-values error on mismatch.
     if (input?.tool === "question") {
+      // Sentinel passthrough — MUST be first inside the question branch so it
+      // bypasses both the startup-chain header guard and the active-approval
+      // header guard. The model is required to emit this sentinel as the last
+      // workflow action; blocking it would prevent finalization detection.
+      const sentinelHeaderFromArgs = readQuestionToolHeader(toolArgs);
+      if (sentinelHeaderFromArgs === FINALIZATION_SENTINEL_HEADER) {
+        pluginContext?.debug?.log?.(
+          "tool-execute-before",
+          "sentinel header passthrough",
+          { sessionID: input?.sessionID },
+        );
+        return;
+      }
       const state = workflowState?.get?.(input?.sessionID);
       const active = state?.approvalCurrent;
       const startupChain = state?.startupChainCurrent;

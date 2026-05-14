@@ -23,6 +23,7 @@ import {
 import {
   buildStartupChainQuestionInstruction,
 } from "../services/approval/build-startup-chain-question-instruction.js";
+import { buildFinalizationSentinelInstruction } from "../services/approval/build-finalization-sentinel-instruction.js";
 
 function resolveCurrentBranch(input, context, pluginContext) {
   if (typeof input?.currentBranch === "string" && input.currentBranch.length > 0) {
@@ -177,6 +178,23 @@ export function createCommandExecuteBeforeHook(
         workflowCommandCount: workflowCommands?.size ?? null,
       });
       if (context) {
+        const pushSentinelPart = () => {
+          const sentinel = buildFinalizationSentinelInstruction({
+            sessionID: context.sessionID,
+            commandName: context.commandName,
+          });
+          if (!Array.isArray(output.parts)) output.parts = [];
+          output.parts.push({
+            type: "text",
+            text: sentinel.instructionText,
+            synthetic: true,
+            metadata: sentinel.metadata,
+          });
+          workflowState.set(context.sessionID, {
+            ...workflowState.get(context.sessionID),
+            finalizationTriggered: false,
+          });
+        };
         const priorState = workflowState.get(context.sessionID);
         workflowState.set(context.sessionID, {
           ...priorState,
@@ -436,6 +454,7 @@ export function createCommandExecuteBeforeHook(
               ...(startupInstruction?.metadata ?? {}),
             },
           });
+          pushSentinelPart();
           return;
         }
 
@@ -603,6 +622,7 @@ export function createCommandExecuteBeforeHook(
             phase: "start",
           },
         });
+        pushSentinelPart();
         pluginContext?.debug?.log?.(
           "command-execute-before",
           "start instruction pushed to output.parts",
