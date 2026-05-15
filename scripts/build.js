@@ -23,9 +23,6 @@ const command = [
   "--platform=node",
   "--format=esm",
   "--target=node22",
-  "--external:simple-git",
-  "--external:@simple-git/*",
-  "--external:@kwsites/*",
   `--outfile="${outputFile}"`,
 ].join(" ");
 
