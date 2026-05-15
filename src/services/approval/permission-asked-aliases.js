@@ -60,6 +60,10 @@ export const APPROVAL_OUTCOME_ALIASES = Object.freeze({
   // .gitignore"; both map to ACCEPT here.
   "setup gitignore and commit": "accept",
   "commit without gitignore": "accept",
+  "create new branch": "accept",
+  "proceed on current branch": "accept",
+  "switch branch": "accept",
+  "stay on current branch": "ignore-and-continue",
   // Note: bare "skip" already maps to IGNORE_AND_CONTINUE via
   // APPROVAL_ANSWER_TOKENS / IGNORE_ANSWER_TOKENS in native-event.js, so no
   // separate alias entry is needed here for the Skip option.

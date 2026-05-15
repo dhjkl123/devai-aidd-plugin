@@ -26,6 +26,7 @@
 const ALLOWED_ACTION_TYPES = new Set([
   "branch/create",
   "branch/switch",
+  "branch/stay",
   "init",
   "commit",
   "push",
@@ -35,7 +36,7 @@ const ALLOWED_ACTION_TYPES = new Set([
  * Maps a branch proposal to its actionType.
  *
  * @param {{ action: string }} proposal
- * @returns {"branch/create" | "branch/switch" | null}
+ * @returns {"branch/create" | "branch/switch" | "branch/stay" | null}
  */
 function classifyBranchAction(proposal) {
   if (proposal?.action === "create") {
@@ -43,6 +44,9 @@ function classifyBranchAction(proposal) {
   }
   if (proposal?.action === "switch") {
     return "branch/switch";
+  }
+  if (proposal?.action === "stay") {
+    return "branch/stay";
   }
   return null;
 }
@@ -69,7 +73,9 @@ export function classifyGitAction(proposal) {
     const actionLabel =
       actionType === "branch/create"
         ? `Create branch: ${proposal.name || "(unnamed)"}`
-        : `Switch to branch: ${proposal.name || "(unnamed)"}`;
+        : actionType === "branch/switch"
+          ? `Switch to branch: ${proposal.name || "(unnamed)"}`
+          : `Proceed on current branch: ${proposal.name || "(current)"}`;
     return { kind, actionType, actionLabel, requiresApproval: true };
   }
 

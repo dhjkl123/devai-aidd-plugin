@@ -136,7 +136,7 @@ const minimalPluginContext = { debug: { log: () => {} }, directory: projectRoot 
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Verify 2: "Commit" answer triggers commit execution (no extra approval prompt)
+// Verify 2: "Commit" answer opens delegated commit execution (no extra approval prompt)
 // ───────────────────────────────────────────────────────────────────────────
 {
   const workflowState = createStubStore();
@@ -183,13 +183,11 @@ const minimalPluginContext = { debug: { log: () => {} }, directory: projectRoot 
 
   const delegated = audit.findOf("workflow.finalization.delegated");
   assert.equal(delegated.length, 1, "delegated finalization audit emitted once");
-
   assert.equal(
     workflowState.get(sessionID).finalizationTriggered,
     true,
     "finalizationTriggered flag set true",
   );
-
   assert.equal(
     workflowState.get(sessionID).delegatedFinalization?.stage,
     "awaiting-commit",

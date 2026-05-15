@@ -514,6 +514,7 @@ export async function executeApprovedAction({
           branchConfig,
           currentBranch: postBaselineCurrentBranch,
           workflowState,
+          pluginContext,
           audit,
         });
         await publishNextPlannedAction({
@@ -525,6 +526,39 @@ export async function executeApprovedAction({
         });
       }
     }
+  } else if (
+    approvalRequest.actionType === "branch/stay" &&
+    approvalRequest.proposal?.kind === "branch"
+  ) {
+    const nextState = workflowState.get(sessionID) ?? {};
+    workflowState.set(sessionID, {
+      ...nextState,
+      branchProposal: null,
+    });
+    envelope = {
+      ok: true,
+      status: "completed",
+      action: {
+        kind: "branch",
+        operation: "stay",
+        branchName: approvalRequest.proposal.name ?? repositorySnapshot?.headBranch ?? null,
+        targetBranch: approvalRequest.proposal.name ?? repositorySnapshot?.headBranch ?? null,
+        remoteName: null,
+        correlationId: approvalRequest.proposal.correlationId ?? null,
+        approvedAt,
+      },
+      code: "branch-stay-approved",
+      message: "Continued on the current branch.",
+      details: {
+        observedState: {
+          ...(repositorySnapshot ?? {}),
+          headBranch:
+            approvalRequest.proposal.name ?? repositorySnapshot?.headBranch ?? null,
+        },
+      },
+      audit: { attempted: false, logged: false, loggingError: null },
+      next: { continueWorkflow: true, requiresRecoveryChoice: false },
+    };
   } else if (
     (approvalRequest.actionType === "branch/create" ||
       approvalRequest.actionType === "branch/switch") &&

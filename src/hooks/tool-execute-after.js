@@ -17,6 +17,7 @@ import { executeStartupChain } from "../services/git/startup-chain-executor.js";
 import { openRecoveryFromExecution } from "../services/approval/recovery-orchestrator.js";
 import { deliverRecoveryPrompt } from "./permission-asked.js";
 import { FINALIZATION_SENTINEL_HEADER } from "../services/approval/build-finalization-sentinel-instruction.js";
+import { updateWorkflowRunFinalization } from "../services/workflow/workflow-run-lifecycle.js";
 
 function extractQuestionHeader(input) {
   const args = input?.args;
@@ -309,6 +310,10 @@ function matchesDelegatedCommitCommand(command, delegatedFinalization) {
 function buildTerminalFinalizationState(state, completion) {
   return {
     ...state,
+    workflowRunCurrent: updateWorkflowRunFinalization(
+      state?.workflowRunCurrent ?? null,
+      completion,
+    ),
     finalizationTriggered: false,
     delegatedFinalization: null,
     finalizationCompletion: completion,

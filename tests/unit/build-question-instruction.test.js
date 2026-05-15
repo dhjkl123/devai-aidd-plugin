@@ -59,7 +59,13 @@ async function runTests() {
       proposal: { kind: "branch", action: "create", name: "feat/test" },
     });
     assert.equal(r.header, "Create Branch");
+    assert.deepEqual(r.options, [
+      "Create New Branch (Recommended)",
+      "Stay On Current Branch",
+      "Skip",
+    ]);
     assert.match(r.instructionText, /Suggested branch name: `feat\/test`/);
+    assert.match(r.instructionText, /Stay On Current Branch/);
   }
 
   // ---- Case: branch/switch (F1 verification) ----
@@ -70,7 +76,25 @@ async function runTests() {
       proposal: { kind: "branch", action: "switch", name: "feat/bar" },
     });
     assert.equal(r.header, "Switch Branch");
+    assert.deepEqual(r.options, [
+      "Switch Branch (Recommended)",
+      "Stay On Current Branch",
+      "Skip",
+    ]);
     assert.match(r.instructionText, /Target branch: `feat\/bar`/);
+  }
+
+  // ---- Case: branch/stay ----
+  {
+    const r = buildQuestionInstruction({
+      commandName: "bmad-bmm-create-prd",
+      actionType: "branch/stay",
+      proposal: { kind: "branch", action: "stay", name: "feat/bar" },
+    });
+    assert.equal(r.header, "Branch Decision");
+    assert.deepEqual(r.options, ["Proceed On Current Branch (Recommended)", "Skip"]);
+    assert.match(r.instructionText, /current branch already matches the recommended workflow context/i);
+    assert.match(r.instructionText, /Current branch: `feat\/bar`/);
   }
 
   // ---- Case: commit-finalize (regular commit) ----
@@ -250,6 +274,10 @@ async function runTests() {
     // new unified labels
     assert.equal(APPROVAL_OUTCOME_ALIASES["setup gitignore and commit"], "accept");
     assert.equal(APPROVAL_OUTCOME_ALIASES["commit without gitignore"], "accept");
+    assert.equal(APPROVAL_OUTCOME_ALIASES["create new branch"], "accept");
+    assert.equal(APPROVAL_OUTCOME_ALIASES["proceed on current branch"], "accept");
+    assert.equal(APPROVAL_OUTCOME_ALIASES["switch branch"], "accept");
+    assert.equal(APPROVAL_OUTCOME_ALIASES["stay on current branch"], "ignore-and-continue");
     // legacy labels still mapped (one-release deprecation window)
     assert.equal(APPROVAL_OUTCOME_ALIASES["add to gitignore and commit"], "accept");
     assert.equal(APPROVAL_OUTCOME_ALIASES["commit anyway"], "accept");
@@ -311,12 +339,12 @@ async function runTests() {
   }
 
   // Sanity: every actionType in the contract returns a non-empty instructionText.
-  for (const actionType of ["init", "commit", "branch/create", "branch/switch", "push"]) {
+  for (const actionType of ["init", "commit", "branch/create", "branch/stay", "branch/switch", "push"]) {
     const r = buildQuestionInstruction({
       commandName: "x",
       actionType,
       proposal:
-        actionType === "branch/create" || actionType === "branch/switch"
+        actionType === "branch/create" || actionType === "branch/stay" || actionType === "branch/switch"
           ? { kind: "branch", action: actionType.split("/")[1], name: "test/foo" }
           : actionType === "commit"
           ? { kind: "commit", action: "commit" }
@@ -327,6 +355,9 @@ async function runTests() {
     assert.ok(r.instructionText.length > 0, `instructionText must be non-empty for ${actionType}`);
     assert.ok(r.header.length > 0, `header must be non-empty for ${actionType}`);
     assert.ok(r.options.length >= 2, `options must have >= 2 entries for ${actionType}`);
+    if (actionType === "branch/create" || actionType === "branch/switch" || actionType === "branch/stay") {
+      assert.ok(r.options.includes("Skip"), `${actionType} must include Skip`);
+    }
   }
 
   // Ensure native-event module loads cleanly (parseApprovalAnswerOutcome dependency surface).

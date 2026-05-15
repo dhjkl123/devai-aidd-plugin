@@ -3564,6 +3564,13 @@ async function verifyClassifyGitActionContracts() {
     "classifyGitAction: branch+switch must map to branch/switch",
   );
 
+  const branchStay = classifyGitAction({ kind: "branch", action: "stay", name: "feat/ABC-2" });
+  assert.equal(
+    branchStay?.actionType,
+    "branch/stay",
+    "classifyGitAction: branch+stay must map to branch/stay",
+  );
+
   // Init proposal
   const init = classifyGitAction({ kind: "init", directory: "/tmp/repo" });
   assert.equal(
@@ -3587,6 +3594,7 @@ async function verifyClassifyGitActionContracts() {
   // isAllowedActionType
   assert.equal(isAllowedActionType("branch/create"), true);
   assert.equal(isAllowedActionType("branch/switch"), true);
+  assert.equal(isAllowedActionType("branch/stay"), true);
   assert.equal(isAllowedActionType("init"), true);
   assert.equal(isAllowedActionType("commit"), true);
   assert.equal(isAllowedActionType("push"), true);
@@ -3872,8 +3880,9 @@ async function verifyApprovalRequestFromBranchProposal() {
     );
     assert.ok(
       state.approvalCurrent.actionType === "branch/create" ||
-        state.approvalCurrent.actionType === "branch/switch",
-      "verifyApprovalRequestFromBranchProposal: approvalCurrent.actionType must be branch/create or branch/switch",
+        state.approvalCurrent.actionType === "branch/switch" ||
+        state.approvalCurrent.actionType === "branch/stay",
+      "verifyApprovalRequestFromBranchProposal: approvalCurrent.actionType must be branch/create, branch/switch, or branch/stay",
     );
     assert.equal(
       state.approvalCurrent.status,
@@ -3908,7 +3917,9 @@ async function verifyApprovalRequestFromBranchProposal() {
     assert.equal(auditExtra.outcome, "ask");
     assert.equal(typeof auditExtra.details.requestId, "string");
     assert.ok(
-      auditExtra.details.actionType === "branch/create" || auditExtra.details.actionType === "branch/switch",
+      auditExtra.details.actionType === "branch/create" ||
+        auditExtra.details.actionType === "branch/switch" ||
+        auditExtra.details.actionType === "branch/stay",
     );
     assert.equal(typeof auditExtra.details.sessionID, "string");
 
@@ -4218,8 +4229,10 @@ async function verifyApprovalRequestPayloadShape() {
     assert.equal(req.sessionID, "s-shape", "payload: sessionID preserved");
     assert.equal(req.workflow, "bmad-bmm-quick-dev", "payload: workflow preserved");
     assert.ok(
-      req.actionType === "branch/create" || req.actionType === "branch/switch",
-      "payload: actionType must be branch/create or branch/switch",
+      req.actionType === "branch/create" ||
+        req.actionType === "branch/switch" ||
+        req.actionType === "branch/stay",
+      "payload: actionType must be branch/create, branch/switch, or branch/stay",
     );
     assert.equal(req.proposal?.kind, "branch", "payload: proposal.kind must be branch");
     assert.equal(typeof req.id, "string", "payload: id must be string");
@@ -4392,7 +4405,9 @@ async function verifyApprovalPromptDeliveryFailureAudit() {
     );
     assert.equal(typeof payload.details.requestId, "string");
     assert.ok(
-      payload.details.actionType === "branch/create" || payload.details.actionType === "branch/switch",
+      payload.details.actionType === "branch/create" ||
+        payload.details.actionType === "branch/switch" ||
+        payload.details.actionType === "branch/stay",
     );
     assert.equal(payload.details.sessionID, "s-h1");
     assert.equal(
@@ -13598,24 +13613,24 @@ async function verifyStartupChainRegressionContracts() {
   };
   assert.deepEqual(
     nativeMod.readReplyAnswers(
-      { answers: [{ id: "chain:init", answer: "Skip" }, { id: "chain:baseline", answer: "Skip" }, { id: "chain:branch", answer: "Ignore and continue" }] },
+      { answers: [{ id: "chain:init", answer: "Skip" }, { id: "chain:baseline", answer: "Skip" }, { id: "chain:branch", answer: "Skip" }] },
       pendingStartupQuestion,
     ),
-    { init: "Skip", baseline: "Skip", branch: "Ignore and continue" },
+    { init: "Skip", baseline: "Skip", branch: "Skip" },
   );
   assert.deepEqual(
     nativeMod.readReplyAnswers(
-      { answers: { "chain:init": "Initialize Git (Recommended)", "chain:baseline": "Commit Without .gitignore", "chain:branch": "Approve (Recommended)" } },
+      { answers: { "chain:init": "Initialize Git (Recommended)", "chain:baseline": "Commit Without .gitignore", "chain:branch": "Create New Branch (Recommended)" } },
       pendingStartupQuestion,
     ),
-    { init: "Initialize Git (Recommended)", baseline: "Commit Without .gitignore", branch: "Approve (Recommended)" },
+    { init: "Initialize Git (Recommended)", baseline: "Commit Without .gitignore", branch: "Create New Branch (Recommended)" },
   );
   assert.deepEqual(
     nativeMod.readReplyAnswers(
-      { answers: [["Initialize Git (Recommended)"], ["Skip"], ["Ignore and continue"]] },
+      { answers: [["Initialize Git (Recommended)"], ["Skip"], ["Skip"]] },
       pendingStartupQuestion,
     ),
-    { init: "Initialize Git (Recommended)", baseline: "Skip", branch: "Ignore and continue" },
+    { init: "Initialize Git (Recommended)", baseline: "Skip", branch: "Skip" },
   );
 
   const workflowContext = {
@@ -13677,6 +13692,204 @@ async function verifyStartupChainRegressionContracts() {
   assert.equal(seenActions[0]?.operation, "create");
 
   console.log("verifyStartupChainRegressionContracts OK");
+}
+
+async function verifyStartupRunResolutionSuppressesReentry() {
+  const lifecycleModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "services", "workflow", "workflow-run-lifecycle.js"),
+  ).href;
+  const { createWorkflowStateStore } = await import(`${workflowStateModuleUrl}?runre=${Date.now()}`);
+  const { createCommandExecuteBeforeHook } = await import(
+    `${commandExecuteBeforeModuleUrl}?runre=${Date.now()}`
+  );
+  const { createWorkflowRunRecord, updateWorkflowRunStartup } = await import(
+    `${lifecycleModuleUrl}?runre=${Date.now()}`
+  );
+
+  const auditEvents = [];
+  const workflowState = createWorkflowStateStore();
+  const workspace = createTempWorkspace();
+  const workflowContext = {
+    sessionID: "run-reentry-session",
+    commandName: "bmad-bmm-quick-dev",
+    arguments: "ABC-123 replay",
+    phase: "start",
+  };
+  const resolvedRun = updateWorkflowRunStartup(
+    createWorkflowRunRecord({ workflowContext, now: "2026-05-15T00:00:00.000Z" }),
+    {
+      status: "resolved",
+      reason: "startup-chain-complete",
+      terminal: true,
+      resolvedAt: "2026-05-15T00:01:00.000Z",
+    },
+  );
+  workflowState.set("run-reentry-session", {
+    ...workflowContext,
+    workflowRunCurrent: resolvedRun,
+    startupChainCurrent: null,
+    finalizationCompletion: null,
+  });
+
+  const hook = createCommandExecuteBeforeHook({
+    workflowCommands: new Set(["bmad-bmm-quick-dev"]),
+    workflowState,
+    branchConfig: TEST_BRANCH_CONFIG,
+    pluginContext: {
+      directory: workspace,
+      requestStartupChainApproval: async () => {},
+      resolvePolicy(wfCtx) {
+        return { outcome: "allow", details: { policy: defaultPolicyWithLegacyBranchRequired(wfCtx.commandName) } };
+      },
+      resolveBranchDecision: async () => null,
+      listLocalBranches() {
+        return [];
+      },
+    },
+    audit: {
+      async info(_name, payload) {
+        auditEvents.push(payload);
+      },
+    },
+  });
+
+  const output = { parts: [] };
+  await hook(
+    { command: "/bmad-bmm-quick-dev", arguments: "ABC-123 replay", sessionID: "run-reentry-session" },
+    output,
+  );
+  const state = workflowState.get("run-reentry-session");
+  assert.equal(
+    output.parts.some((part) => part?.metadata?.startupChain === true),
+    false,
+    "verifyStartupRunResolutionSuppressesReentry: resolved run must not restage startup chain",
+  );
+  assert.equal(
+    state?.startupChainCurrent ?? null,
+    null,
+    "verifyStartupRunResolutionSuppressesReentry: startupChainCurrent must remain empty",
+  );
+  assert.ok(
+    auditEvents.some(
+      (event) => event?.event === "startup.chain.skipped" && event?.details?.reason === "startup-already-resolved",
+    ),
+    "verifyStartupRunResolutionSuppressesReentry: must audit startup.chain.skipped with startup-already-resolved",
+  );
+
+  fs.rmSync(workspace, { recursive: true, force: true });
+  console.log("verifyStartupRunResolutionSuppressesReentry OK");
+}
+
+async function verifyModelDrivenBranchDecisionContracts() {
+  const branchPlanningModuleUrl = pathToFileURL(
+    path.join(projectRoot, "src", "services", "git", "resolve-branch-planning.js"),
+  ).href;
+  const { createWorkflowStateStore } = await import(`${workflowStateModuleUrl}?branchmodel=${Date.now()}`);
+  const { resolveBranchPlanning } = await import(`${branchPlanningModuleUrl}?branchmodel=${Date.now()}`);
+
+  const workflowContext = {
+    sessionID: "branch-model-session",
+    commandName: "bmad-bmm-quick-dev",
+    normalizedCommand: "bmad-bmm-quick-dev",
+    arguments: "ABC-123 branch context",
+    phase: "start",
+  };
+  const workflowPolicy = TEST_WORKFLOW_POLICY["bmad-bmm-quick-dev"];
+
+  const switchState = createWorkflowStateStore();
+  switchState.set(workflowContext.sessionID, { workflowRunCurrent: null });
+  const switched = await resolveBranchPlanning({
+    workflowContext,
+    workflowPolicy,
+    branchConfig: TEST_BRANCH_CONFIG,
+    currentBranch: "main",
+    workflowState: switchState,
+    pluginContext: {
+      listLocalBranches() {
+        return ["main", "feat/ABC-123-existing"];
+      },
+      async resolveBranchDecision() {
+        return {
+          conclusion: "switch-to-existing-branch",
+          branchName: "feat/ABC-123-existing",
+          reason: "same-feature-context",
+        };
+      },
+    },
+    audit: { async info() {} },
+    persist: true,
+  });
+  assert.equal(
+    switched.proposal?.action,
+    "switch",
+    "verifyModelDrivenBranchDecisionContracts: model-selected existing branch must become switch proposal",
+  );
+  assert.equal(switched.proposal?.name, "feat/ABC-123-existing");
+  assert.equal(switched.decision?.source, "model");
+
+  const fallbackState = createWorkflowStateStore();
+  fallbackState.set("branch-fallback-session", {});
+  const fallback = await resolveBranchPlanning({
+    workflowContext: { ...workflowContext, sessionID: "branch-fallback-session" },
+    workflowPolicy,
+    branchConfig: TEST_BRANCH_CONFIG,
+    currentBranch: "main",
+    workflowState: fallbackState,
+    pluginContext: {
+      listLocalBranches() {
+        return ["main"];
+      },
+      async resolveBranchDecision() {
+        return {
+          conclusion: "create-new-branch",
+          branchName: "bad branch name",
+        };
+      },
+    },
+    audit: { async info() {} },
+    persist: true,
+  });
+  assert.equal(
+    fallback.proposal?.action,
+    "create",
+    "verifyModelDrivenBranchDecisionContracts: invalid model decision must fall back to deterministic create proposal",
+  );
+  assert.equal(
+    fallback.decision?.source,
+    "deterministic",
+    "verifyModelDrivenBranchDecisionContracts: invalid model decision must preserve deterministic source",
+  );
+
+  const askUserState = createWorkflowStateStore();
+  askUserState.set("branch-ask-user-session", {});
+  const askUser = await resolveBranchPlanning({
+    workflowContext: { ...workflowContext, sessionID: "branch-ask-user-session" },
+    workflowPolicy,
+    branchConfig: TEST_BRANCH_CONFIG,
+    currentBranch: "main",
+    workflowState: askUserState,
+    pluginContext: {
+      listLocalBranches() {
+        return ["main", "feat/ABC-123-existing"];
+      },
+      async resolveBranchDecision() {
+        return {
+          conclusion: "ask-user",
+          reason: "ambiguous-branch-context",
+        };
+      },
+    },
+    audit: { async info() {} },
+    persist: true,
+  });
+  assert.equal(
+    askUser.proposal,
+    null,
+    "verifyModelDrivenBranchDecisionContracts: ask-user conclusion must not synthesize a git proposal",
+  );
+  assert.equal(askUser.decision?.conclusion, "ask-user");
+
+  console.log("verifyModelDrivenBranchDecisionContracts OK");
 }
 
 main()
@@ -13864,6 +14077,8 @@ main()
   // Native event contract ??opencode native plugin (.opencode/plugins)
   .then(() => verifyNativeEventHandlerExists())
   .then(() => verifyStartupChainRegressionContracts())
+  .then(() => verifyStartupRunResolutionSuppressesReentry())
+  .then(() => verifyModelDrivenBranchDecisionContracts())
   .then(() => verifyStartupChainReadinessSkipContracts())
   .then(() => verifyReadinessStatePolicyContracts())
   .then(() => verifyUnavailableReadinessPreservesKnownGoodState())
@@ -13946,7 +14161,16 @@ async function verifyQuestionInstructionBuilderContract() {
         proposal: { kind: "branch", action: "create", name: "feat/foo" },
       },
       header: "Create Branch",
-      firstOption: "Approve (Recommended)",
+      firstOption: "Create New Branch (Recommended)",
+    },
+    {
+      input: {
+        commandName: "x",
+        actionType: "branch/stay",
+        proposal: { kind: "branch", action: "stay", name: "feat/foo" },
+      },
+      header: "Branch Decision",
+      firstOption: "Proceed On Current Branch (Recommended)",
     },
     {
       input: {
@@ -13955,7 +14179,7 @@ async function verifyQuestionInstructionBuilderContract() {
         proposal: { kind: "branch", action: "switch", name: "feat/bar" },
       },
       header: "Switch Branch",
-      firstOption: "Approve (Recommended)",
+      firstOption: "Switch Branch (Recommended)",
     },
     {
       input: {

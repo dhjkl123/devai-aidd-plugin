@@ -1,15 +1,12 @@
 import { APPROVAL_OUTCOMES } from "../approval/approval-resolution-state.js";
+import { updateWorkflowRunStartup } from "../workflow/workflow-run-lifecycle.js";
 import { normalizeBaselineAnswer, resolveBaselineCommitFiles } from "./baseline-commit-service.js";
 import { buildBaselineCommitProposal } from "./build-init-proposal.js";
 import { buildCommitAction, executeCommit } from "./commit-service.js";
 import { buildInitAction, executeInit } from "./init-service.js";
 import { buildBranchAction, executeBranch } from "./branch-action-service.js";
 import { checkRepositoryReadiness } from "./check-repository-readiness.js";
-import {
-  buildBranchProposal,
-  computeCandidateBranchName,
-  evaluateBranchStrategy,
-} from "./branch-service.js";
+import { resolveBranchPlanning } from "./resolve-branch-planning.js";
 import {
   buildAssumedRepositoryReadyReadiness,
   resolveReadinessStateUpdate,
@@ -58,6 +55,17 @@ export async function executeStartupChain({
           branchProposal: null,
           startupChainCurrent: null,
           pendingStartupQuestion: null,
+          workflowRunCurrent: updateWorkflowRunStartup(
+            workflowState.get(sessionID)?.workflowRunCurrent ?? state.workflowRunCurrent ?? null,
+            {
+              status: "resolved",
+              reason: "git-init-skipped",
+              terminal: true,
+              resolutionSource: "startup-chain-executor",
+              resolvedAt: new Date().toISOString(),
+              answers,
+            },
+          ),
         });
         await auditResolved({ audit, sessionID, workflowContext, chain, answers, resolved });
         return { outcome: "resolved", resolved };
@@ -79,6 +87,13 @@ export async function executeStartupChain({
         workflowState,
       });
       if (!envelope.ok) {
+        finalizeFailedStartupExecution({
+          workflowState,
+          sessionID,
+          state,
+          reason: envelope.code ?? "git-init-failed",
+          answers,
+        });
         await auditResolved({ audit, sessionID, workflowContext, chain, answers, resolved });
         return { outcome: "failed", envelope, resolved };
       }
@@ -123,6 +138,17 @@ export async function executeStartupChain({
           branchProposal: null,
           startupChainCurrent: null,
           pendingStartupQuestion: null,
+          workflowRunCurrent: updateWorkflowRunStartup(
+            workflowState.get(sessionID)?.workflowRunCurrent ?? state.workflowRunCurrent ?? null,
+            {
+              status: "resolved",
+              reason: "baseline-skipped",
+              terminal: true,
+              resolutionSource: "startup-chain-executor",
+              resolvedAt: new Date().toISOString(),
+              answers,
+            },
+          ),
         });
         await auditResolved({ audit, sessionID, workflowContext, chain, answers, resolved });
         return { outcome: "resolved", resolved };
@@ -178,6 +204,13 @@ export async function executeStartupChain({
         workflowState,
       });
       if (!envelope.ok) {
+        finalizeFailedStartupExecution({
+          workflowState,
+          sessionID,
+          state,
+          reason: envelope.code ?? "baseline-commit-failed",
+          answers,
+        });
         await auditResolved({ audit, sessionID, workflowContext, chain, answers, resolved });
         return { outcome: "failed", envelope, resolved };
       }
@@ -211,19 +244,37 @@ export async function executeStartupChain({
           branchProposal: null,
           startupChainCurrent: null,
           pendingStartupQuestion: null,
+          workflowRunCurrent: updateWorkflowRunStartup(
+            workflowState.get(sessionID)?.workflowRunCurrent ?? state.workflowRunCurrent ?? null,
+            {
+              status: "resolved",
+              reason: "branch-ignored-and-continue",
+              terminal: true,
+              resolutionSource: "startup-chain-executor",
+              resolvedAt: new Date().toISOString(),
+              answers,
+            },
+          ),
         });
         await auditResolved({ audit, sessionID, workflowContext, chain, answers, resolved });
         return { outcome: "resolved", resolved };
       }
 
-      const proposal = recomputeBranchProposal({
+      const proposal = await recomputeBranchProposal({
         chain,
         workflowContext,
         workflowPolicy,
         readiness,
         branchConfig: chain.branchConfig ?? pluginContext?.runtimeConfig?.config?.branch ?? null,
+        workflowState,
+        pluginContext,
+        audit,
       });
       if (!proposal) continue;
+      if (proposal.action === "stay") {
+        updateState(workflowState, sessionID, { branchProposal: null });
+        continue;
+      }
       const plan = buildBranchAction({ proposal, correlationId: step.correlationId ?? null });
       const expectedBranchState = {
         ...(repositorySnapshot ?? {}),
@@ -240,6 +291,13 @@ export async function executeStartupChain({
         workflowState,
       });
       if (!envelope.ok) {
+        finalizeFailedStartupExecution({
+          workflowState,
+          sessionID,
+          state,
+          reason: envelope.code ?? "branch-execution-failed",
+          answers,
+        });
         await auditResolved({ audit, sessionID, workflowContext, chain, answers, resolved });
         return { outcome: "failed", envelope, resolved };
       }
@@ -272,6 +330,17 @@ export async function executeStartupChain({
     initProposal: null,
     commitProposal: null,
     branchProposal: null,
+    workflowRunCurrent: updateWorkflowRunStartup(
+      workflowState.get(sessionID)?.workflowRunCurrent ?? state.workflowRunCurrent ?? null,
+      {
+        status: "resolved",
+        reason: "startup-chain-complete",
+        terminal: true,
+        resolutionSource: "startup-chain-executor",
+        resolvedAt: new Date().toISOString(),
+        answers,
+      },
+    ),
   });
   await auditResolved({ audit, sessionID, workflowContext, chain, answers, resolved });
   return { outcome: "resolved", resolved };
@@ -291,7 +360,14 @@ function parseBaselineDecision(answer) {
 
 function parseApproveDecision(answer) {
   const key = normalizeAnswer(answer);
-  return key === "approve" || key === "approved" || key === "yes"
+  return (
+    key === "approve" ||
+    key === "approved" ||
+    key === "yes" ||
+    key === "create new branch" ||
+    key === "proceed on current branch" ||
+    key === "switch branch"
+  )
     ? APPROVAL_OUTCOMES.ACCEPT
     : APPROVAL_OUTCOMES.IGNORE_AND_CONTINUE;
 }
@@ -398,24 +474,31 @@ function safeListChangedFiles(pluginContext, trace = null) {
   }
 }
 
-function recomputeBranchProposal({ chain, workflowContext, workflowPolicy, readiness, branchConfig }) {
+async function recomputeBranchProposal({
+  chain,
+  workflowContext,
+  workflowPolicy,
+  readiness,
+  branchConfig,
+  workflowState,
+  pluginContext,
+  audit,
+}) {
   const currentBranch =
     typeof readiness?.details?.branch === "string" && readiness.details.branch.length > 0
       ? readiness.details.branch
       : null;
-  const strategy = evaluateBranchStrategy({
+  const { proposal } = await resolveBranchPlanning({
     workflowContext,
     workflowPolicy,
     branchConfig,
     currentBranch,
+    workflowState,
+    pluginContext,
+    audit,
+    persist: false,
   });
-  if (strategy.requirement === "unnecessary") return null;
-  const candidateName = computeCandidateBranchName({
-    workflowContext,
-    workflowPolicy,
-    branchConfig,
-  });
-  return buildBranchProposal({ strategy, candidateName, currentBranch }) ?? chain.branchPreview ?? null;
+  return proposal ?? chain.branchPreview ?? null;
 }
 
 function updateState(workflowState, sessionID, patch) {
@@ -425,13 +508,24 @@ function updateState(workflowState, sessionID, patch) {
   });
 }
 
-// When an upstream step is skipped (init or baseline), downstream git actions
-// cannot proceed (you cannot create a baseline commit without `git init`, and
-// you cannot create a feature branch off an unborn HEAD). Record the
-// downstream steps in `resolved` with an explicit `blockedBy` reason so the
-// audit trail shows them — and so `tool.execute.after` can surface a clear
-// message back to the model explaining why the answer the user gave was not
-// acted on.
+function finalizeFailedStartupExecution({ workflowState, sessionID, state, reason, answers }) {
+  updateState(workflowState, sessionID, {
+    startupChainCurrent: null,
+    pendingStartupQuestion: null,
+    workflowRunCurrent: updateWorkflowRunStartup(
+      workflowState.get(sessionID)?.workflowRunCurrent ?? state.workflowRunCurrent ?? null,
+      {
+        status: "execution-failed",
+        reason,
+        terminal: true,
+        resolutionSource: "startup-chain-executor",
+        resolvedAt: new Date().toISOString(),
+        answers,
+      },
+    ),
+  });
+}
+
 function addBlockedDownstreamSteps({ chain, fromKey, resolved, answers, reason }) {
   const steps = Array.isArray(chain?.steps) ? chain.steps : [];
   const startIndex = steps.findIndex((step) => step.key === fromKey) + 1;

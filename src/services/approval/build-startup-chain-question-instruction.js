@@ -74,9 +74,12 @@ function buildQuestionText(question) {
       typeof question.branchName === "string" && question.branchName.length > 0
         ? question.branchName
         : "the workflow branch";
-    return question.header === "Switch Branch"
-      ? `Switch to ${branchName} before editing files?`
-      : `Create and check out ${branchName} before editing files?`;
+    if (question.action === "stay") {
+      return `Proceed on ${branchName} before editing files?`;
+    }
+    return question.header.startsWith("Switch Branch")
+      ? `Switch to ${branchName} before editing files, or stay on the current branch?`
+      : `Create and check out ${branchName} before editing files, or stay on the current branch?`;
   }
   return question.header;
 }
@@ -98,9 +101,19 @@ function describeOption(key, label) {
     return "Skip the baseline commit and disable later startup Git automation.";
   }
   if (key === "branch") {
-    return normalized.startsWith("approve")
-      ? "Create or switch to the proposed workflow branch."
-      : "Continue without creating or switching branches.";
+    if (normalized.startsWith("proceed on current branch")) {
+      return "Proceed on the current branch without changing branches.";
+    }
+    if (normalized.startsWith("create new branch")) {
+      return "Create the proposed workflow branch and continue there.";
+    }
+    if (normalized.startsWith("switch branch")) {
+      return "Switch to the proposed existing branch and continue there.";
+    }
+    if (normalized.startsWith("stay on current branch")) {
+      return "Continue on the current branch without changing branches.";
+    }
+    return "Skip automatic branch change and continue the workflow as-is.";
   }
   return label;
 }
@@ -131,16 +144,20 @@ function buildQuestion({ step, startupChainId }) {
     typeof step.proposal?.name === "string" && step.proposal.name.length > 0
       ? step.proposal.name
       : "workflow";
-  const action = step.action === "switch" ? "Switch" : "Create";
-  // Embed the target branch name in the header itself so the user sees
-  // *which* branch will be created/switched to right in the question dialog —
-  // the "Approve" option label stays clean and decision parsing is unaffected.
+  const action =
+    step.action === "switch" ? "Switch" : step.action === "stay" ? "Branch Decision" : "Create";
   const header = `${action} Branch \`${branchName}\``;
   return {
     key,
     id: `${startupChainId}:branch`,
-    header,
-    options: ["Approve (Recommended)", "Ignore and continue"],
+    header: step.action === "stay" ? "Branch Decision" : header,
+    options:
+      step.action === "switch"
+        ? ["Switch Branch (Recommended)", "Stay On Current Branch", "Skip"]
+        : step.action === "stay"
+          ? ["Proceed On Current Branch (Recommended)", "Skip"]
+          : ["Create New Branch (Recommended)", "Stay On Current Branch", "Skip"],
     branchName,
+    action: step.action,
   };
 }
