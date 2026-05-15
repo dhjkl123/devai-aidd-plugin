@@ -1,6 +1,19 @@
 import path from "node:path";
 
 const CODE_PREFIXES = ["src/", "tests/", "scripts/", "templates/", "installer/", "dist/", "release/"];
+const ROOT_LEVEL_CODE_EXTENSIONS = new Set([
+  ".html",
+  ".htm",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".jsx",
+  ".css",
+  ".scss",
+  ".json",
+]);
 const TECHNICAL_DOC_PREFIXES = ["docs/"];
 const PLANNING_ARTIFACT_PREFIX = "_bmad-output/planning-artifacts/";
 const IMPLEMENTATION_ARTIFACT_PREFIX = "_bmad-output/implementation-artifacts/";
@@ -52,6 +65,15 @@ export function classifyTrackedFileKind(normalizedPath) {
 
   if (CODE_PREFIXES.some((prefix) => normalizedPath.startsWith(prefix))) {
     return "code";
+  }
+  if (!normalizedPath.includes("/")) {
+    const dotIndex = normalizedPath.lastIndexOf(".");
+    if (dotIndex > 0) {
+      const ext = normalizedPath.slice(dotIndex).toLowerCase();
+      if (ROOT_LEVEL_CODE_EXTENSIONS.has(ext)) {
+        return "code";
+      }
+    }
   }
   if (
     normalizedPath === "README.md" ||

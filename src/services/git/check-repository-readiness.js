@@ -77,6 +77,7 @@ export function checkRepositoryReadiness({
   gitRunner = runGitCommand,
   policy,
   readinessGate = null,
+  trace = null,
 } = {}) {
   const checkedAt = new Date().toISOString();
   const baseDetails = createBaseDetails(directory, checkedAt);
@@ -86,7 +87,15 @@ export function checkRepositoryReadiness({
   function runProbe(command) {
     const startedAt = process.hrtime.bigint();
     try {
-      const output = gitRunner({ directory, command });
+      const output = gitRunner({
+        directory,
+        command,
+        trace: {
+          ...(trace && typeof trace === "object" ? trace : {}),
+          stage: "readiness-probe",
+          probe: command,
+        },
+      });
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
       probeTrace.push({ command, outcome: "ok", durationMs });
       return output;

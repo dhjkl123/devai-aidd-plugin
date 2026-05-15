@@ -8,6 +8,9 @@
  * single source of truth for the active-guard signal in `output.parts`.
  */
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
 import { detectWorkflowContext } from "../services/workflow/detect-workflow-context.js";
 import { checkRepositoryReadiness } from "../services/git/check-repository-readiness.js";
 import { planBranchProposal } from "../services/git/plan-branch-proposal.js";
@@ -23,6 +26,7 @@ import {
 import {
   buildStartupChainQuestionInstruction,
 } from "../services/approval/build-startup-chain-question-instruction.js";
+import { buildFinalizationSentinelInstruction } from "../services/approval/build-finalization-sentinel-instruction.js";
 
 function resolveCurrentBranch(input, context, pluginContext) {
   if (typeof input?.currentBranch === "string" && input.currentBranch.length > 0) {
@@ -161,6 +165,17 @@ function buildStartInstructionText({ commandName, readiness, approvalCurrent, st
   return header;
 }
 
+function shouldInjectFinalizationSentinel(directory) {
+  if (typeof directory !== "string" || directory.length === 0) {
+    return false;
+  }
+  try {
+    return existsSync(join(directory, ".git"));
+  } catch {
+    return false;
+  }
+}
+
 export function createCommandExecuteBeforeHook(
   { workflowCommands, workflowState, audit, pluginContext, branchConfig } = {},
 ) {
@@ -177,6 +192,39 @@ export function createCommandExecuteBeforeHook(
         workflowCommandCount: workflowCommands?.size ?? null,
       });
       if (context) {
+        const pushSentinelPart = (readiness) => {
+          if (!shouldInjectFinalizationSentinel(pluginContext?.directory)) {
+            pluginContext?.debug?.log?.(
+              "command-execute-before",
+              "finalization sentinel skipped because repository is not initialized",
+              {
+                sessionID: context.sessionID,
+                commandName: context.commandName,
+                readinessOutcome: readiness?.outcome ?? null,
+                readinessReason: readiness?.reason ?? null,
+                isGitRepository: readiness?.details?.isGitRepository ?? null,
+              },
+            );
+            return;
+          }
+          const sentinel = buildFinalizationSentinelInstruction({
+            sessionID: context.sessionID,
+            commandName: context.commandName,
+          });
+          if (!Array.isArray(output.parts)) output.parts = [];
+          output.parts.push({
+            type: "text",
+            text: sentinel.instructionText,
+            synthetic: true,
+            metadata: sentinel.metadata,
+          });
+          workflowState.set(context.sessionID, {
+            ...workflowState.get(context.sessionID),
+            finalizationTriggered: false,
+            delegatedFinalization: null,
+            finalizationCompletion: null,
+          });
+        };
         const priorState = workflowState.get(context.sessionID);
         workflowState.set(context.sessionID, {
           ...priorState,
@@ -241,6 +289,13 @@ export function createCommandExecuteBeforeHook(
           gitRunner: pluginContext?.gitRunner,
           policy: workflowPolicy,
           readinessGate,
+          trace: {
+            hook: "command-execute-before",
+            stage: "workflow-readiness-check",
+            sessionID: context.sessionID,
+            workflow: context.commandName,
+            phase: context.phase,
+          },
         });
         pluginContext?.debug?.log?.("command-execute-before", "readiness check completed", {
           outcome: rawReadiness?.outcome,
@@ -436,6 +491,7 @@ export function createCommandExecuteBeforeHook(
               ...(startupInstruction?.metadata ?? {}),
             },
           });
+          pushSentinelPart();
           return;
         }
 
@@ -468,7 +524,13 @@ export function createCommandExecuteBeforeHook(
             typeof pluginContext?.listChangedFiles === "function"
               ? (() => {
                   try {
-                    return pluginContext.listChangedFiles();
+                    return pluginContext.listChangedFiles({
+                      hook: "command-execute-before",
+                      stage: "baseline-proposal-refresh",
+                      sessionID: context.sessionID,
+                      workflow: context.commandName,
+                      phase: context.phase,
+                    });
                   } catch {
                     return [];
                   }
@@ -603,6 +665,7 @@ export function createCommandExecuteBeforeHook(
             phase: "start",
           },
         });
+        pushSentinelPart(readiness);
         pluginContext?.debug?.log?.(
           "command-execute-before",
           "start instruction pushed to output.parts",

@@ -26,10 +26,13 @@ import { createCommandExecuteBeforeHook } from "./hooks/command-execute-before.j
 import { createToolExecuteBeforeHook } from "./hooks/tool-execute-before.js";
 import { createToolExecuteAfterHook } from "./hooks/tool-execute-after.js";
 import { createPermissionAskedHook } from "./hooks/permission-asked.js";
-import { createFileEditedHook } from "./hooks/file-edited.js";
 import { createNativeEventHook } from "./hooks/native-event.js";
 import { resolveWorkflowPolicy } from "./services/workflow/resolve-workflow-policy.js";
-import { runGitAction, runGitCommand } from "./services/git/run-git-command.js";
+import {
+  buildGitFailureDiagnostics,
+  runGitAction,
+  runGitCommand,
+} from "./services/git/run-git-command.js";
 import { buildRecoveryPrompt } from "./services/approval/build-recovery-prompt.js";
 import { buildQuestionInstruction } from "./services/approval/build-question-instruction.js";
 import {
@@ -184,21 +187,42 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       runtimeConfig,
       directory,
       debug: debugLogger,
-      gitRunner: runGitCommand,
-      gitActionRunner: ({ action }) =>
+      gitRunner: (options = {}) =>
+        runGitCommand({
+          ...options,
+          directory: options.directory || directory,
+          debug: options.debug || debugLogger,
+        }),
+      gitActionRunner: ({ action, trace = null }) =>
         runGitAction({
           directory,
           action,
+          debug: debugLogger,
+          trace,
         }),
       resolvePolicy: (workflowContext) => resolveWorkflowPolicy(workflowContext, runtimeConfig.config),
-      listChangedFiles() {
+      listChangedFiles(trace = null) {
         try {
           const stdout = runGitCommand({
             directory,
             command: "status-porcelain",
+            debug: debugLogger,
+            trace,
           });
           return parseStatusPorcelainPaths(stdout);
-        } catch {
+        } catch (error) {
+          debugLogger.log(
+            "git.status",
+            "git status enumeration failed; returning empty change list",
+            buildGitFailureDiagnostics(error, {
+              directory,
+              args: ["status", "--short", "--untracked-files=all"],
+              timeoutMs: 1500,
+              command: "status-porcelain",
+              operation: "listChangedFiles",
+              trace,
+            }),
+          );
           return [];
         }
       },
@@ -444,7 +468,6 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         audit,
         pluginContext,
       }),
-      "file.edited": createFileEditedHook({ workflowState, pluginContext }),
       // Native event router. `command.executed` delegates to the legacy
       // command-execute-before factory to reuse workflow detection /
       // readiness / branch / init planning. `session.deleted` still clears

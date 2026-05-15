@@ -31,43 +31,121 @@ function resolveAllowedArgs(command) {
   return [...ALLOWED_COMMANDS.get(command)];
 }
 
-function execGitSync(directory, args, timeoutMs) {
-  return execFileSync("git", args, {
+function buildGitEnv() {
+  return {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || "DevAI AIDD",
+    GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL || "devai-aidd@example.invalid",
+    GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || "DevAI AIDD",
+    GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || "devai-aidd@example.invalid",
+  };
+}
+
+function truncateDiagnostic(value, maxLength = 4000) {
+  const text = typeof value === "string" ? value : value == null ? "" : String(value);
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}...`;
+}
+
+export function buildGitFailureDiagnostics(
+  error,
+  { directory, args, timeoutMs, command = null, operation = null, startedAt = null, trace = null } = {},
+) {
+  const durationMs =
+    typeof startedAt === "bigint" ? Number(process.hrtime.bigint() - startedAt) / 1e6 : null;
+  return {
+    operation,
+    command,
+    gitExecutable: "git",
+    cwd: typeof directory === "string" && directory.length > 0 ? directory : null,
+    args: Array.isArray(args) ? [...args] : [],
+    timeoutMs: typeof timeoutMs === "number" ? timeoutMs : null,
+    durationMs,
+    pid: typeof error?.pid === "number" ? error.pid : null,
+    errorName: error?.name || null,
+    errorCode: error?.code || null,
+    errorErrno: error?.errno ?? null,
+    errorStatus: typeof error?.status === "number" ? error.status : null,
+    errorSignal: error?.signal || null,
+    errorSyscall: error?.syscall || null,
+    errorPath: error?.path || null,
+    errorSpawnargs: Array.isArray(error?.spawnargs) ? [...error.spawnargs] : null,
+    errorMessage: error?.message ? truncateDiagnostic(error.message) : null,
+    stdout: error?.stdout ? truncateDiagnostic(error.stdout) : null,
+    stderr: error?.stderr ? truncateDiagnostic(error.stderr) : null,
+    pathEnv: process.env.PATH || null,
+    trace: trace && typeof trace === "object" ? { ...trace } : null,
+  };
+}
+
+function logGitFailure(debug, message, error, context) {
+  debug?.log?.("git-subprocess", message, buildGitFailureDiagnostics(error, context));
+}
+
+function execGitSync(directory, args, timeoutMs, debugContext = null) {
+  const startedAt = process.hrtime.bigint();
+  try {
+    return execFileSync("git", args, {
     cwd: directory,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: timeoutMs,
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: "0",
-      GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || "DevAI AIDD",
-      GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL || "devai-aidd@example.invalid",
-      GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || "DevAI AIDD",
-      GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || "devai-aidd@example.invalid",
-    },
-  });
+    env: buildGitEnv(),
+    });
+  } catch (error) {
+    logGitFailure(debugContext?.debug, debugContext?.message || "git sync command failed", error, {
+      directory,
+      args,
+      timeoutMs,
+      command: debugContext?.command || null,
+      operation: debugContext?.operation || null,
+      startedAt,
+      trace: debugContext?.trace || null,
+    });
+    throw error;
+  }
 }
 
-async function execGit(directory, args, timeoutMs) {
-  const { stdout } = await execFileAsync("git", args, {
-    cwd: directory,
-    encoding: "utf8",
-    timeout: timeoutMs,
-    env: {
-      ...process.env,
-      GIT_TERMINAL_PROMPT: "0",
-    },
-  });
-  return stdout;
+async function execGit(directory, args, timeoutMs, debugContext = null) {
+  const startedAt = process.hrtime.bigint();
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd: directory,
+      encoding: "utf8",
+      timeout: timeoutMs,
+      env: buildGitEnv(),
+    });
+    return stdout;
+  } catch (error) {
+    logGitFailure(debugContext?.debug, debugContext?.message || "git async command failed", error, {
+      directory,
+      args,
+      timeoutMs,
+      command: debugContext?.command || null,
+      operation: debugContext?.operation || null,
+      startedAt,
+      trace: debugContext?.trace || null,
+    });
+    throw error;
+  }
 }
 
-export function runGitCommand({ directory, command, timeoutMs = 1500 } = {}) {
+export function runGitCommand({ directory, command, timeoutMs = 1500, debug = null, trace = null } = {}) {
   if (typeof directory !== "string" || directory.length === 0) {
     throw new Error("A valid directory is required for git readiness commands.");
   }
 
   const args = resolveAllowedArgs(command);
-  return execGitSync(directory, args, timeoutMs);
+  return execGitSync(directory, args, timeoutMs, {
+    debug,
+    command,
+    operation: "runGitCommand",
+    message: "git readiness command failed",
+    trace,
+  });
 }
 
 /**
@@ -83,7 +161,7 @@ export function runGitCommand({ directory, command, timeoutMs = 1500 } = {}) {
  *     --pathspec-file-nul` to bypass the Windows ~32K argv limit when the
  *     proposal contains hundreds of files (typical brownfield baseline).
  *
- * @param {{ message?: string|null, files?: string[]|null, allowEmpty?: boolean }} action
+ * @param {{ message?: string|null, files?: string[]|null, allowEmpty?: boolean, allFiles?: boolean }} action
  * @param {{ pathspecFromFile?: string|null }} [options]
  * @returns {{ addArgs: string[]|null, commitArgs: string[] }}
  */
@@ -106,6 +184,13 @@ export function buildCommitArgs(action, options = {}) {
     return {
       addArgs: null,
       commitArgs: ["commit", "--allow-empty", "-m", message],
+    };
+  }
+
+  if (action.allFiles === true) {
+    return {
+      addArgs: ["add", "-A"],
+      commitArgs: ["commit", "-m", message],
     };
   }
 
@@ -192,7 +277,7 @@ export function buildBranchArgs(action) {
   throw new Error(`Unsupported branch operation: ${String(operation)}`);
 }
 
-export async function runGitAction({ directory, action, timeoutMs = 5000 } = {}) {
+export async function runGitAction({ directory, action, timeoutMs = 5000, debug = null, trace = null } = {}) {
   if (typeof directory !== "string" || directory.length === 0) {
     throw new Error("A valid directory is required for git action commands.");
   }
@@ -218,9 +303,21 @@ export async function runGitAction({ directory, action, timeoutMs = 5000 } = {})
         useFileMode ? { pathspecFromFile: pathspecFile } : {},
       );
       if (Array.isArray(addArgs) && addArgs.length > 0) {
-        await execGit(directory, addArgs, timeoutMs);
+        await execGit(directory, addArgs, timeoutMs, {
+          debug,
+          operation: "runGitAction",
+          command: "commit:add",
+          message: "git action failed",
+          trace,
+        });
       }
-      const stdout = await execGit(directory, commitArgs, timeoutMs);
+      const stdout = await execGit(directory, commitArgs, timeoutMs, {
+        debug,
+        operation: "runGitAction",
+        command: "commit",
+        message: "git action failed",
+        trace,
+      });
       return { stdout, observedState: null };
     } finally {
       if (pathspecDir) {
@@ -235,7 +332,13 @@ export async function runGitAction({ directory, action, timeoutMs = 5000 } = {})
 
   if (action.kind === "push") {
     const args = buildPushArgs(action);
-    const stdout = await execGit(directory, args, timeoutMs);
+    const stdout = await execGit(directory, args, timeoutMs, {
+      debug,
+      operation: "runGitAction",
+      command: "push",
+      message: "git action failed",
+      trace,
+    });
     return { stdout, observedState: null };
   }
 
@@ -244,16 +347,36 @@ export async function runGitAction({ directory, action, timeoutMs = 5000 } = {})
     // read-only readiness probes invoked via `runGitCommand`. `runGitAction`
     // dispatches on `action.kind` and is the canonical write path; init joins
     // commit/push here without traversing the read-only allowlist.
-    const stdout = await execGit(directory, ["init"], timeoutMs);
+    const stdout = await execGit(directory, ["init"], timeoutMs, {
+      debug,
+      operation: "runGitAction",
+      command: "init",
+      message: "git action failed",
+      trace,
+    });
     return { stdout, observedState: null };
   }
 
   if (action.kind === "branch") {
     const args = buildBranchArgs(action);
-    const stdout = await execGit(directory, args, timeoutMs);
+    const stdout = await execGit(directory, args, timeoutMs, {
+      debug,
+      operation: "runGitAction",
+      command: `branch:${action.operation || "unknown"}`,
+      message: "git action failed",
+      trace,
+    });
     let headBranch = null;
     try {
-      headBranch = (await execGit(directory, ["symbolic-ref", "--short", "HEAD"], timeoutMs)).trim();
+      headBranch = (
+        await execGit(directory, ["symbolic-ref", "--short", "HEAD"], timeoutMs, {
+          debug,
+          operation: "runGitAction",
+          command: "branch:resolve-head",
+          message: "git action failed",
+          trace,
+        })
+      ).trim();
     } catch {
       headBranch = null;
     }

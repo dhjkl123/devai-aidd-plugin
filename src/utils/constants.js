@@ -31,17 +31,19 @@ export const STATE_DIRECTORY_NAME = "devai-aidd-plugin";
 // `SUPPORTED_HOOK_KEYS` remains the canonical native plugin surface list.
 // surface and regression tests (Story 4.5 src/dist parity) intact. The legacy
 // named handlers (`command.execute.before`, `tool.execute.before`,
-// `tool.execute.after`, `permission.asked`, `file.edited`) are now
-// **compatibility-only** ingress points retained for the in-process test
-// harness and any non-native invocation path; they are NOT required for native
-// opencode operation.
+// `tool.execute.after`, `permission.asked`) are now **compatibility-only**
+// ingress points retained for the in-process test harness and any non-native
+// invocation path; they are NOT required for native opencode operation.
+//
+// `file.edited` was removed when workflow finalization switched to a single
+// git-status source — the opencode runtime publishes `file.edited` events
+// without sessionID, so the handler could not attribute edits to a session.
 export const SUPPORTED_HOOK_KEYS = Object.freeze([
   "tool",
   "command.execute.before",
   "tool.execute.before",
   "tool.execute.after",
   "permission.asked",
-  "file.edited",
   "event",
 ]);
 
@@ -60,5 +62,4 @@ export const NATIVE_EVENT_TYPES = Object.freeze([
 // Under native operation they remain available as compatibility shims.
 export const WRAPPER_ONLY_HOOK_KEYS = Object.freeze([
   "permission.asked",
-  "file.edited",
 ]);

@@ -28,9 +28,10 @@ import { executeGitAction } from "./git-executor.js";
  *   targetBranch?: string|null,
  *   correlationId?: string|null,
  *   files?: string[]|null,
+ *   allFiles?: boolean,
  * }} input
  * @param {{ logger?: { warn?: (message: string, payload?: object) => void } | null }} [options]
- * @returns {{ kind: "commit", operation: "commit", branchName: string|null, targetBranch: string|null, remoteName: null, correlationId: string|null, message: string|null, files: string[] }}
+ * @returns {{ kind: "commit", operation: "commit", branchName: string|null, targetBranch: string|null, remoteName: null, correlationId: string|null, message: string|null, files: string[], allFiles: boolean }}
  */
 export function buildCommitAction(input = {}, options = {}) {
   const filesProvided = Object.prototype.hasOwnProperty.call(input, "files");
@@ -60,6 +61,7 @@ export function buildCommitAction(input = {}, options = {}) {
         : null,
     message: typeof input.message === "string" ? input.message : null,
     files: filesArray,
+    allFiles: input.allFiles === true,
     // strengthen-git-init-proposal Task 5: propagate the baseline-commit
     // allowEmpty flag so `buildCommitArgs` can swap the standard
     // `add + commit -- <pathspec>` for `commit --allow-empty -m <message>`.
