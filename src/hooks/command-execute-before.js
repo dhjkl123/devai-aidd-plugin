@@ -182,6 +182,11 @@ function shouldInjectFinalizationSentinel(directory) {
   }
 }
 
+function isCommitFinalizationPolicy(policy) {
+  const mode = policy?.finalization;
+  return mode === "commit-and-push" || mode === "commit-optional-push";
+}
+
 export function createCommandExecuteBeforeHook(
   { workflowCommands, workflowState, audit, pluginContext, branchConfig } = {},
 ) {
@@ -198,7 +203,7 @@ export function createCommandExecuteBeforeHook(
         workflowCommandCount: workflowCommands?.size ?? null,
       });
       if (context) {
-        const pushSentinelPart = (readiness) => {
+        const pushSentinelPart = (readiness, workflowPolicy) => {
           if (!shouldInjectFinalizationSentinel(pluginContext?.directory)) {
             pluginContext?.debug?.log?.(
               "command-execute-before",
@@ -209,6 +214,20 @@ export function createCommandExecuteBeforeHook(
                 readinessOutcome: readiness?.outcome ?? null,
                 readinessReason: readiness?.reason ?? null,
                 isGitRepository: readiness?.details?.isGitRepository ?? null,
+              },
+            );
+            return;
+          }
+          if (!isCommitFinalizationPolicy(workflowPolicy)) {
+            pluginContext?.debug?.log?.(
+              "command-execute-before",
+              "finalization sentinel skipped because workflow policy does not require commit finalization",
+              {
+                sessionID: context.sessionID,
+                commandName: context.commandName,
+                readinessOutcome: readiness?.outcome ?? null,
+                readinessReason: readiness?.reason ?? null,
+                finalizationMode: workflowPolicy?.finalization ?? null,
               },
             );
             return;
@@ -580,7 +599,7 @@ export function createCommandExecuteBeforeHook(
               ...(startupInstruction?.metadata ?? {}),
             },
           });
-          pushSentinelPart();
+          pushSentinelPart(readiness, workflowPolicy);
           return;
         }
 
@@ -754,7 +773,7 @@ export function createCommandExecuteBeforeHook(
             phase: "start",
           },
         });
-        pushSentinelPart(readiness);
+        pushSentinelPart(readiness, workflowPolicy);
         pluginContext?.debug?.log?.(
           "command-execute-before",
           "start instruction pushed to output.parts",

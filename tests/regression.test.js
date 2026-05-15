@@ -9878,8 +9878,8 @@ async function verifyCommitProposalMessageUsesKoreanTemplate() {
   assert.ok(proposal, "proposal must be produced when finalization is allowed");
   assert.equal(
     proposal.message,
-    "?뚰겕?뚮줈???꾨즺(bmad-bmm-quick-dev): implementation ?곗텧臾??낅뜲?댄듃",
-    "commit message must use the Korean template aligned with document_output_language",
+    "Finalize workflow (bmad-bmm-quick-dev): update implementation outputs",
+    "commit message must use the stable finalization template",
   );
 
   const directProposal = buildDirectCommitProposal({
@@ -9897,8 +9897,8 @@ async function verifyCommitProposalMessageUsesKoreanTemplate() {
   assert.equal(directProposal?.allFiles, true);
   assert.equal(
     directProposal?.message,
-    "?뚰겕?뚮줈???꾨즺(bmad-bmm-quick-dev): implementation ?곗텧臾??낅뜲?댄듃",
-    "direct commit proposal must reuse the same Korean message template",
+    "Finalize workflow (bmad-bmm-quick-dev): update implementation outputs",
+    "direct commit proposal must reuse the same finalization template",
   );
 }
 
@@ -11235,7 +11235,7 @@ async function verifyStory35CommitExplanationSurfacesScopeWithoutSensitiveData()
     commitProposal: {
       kind: "commit",
       action: "commit",
-      message: "?뚰겕?뚮줈???꾨즺(bmad-bmm-quick-dev): implementation ?곗텧臾??낅뜲?댄듃",
+      message: "Finalize workflow (bmad-bmm-quick-dev): update implementation outputs",
       artifactScope: "implementation",
       artifactKinds: ["code", "technical-doc"],
       changeCountSummary: "2 code files, 1 technical-doc file",
@@ -11349,7 +11349,7 @@ async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability(
       proposal: {
         kind: "commit",
         action: "commit",
-        message: "?뚰겕?뚮줈???꾨즺(bmad-bmm-quick-dev): implementation ?곗텧臾??낅뜲?댄듃",
+        message: "Finalize workflow (bmad-bmm-quick-dev): update implementation outputs",
         artifactScope: "implementation",
         artifactKinds: ["code"],
         changeCountSummary: "1 code file",
@@ -11368,7 +11368,7 @@ async function verifyStory35PushFailureDoesNotInvalidateLocalCommitTraceability(
     commitProposal: {
       kind: "commit",
       action: "commit",
-      message: "?뚰겕?뚮줈???꾨즺(bmad-bmm-quick-dev): implementation ?곗텧臾??낅뜲?댄듃",
+      message: "Finalize workflow (bmad-bmm-quick-dev): update implementation outputs",
       artifactScope: "implementation",
       artifactKinds: ["code"],
       changeCountSummary: "1 code file",
@@ -14406,5 +14406,6 @@ async function verifyQuestionHeaderGuardMatchesActiveApproval() {
 
   console.log("verifyQuestionHeaderGuardMatchesActiveApproval OK");
 }
+
 
 

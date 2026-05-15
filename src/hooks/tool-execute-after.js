@@ -300,6 +300,24 @@ function hasQuotedCommitMessage(command, message) {
   );
 }
 
+function normalizeShellCommand(command) {
+  return typeof command === "string" ? command.trim() : "";
+}
+
+function isDelegatedFinalizationStatusCheck(command) {
+  const raw = normalizeShellCommand(command);
+  if (raw.length === 0) return false;
+  return (
+    /^git\s+status(?:\s|$)/i.test(raw) ||
+    /^git\s+status\s+--short(?:\s|$)/i.test(raw) ||
+    /^git\s+status\s+--porcelain(?:\s|$)/i.test(raw)
+  );
+}
+
+function isCommitFinalizationMode(finalizationMode) {
+  return finalizationMode === "commit-and-push" || finalizationMode === "commit-optional-push";
+}
+
 function matchesDelegatedCommitCommand(command, delegatedFinalization) {
   if (delegatedFinalization?.stage !== "awaiting-commit") return false;
   if (typeof command !== "string" || command.length === 0) return false;
@@ -517,26 +535,38 @@ export function createToolExecuteAfterHook(
           resolvedPolicy?.outcome === "allow"
             ? resolvedPolicy.details?.policy || null
             : null;
-        const directCommitProposal = buildDirectCommitProposal({
-          workflowContext,
-          workflowPolicy,
-          changedFiles: finishedState?.touchedFiles ?? [],
-        });
+        const directCommitProposal = isCommitFinalizationMode(workflowPolicy?.finalization)
+          ? buildDirectCommitProposal({
+              workflowContext,
+              workflowPolicy,
+              changedFiles: finishedState?.touchedFiles ?? [],
+            })
+          : null;
         const commitProposal = finishedState?.commitProposal ?? directCommitProposal ?? null;
         if (!commitProposal) {
           workflowState.set(
             sessionID,
             buildTerminalFinalizationState(finishedState ?? state, {
               outcome: "skip",
-              reason: "no-working-tree-changes",
+              reason: isCommitFinalizationMode(workflowPolicy?.finalization)
+                ? "no-working-tree-changes"
+                : "finalization-not-forced",
               resolvedAt: new Date().toISOString(),
             }),
           );
           pluginContext?.debug?.log?.(
             "tool-execute-after",
-            "sentinel commit ??no changed files available, nothing to commit",
-            { sessionID },
+            isCommitFinalizationMode(workflowPolicy?.finalization)
+              ? "sentinel commit ??no changed files available, nothing to commit"
+              : "sentinel commit ??workflow policy does not allow commit finalization",
+            {
+              sessionID,
+              finalizationMode: workflowPolicy?.finalization ?? null,
+            },
           );
+          const skipReason = isCommitFinalizationMode(workflowPolicy?.finalization)
+            ? "no-working-tree-changes"
+            : "finalization-not-forced";
           try {
             await audit?.info?.("workflow.finalization.sentinel.skipped", {
               event: "workflow.finalization.sentinel.skipped",
@@ -547,7 +577,7 @@ export function createToolExecuteAfterHook(
               outcome: "skip",
               details: {
                 phase: finishedState?.phase ?? state.phase ?? null,
-                reason: "no-working-tree-changes",
+                reason: skipReason,
               },
             });
           } catch {
@@ -555,7 +585,9 @@ export function createToolExecuteAfterHook(
           }
           appendDelegatedFinalizationNotice(output, [
             "[Git workflow guard - finalization resolved]",
-            "There are no remaining working-tree changes to commit.",
+            isCommitFinalizationMode(workflowPolicy?.finalization)
+              ? "There are no remaining working-tree changes to commit."
+              : "This workflow policy does not allow commit finalization.",
             "Finish the workflow normally without asking the finalization question again.",
           ]);
           return;
@@ -611,6 +643,18 @@ export function createToolExecuteAfterHook(
       const sessionStateForGit = workflowState?.get?.(input?.sessionID) ?? null;
       const delegatedFinalization = sessionStateForGit?.delegatedFinalization ?? null;
       const command = input?.args?.command ?? "";
+      if (isDelegatedFinalizationStatusCheck(command) && delegatedFinalization?.stage === "awaiting-commit") {
+        pluginContext?.debug?.log?.(
+          "tool-execute-after",
+          "delegated finalization status re-check preserved phase",
+          {
+            sessionID: input?.sessionID,
+            callID: input?.callID ?? null,
+            phase: sessionStateForGit?.phase ?? null,
+          },
+        );
+        return;
+      }
       if (matchesDelegatedCommitCommand(command, delegatedFinalization)) {
         if (isSuccessfulToolExecution(output)) {
           workflowState.set(
@@ -657,6 +701,7 @@ export function createToolExecuteAfterHook(
             // best-effort
           }
         }
+        return;
       }
     }
     if (input?.tool === "finish") {

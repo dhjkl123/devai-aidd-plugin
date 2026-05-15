@@ -32,12 +32,12 @@ export function buildSuggestedCommitMessage(workflowContext, artifactScope) {
   const workflowName =
     typeof workflowContext?.commandName === "string" && workflowContext.commandName.length > 0
       ? workflowContext.commandName
-      : "?Œí¬?Œë¡œ??";
+      : "workflow";
   const scope =
     typeof artifactScope === "string" && artifactScope.length > 0
       ? artifactScope
-      : "?Œí¬?Œë¡œ??";
-  return `?Œí¬?Œë¡œ???„ë£Œ(${workflowName}): ${scope} ?°ì¶œë¬??…ë°?´íŠ¸`;
+      : "workflow";
+  return `Finalize workflow (${workflowName}): update ${scope} outputs`;
 }
 
 function generateAttemptToken() {
@@ -127,4 +127,3 @@ export function buildDirectCommitProposal({
     correlationPrefix: "commit-all",
   });
 }
-
