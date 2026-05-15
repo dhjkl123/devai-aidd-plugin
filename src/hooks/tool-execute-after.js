@@ -599,6 +599,8 @@ export function createToolExecuteAfterHook(
         appendDelegatedFinalizationNotice(output, [
           "[Git workflow guard - delegated finalization active]",
           `The user chose Commit. Run the final git commit yourself with the exact suggested message: \`${commitProposal.message}\`.`,
+          "First run `git status` immediately before the commit decision. If it is empty, wait briefly and retry `git status` 2 to 3 more times in the same turn.",
+          "If any retry shows changed files, perform the commit in that same turn with the exact suggested message.",
           "Do not ask another approval question and do not run unrelated git commands.",
           "After the commit succeeds, finish the workflow normally.",
         ]);
