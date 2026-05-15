@@ -219,7 +219,14 @@ export function buildBranchProposal({ strategy, candidateName, currentBranch } =
 
   const current = typeof currentBranch === "string" && currentBranch.length > 0 ? currentBranch : null;
   if (current === candidateName) {
-    return null;
+    return {
+      kind: "branch",
+      action: "stay",
+      name: candidateName,
+      reason: "current-branch-matches-candidate",
+      current,
+      policyMatch: strategy.policyMatch,
+    };
   }
 
   let action = "switch";

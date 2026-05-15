@@ -161,6 +161,12 @@ export function createWorkflowStateStore() {
       if (Array.isArray(copy.startupChainHistory)) {
         copy.startupChainHistory = structuredClone(copy.startupChainHistory);
       }
+      if (copy.workflowRunCurrent !== null && copy.workflowRunCurrent !== undefined) {
+        copy.workflowRunCurrent = structuredClone(copy.workflowRunCurrent);
+      }
+      if (Array.isArray(copy.workflowRunHistory)) {
+        copy.workflowRunHistory = structuredClone(copy.workflowRunHistory);
+      }
       // Story 2.5: deep-clone the recovery gate so callers cannot tamper with
       // gate state, options, or history through the returned snapshot.
       if (copy.recoveryGate !== null && copy.recoveryGate !== undefined) {

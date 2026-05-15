@@ -152,16 +152,42 @@ export function buildQuestionInstruction({ commandName, actionType, proposal } =
   if (actionType === "branch/create") {
     return finalize({
       header: "Create Branch",
-      options: ["Approve (Recommended)", "Ignore and continue"],
+      options: [
+        "Create New Branch (Recommended)",
+        "Stay On Current Branch",
+        "Skip",
+      ],
       lines: [
         guardLine,
-        "This workflow needs a dedicated branch before continuing.",
+        "This workflow should not continue on the current branch without an explicit branch decision.",
         "Ask the user the `Create Branch` question with these exact options:",
-        "1. `Approve (Recommended)`",
-        "2. `Ignore and continue`",
+        "1. `Create New Branch (Recommended)`",
+        "2. `Stay On Current Branch`",
+        "3. `Skip`",
         "Suggested branch name: `" + safeName + "`.",
-        "If the user chooses Approve, create the branch with the suggested name only after that approval.",
-        "If the user chooses Ignore and continue, proceed with the workflow on the current branch without creating a new one.",
+        "Explain to the user that the branch recommendation is based on the current workflow context and repository branch state.",
+        "If the user chooses Create New Branch, create the branch with the suggested name only after that approval.",
+        "If the user chooses Stay On Current Branch, continue the workflow on the current branch without creating a new branch.",
+        "If the user chooses Skip, continue the workflow without any automatic branch change and without reopening this branch question in the same run.",
+        "Do not run git or modify files before the user answers this question.",
+      ],
+    });
+  }
+
+  if (actionType === "branch/stay") {
+    return finalize({
+      header: "Branch Decision",
+      options: ["Proceed On Current Branch (Recommended)", "Skip"],
+      lines: [
+        guardLine,
+        "The current branch already matches the recommended workflow context.",
+        "Ask the user the `Branch Decision` question with these exact options:",
+        "1. `Proceed On Current Branch (Recommended)`",
+        "2. `Skip`",
+        "Current branch: `" + safeName + "`.",
+        "Explain to the user that the branch recommendation is based on the current workflow context and repository branch state.",
+        "If the user chooses Proceed On Current Branch, continue the workflow on the current branch without switching or creating a branch.",
+        "If the user chooses Skip, continue the workflow without any automatic branch change and without reopening this branch question in the same run.",
         "Do not run git or modify files before the user answers this question.",
       ],
     });
@@ -170,16 +196,23 @@ export function buildQuestionInstruction({ commandName, actionType, proposal } =
   if (actionType === "branch/switch") {
     return finalize({
       header: "Switch Branch",
-      options: ["Approve (Recommended)", "Ignore and continue"],
+      options: [
+        "Switch Branch (Recommended)",
+        "Stay On Current Branch",
+        "Skip",
+      ],
       lines: [
         guardLine,
-        "This workflow expects a different branch than the current one.",
+        "This workflow likely belongs on a different existing branch than the current one.",
         "Ask the user the `Switch Branch` question with these exact options:",
-        "1. `Approve (Recommended)`",
-        "2. `Ignore and continue`",
+        "1. `Switch Branch (Recommended)`",
+        "2. `Stay On Current Branch`",
+        "3. `Skip`",
         "Target branch: `" + safeName + "`.",
-        "If the user chooses Approve, switch to the target branch only after that approval.",
-        "If the user chooses Ignore and continue, proceed with the workflow on the current branch without switching.",
+        "Explain to the user that the branch recommendation is based on the current workflow context and repository branch state.",
+        "If the user chooses Switch Branch, switch to the target branch only after that approval.",
+        "If the user chooses Stay On Current Branch, continue the workflow on the current branch without switching.",
+        "If the user chooses Skip, continue the workflow without any automatic branch change and without reopening this branch question in the same run.",
         "Do not run git or modify files before the user answers this question.",
       ],
     });

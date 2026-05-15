@@ -289,6 +289,12 @@
       "branchRequired": true,
       "finalization": "commit-optional-push"
     },
+    "bmad-index-docs": {
+      "category": "docs",
+      "identityStrategy": "artifact-or-args",
+      "branchRequired": true,
+      "finalization": "commit-optional-push"
+    },
     "bmad-bmm-sprint-planning": {
       "category": "planning",
       "identityStrategy": "artifact-singleton",

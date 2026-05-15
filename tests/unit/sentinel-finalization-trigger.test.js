@@ -100,8 +100,30 @@ function createCommitReadyPluginContext({
         details: {
           policy: {
             category: "workflow",
-            finalization: "commit-only",
+            finalization: "commit-and-push",
             identityStrategy: "workflow-scope",
+          },
+        },
+      };
+    },
+  };
+}
+
+function createPolicyPluginContext(finalization) {
+  return {
+    debug: { log: () => {} },
+    directory: projectRoot,
+    listChangedFiles() {
+      return ["index.html"];
+    },
+    resolvePolicy() {
+      return {
+        outcome: "allow",
+        details: {
+          policy: {
+            category: "docs",
+            finalization,
+            identityStrategy: "ticket-or-args",
           },
         },
       };
@@ -136,7 +158,7 @@ const minimalPluginContext = { debug: { log: () => {} }, directory: projectRoot 
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Verify 2: "Commit" answer triggers commit execution (no extra approval prompt)
+// Verify 2: "Commit" answer opens delegated commit execution (no extra approval prompt)
 // ───────────────────────────────────────────────────────────────────────────
 {
   const workflowState = createStubStore();
@@ -183,13 +205,11 @@ const minimalPluginContext = { debug: { log: () => {} }, directory: projectRoot 
 
   const delegated = audit.findOf("workflow.finalization.delegated");
   assert.equal(delegated.length, 1, "delegated finalization audit emitted once");
-
   assert.equal(
     workflowState.get(sessionID).finalizationTriggered,
     true,
     "finalizationTriggered flag set true",
   );
-
   assert.equal(
     workflowState.get(sessionID).delegatedFinalization?.stage,
     "awaiting-commit",
@@ -351,6 +371,48 @@ const minimalPluginContext = { debug: { log: () => {} }, directory: projectRoot 
   assert.equal(skipped[0].payload?.details?.reason, "no-working-tree-changes");
   assert.equal(workflowState.get(sessionID).delegatedFinalization ?? null, null);
   assert.equal(workflowState.get(sessionID).finalizationCompletion?.reason, "no-working-tree-changes");
+}
+
+// Verify 2-e: "Commit" does not bypass a no-forced-finalization policy
+{
+  const workflowState = createStubStore();
+  const audit = createAudit();
+  const sessionID = "session-policy-light-commit";
+  const pluginContext = createPolicyPluginContext("no-forced-finalization");
+  workflowState.set(sessionID, {
+    commandName: "policy-light",
+    arguments: "",
+    detectedAt: new Date().toISOString(),
+    phase: "mutating",
+    touchedFiles: [{ path: "docs/index.md", kind: "technical-doc" }],
+    finalizationTriggered: false,
+  });
+
+  const hook = createToolExecuteAfterHook({
+    workflowState,
+    audit,
+    pluginContext,
+  });
+
+  const input = {
+    tool: "question",
+    sessionID,
+    args: {
+      questions: [
+        { header: FINALIZATION_SENTINEL_HEADER, options: ["Commit", "Skip"] },
+      ],
+    },
+  };
+  const output = { metadata: { answers: [["Commit"]] } };
+  await hook(input, output);
+
+  assert.equal(
+    audit.countOf("workflow.finalization.delegated"),
+    0,
+    "policy-light workflow must not open delegated finalization on Commit",
+  );
+  assert.equal(workflowState.get(sessionID).delegatedFinalization ?? null, null);
+  assert.equal(workflowState.get(sessionID).finalizationCompletion?.reason, "finalization-not-forced");
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -643,6 +705,88 @@ const minimalPluginContext = { debug: { log: () => {} }, directory: projectRoot 
   } finally {
     fs.rmSync(tempWorkspace, { force: true, recursive: true });
   }
+}
+
+// Verify 8: command-execute-before does not inject sentinel for no-forced-finalization
+{
+  const workflowState = createStubStore();
+  const audit = createAudit();
+  const output = { parts: [] };
+
+  const hook = createCommandExecuteBeforeHook({
+    workflowCommands: new Set(["policy-light"]),
+    workflowState,
+    audit,
+    branchConfig: {},
+    pluginContext: {
+      directory: projectRoot,
+      runtimeConfig: { config: { readiness: { skipInitAndBaseline: true } } },
+      resolvePolicy() {
+        return {
+          outcome: "allow",
+          details: {
+            policy: {
+              category: "docs",
+              identityStrategy: "ticket-or-args",
+              branchRequired: false,
+              finalization: "no-forced-finalization",
+            },
+          },
+        };
+      },
+      debug: { log: () => {} },
+    },
+  });
+
+  await hook({ command: "/policy-light", arguments: "", sessionID: "policy-light-no-sentinel" }, output);
+  assert.equal(
+    output.parts.some(
+      (part) => typeof part?.text === "string" && part.text.includes(FINALIZATION_SENTINEL_HEADER),
+    ),
+    false,
+    "policy-light workflow must not receive finalization sentinel instruction",
+  );
+}
+
+// Verify 9: command-execute-before does not inject sentinel when policy resolution is not allow
+{
+  const workflowState = createStubStore();
+  const audit = createAudit();
+  const output = { parts: [] };
+
+  const hook = createCommandExecuteBeforeHook({
+    workflowCommands: new Set(["policy-missing"]),
+    workflowState,
+    audit,
+    branchConfig: {},
+    pluginContext: {
+      directory: projectRoot,
+      runtimeConfig: { config: { readiness: { skipInitAndBaseline: true } } },
+      resolvePolicy() {
+        return {
+          outcome: "ask",
+          details: {
+            fallback: {
+              category: "uncategorized",
+              identityStrategy: "ticket-or-args",
+              branchRequired: false,
+              finalization: "no-forced-finalization",
+            },
+          },
+        };
+      },
+      debug: { log: () => {} },
+    },
+  });
+
+  await hook({ command: "/policy-missing", arguments: "", sessionID: "policy-ask-no-sentinel" }, output);
+  assert.equal(
+    output.parts.some(
+      (part) => typeof part?.text === "string" && part.text.includes(FINALIZATION_SENTINEL_HEADER),
+    ),
+    false,
+    "policy ask/fallback workflow must not receive finalization sentinel instruction",
+  );
 }
 
 console.log("sentinel-finalization-trigger.test.js: PASS");

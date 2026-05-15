@@ -7,7 +7,7 @@ import {
   runScenario,
 } from "./helpers.js";
 
-async function startupBranchIgnoreResolvesWithoutRecovery() {
+async function startupBranchStayResolvesWithoutRecovery() {
   const directory = createTempWorkspace({ initializeGit: true, withInitialCommit: true });
   try {
     const { handlers, mock } = await bootstrapPlugin(directory);
@@ -32,7 +32,11 @@ async function startupBranchIgnoreResolvesWithoutRecovery() {
             {
               id: `${startupChainId}:branch`,
               header: "Create Branch `feat/ABC-123-ignore`",
-              options: ["Approve (Recommended)", "Ignore and continue"],
+              options: [
+                "Create New Branch (Recommended)",
+                "Stay On Current Branch",
+                "Skip",
+              ],
             },
           ],
         },
@@ -44,7 +48,7 @@ async function startupBranchIgnoreResolvesWithoutRecovery() {
         type: "question.replied",
         properties: {
           sessionID,
-          answers: [["Ignore and continue"]],
+          answers: [["Stay On Current Branch"]],
         },
       },
     });
@@ -58,6 +62,6 @@ async function startupBranchIgnoreResolvesWithoutRecovery() {
 }
 
 await runScenario(
-  "startup branch ignore resolves without recovery",
-  startupBranchIgnoreResolvesWithoutRecovery,
+  "startup branch stay resolves without recovery",
+  startupBranchStayResolvesWithoutRecovery,
 );

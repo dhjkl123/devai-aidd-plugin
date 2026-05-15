@@ -27,6 +27,12 @@ import {
   buildStartupChainQuestionInstruction,
 } from "../services/approval/build-startup-chain-question-instruction.js";
 import { buildFinalizationSentinelInstruction } from "../services/approval/build-finalization-sentinel-instruction.js";
+import {
+  describeStartupChainSkip,
+  resolveWorkflowRunTransition,
+  updateWorkflowRunFinalization,
+  updateWorkflowRunStartup,
+} from "../services/workflow/workflow-run-lifecycle.js";
 
 function resolveCurrentBranch(input, context, pluginContext) {
   if (typeof input?.currentBranch === "string" && input.currentBranch.length > 0) {
@@ -176,6 +182,11 @@ function shouldInjectFinalizationSentinel(directory) {
   }
 }
 
+function isCommitFinalizationPolicy(policy) {
+  const mode = policy?.finalization;
+  return mode === "commit-and-push" || mode === "commit-optional-push";
+}
+
 export function createCommandExecuteBeforeHook(
   { workflowCommands, workflowState, audit, pluginContext, branchConfig } = {},
 ) {
@@ -192,7 +203,7 @@ export function createCommandExecuteBeforeHook(
         workflowCommandCount: workflowCommands?.size ?? null,
       });
       if (context) {
-        const pushSentinelPart = (readiness) => {
+        const pushSentinelPart = (readiness, workflowPolicy) => {
           if (!shouldInjectFinalizationSentinel(pluginContext?.directory)) {
             pluginContext?.debug?.log?.(
               "command-execute-before",
@@ -203,6 +214,20 @@ export function createCommandExecuteBeforeHook(
                 readinessOutcome: readiness?.outcome ?? null,
                 readinessReason: readiness?.reason ?? null,
                 isGitRepository: readiness?.details?.isGitRepository ?? null,
+              },
+            );
+            return;
+          }
+          if (!isCommitFinalizationPolicy(workflowPolicy)) {
+            pluginContext?.debug?.log?.(
+              "command-execute-before",
+              "finalization sentinel skipped because workflow policy does not require commit finalization",
+              {
+                sessionID: context.sessionID,
+                commandName: context.commandName,
+                readinessOutcome: readiness?.outcome ?? null,
+                readinessReason: readiness?.reason ?? null,
+                finalizationMode: workflowPolicy?.finalization ?? null,
               },
             );
             return;
@@ -218,34 +243,56 @@ export function createCommandExecuteBeforeHook(
             synthetic: true,
             metadata: sentinel.metadata,
           });
+          const currentState = workflowState.get(context.sessionID) ?? {};
           workflowState.set(context.sessionID, {
-            ...workflowState.get(context.sessionID),
-            finalizationTriggered: false,
-            delegatedFinalization: null,
-            finalizationCompletion: null,
+            ...currentState,
+            workflowRunCurrent: updateWorkflowRunFinalization(
+              currentState.workflowRunCurrent ?? null,
+              currentState.finalizationCompletion ?? null,
+            ),
           });
         };
         const priorState = workflowState.get(context.sessionID);
-        workflowState.set(context.sessionID, {
+        const runTransition = resolveWorkflowRunTransition({
+          priorState,
+          workflowContext: context,
+        });
+        const isSameRun = runTransition.reused === true;
+        const nextState = {
           ...priorState,
           ...context,
-          approvalCurrent: priorState?.approvalCurrent ?? null,
+          workflowRunCurrent: runTransition.workflowRun,
+          workflowRunHistory: Array.isArray(priorState?.workflowRunHistory)
+            ? priorState.workflowRunHistory
+            : [],
+          approvalCurrent: isSameRun ? priorState?.approvalCurrent ?? null : null,
+          pendingApprovalQuestion: isSameRun ? priorState?.pendingApprovalQuestion ?? null : null,
           approvalHistory: priorState?.approvalHistory ?? [],
-          pendingActions: Array.isArray(priorState?.pendingActions)
+          pendingActions: isSameRun && Array.isArray(priorState?.pendingActions)
             ? priorState.pendingActions
             : [],
-          startupChainCurrent: priorState?.startupChainCurrent ?? null,
-          pendingStartupQuestion: priorState?.pendingStartupQuestion ?? null,
+          startupChainCurrent: isSameRun ? priorState?.startupChainCurrent ?? null : null,
+          pendingStartupQuestion: isSameRun ? priorState?.pendingStartupQuestion ?? null : null,
           startupChainHistory: Array.isArray(priorState?.startupChainHistory)
             ? priorState.startupChainHistory
             : [],
           lastContinuationDecision: priorState?.lastContinuationDecision ?? null,
+          recoveryGate: isSameRun ? priorState?.recoveryGate ?? null : null,
+          pendingRecoveryQuestion: isSameRun ? priorState?.pendingRecoveryQuestion ?? null : null,
           readinessGate: undefined,
-          readiness: priorState?.readiness ?? undefined,
-          latestReadinessError: priorState?.latestReadinessError ?? null,
+          readiness: isSameRun ? priorState?.readiness ?? undefined : undefined,
+          latestReadinessError: isSameRun ? priorState?.latestReadinessError ?? null : null,
           branchProposal: undefined,
           initProposal: undefined,
-        });
+          commitProposal: isSameRun ? priorState?.commitProposal ?? null : null,
+          pushProposal: isSameRun ? priorState?.pushProposal ?? null : null,
+          gitInitSkipped: isSameRun ? priorState?.gitInitSkipped === true : false,
+          baselineSkipped: isSameRun ? priorState?.baselineSkipped === true : false,
+          finalizationTriggered: isSameRun ? priorState?.finalizationTriggered === true : false,
+          delegatedFinalization: isSameRun ? priorState?.delegatedFinalization ?? null : null,
+          finalizationCompletion: isSameRun ? priorState?.finalizationCompletion ?? null : null,
+        };
+        workflowState.set(context.sessionID, nextState);
         if (audit) {
           // Story 3.4: every audit emission on the finalization path is
           // best-effort. A throwing audit sink must NEVER abort the hook.
@@ -284,9 +331,8 @@ export function createCommandExecuteBeforeHook(
           });
         }
         const readinessStartedAt = process.hrtime.bigint();
-        const rawReadiness = checkRepositoryReadiness({
+        const rawReadiness = await checkRepositoryReadiness({
           directory: pluginContext?.directory,
-          gitRunner: pluginContext?.gitRunner,
           policy: workflowPolicy,
           readinessGate,
           trace: {
@@ -327,13 +373,34 @@ export function createCommandExecuteBeforeHook(
           latestReadinessError: readinessState.latestReadinessError,
         });
 
-        const stateForStartupChain = workflowState.get(context.sessionID);
         const currentBranchForStartup = resolveEffectiveCurrentBranch(
           input,
           context,
           pluginContext,
           readiness,
         );
+        const stateForStartupChain = workflowState.get(context.sessionID);
+        const startupSkip = describeStartupChainSkip({
+          workflowRun: stateForStartupChain?.workflowRunCurrent ?? null,
+          state: stateForStartupChain,
+        });
+        let startupBranchProposal = null;
+        const branchPlanningGateState = workflowState.get(context.sessionID);
+        if (
+          startupSkip.skip !== true &&
+          !shouldSkipBranchPlanning(readiness, branchPlanningGateState)
+        ) {
+          const branchPlan = await planBranchProposal({
+            workflowContext: context,
+            workflowPolicy,
+            branchConfig,
+            currentBranch: currentBranchForStartup,
+            workflowState,
+            pluginContext,
+            audit,
+          });
+          startupBranchProposal = branchPlan.proposal ?? null;
+        }
         const startupChainPlan = buildStartupChainPlan({
           readiness,
           readinessGate,
@@ -341,11 +408,13 @@ export function createCommandExecuteBeforeHook(
           workflowPolicy,
           branchConfig,
           currentBranch: currentBranchForStartup,
+          branchProposal: startupBranchProposal,
           state: stateForStartupChain,
         });
 
         let startupChainPromptDelivered = false;
         if (
+          startupSkip.skip !== true &&
           startupChainPlan.shouldAsk === true &&
           typeof pluginContext?.requestStartupChainApproval === "function"
         ) {
@@ -368,6 +437,18 @@ export function createCommandExecuteBeforeHook(
             commitProposal: null,
             branchProposal: null,
             approvalCurrent: null,
+            workflowRunCurrent: updateWorkflowRunStartup(
+              workflowState.get(context.sessionID)?.workflowRunCurrent ?? null,
+              {
+                status: "question-pending",
+                reason: "startup-chain-requested",
+                terminal: false,
+                startupChainId,
+                resolvedAt: null,
+                answers: null,
+                resolutionSource: "command.execute.before",
+              },
+            ),
           });
           if (audit) {
             try {
@@ -397,6 +478,16 @@ export function createCommandExecuteBeforeHook(
               ...workflowState.get(context.sessionID),
               startupChainCurrent: null,
               pendingStartupQuestion: null,
+              workflowRunCurrent: updateWorkflowRunStartup(
+                workflowState.get(context.sessionID)?.workflowRunCurrent ?? null,
+                {
+                  status: "not-started",
+                  reason: "prompt-delivery-failed",
+                  terminal: false,
+                  startupChainId: null,
+                  resolvedAt: null,
+                },
+              ),
             });
             if (audit) {
               try {
@@ -417,6 +508,23 @@ export function createCommandExecuteBeforeHook(
                 // best-effort
               }
             }
+          }
+        } else if (startupSkip.skip === true && audit) {
+          try {
+            await audit.info("startup.chain.skipped", {
+              event: "startup.chain.skipped",
+              timestamp: new Date().toISOString(),
+              workflow: context.commandName,
+              command: context.commandName,
+              sessionID: context.sessionID,
+              outcome: "skip",
+              details: {
+                reason: startupSkip.reason,
+                runId: stateForStartupChain?.workflowRunCurrent?.runId ?? null,
+              },
+            });
+          } catch {
+            // best-effort
           }
         }
 
@@ -491,8 +599,26 @@ export function createCommandExecuteBeforeHook(
               ...(startupInstruction?.metadata ?? {}),
             },
           });
-          pushSentinelPart();
+          pushSentinelPart(readiness, workflowPolicy);
           return;
+        }
+
+        if (startupSkip.skip !== true && startupChainPlan.shouldAsk !== true) {
+          workflowState.set(context.sessionID, {
+            ...workflowState.get(context.sessionID),
+            workflowRunCurrent: updateWorkflowRunStartup(
+              workflowState.get(context.sessionID)?.workflowRunCurrent ?? null,
+              {
+                status: "resolved",
+                reason: startupChainPlan.reason ?? "startup-not-required",
+                terminal: true,
+                startupChainId: null,
+                resolvedAt: new Date().toISOString(),
+                answers: null,
+                resolutionSource: "command.execute.before",
+              },
+            ),
+          });
         }
 
         // strengthen-approval-prompt-instructions follow-up: if the user
@@ -522,9 +648,9 @@ export function createCommandExecuteBeforeHook(
         if (baselineRequired) {
           const changedFiles =
             typeof pluginContext?.listChangedFiles === "function"
-              ? (() => {
+              ? await (async () => {
                   try {
-                    return pluginContext.listChangedFiles({
+                    return await pluginContext.listChangedFiles({
                       hook: "command-execute-before",
                       stage: "baseline-proposal-refresh",
                       sessionID: context.sessionID,
@@ -620,24 +746,6 @@ export function createCommandExecuteBeforeHook(
           }
         }
 
-        const stateForBranchGate = workflowState.get(context.sessionID);
-        if (!shouldSkipBranchPlanning(readiness, stateForBranchGate)) {
-          const currentBranch = resolveEffectiveCurrentBranch(
-            input,
-            context,
-            pluginContext,
-            readiness,
-          );
-          await planBranchProposal({
-            workflowContext: context,
-            workflowPolicy,
-            branchConfig,
-            currentBranch,
-            workflowState,
-            audit,
-          });
-        }
-
         await publishNextPlannedAction({
           workflowState,
           workflowContext: context,
@@ -665,7 +773,7 @@ export function createCommandExecuteBeforeHook(
             phase: "start",
           },
         });
-        pushSentinelPart(readiness);
+        pushSentinelPart(readiness, workflowPolicy);
         pluginContext?.debug?.log?.(
           "command-execute-before",
           "start instruction pushed to output.parts",

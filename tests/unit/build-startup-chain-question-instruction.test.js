@@ -85,8 +85,16 @@ function plan(readiness, currentBranch = null) {
       branch: "feat/ABC-123-startup-matrix",
     },
   }, "feat/ABC-123-startup-matrix");
-  assert.equal(ready.shouldAsk, false);
-  assert.equal(ready.reason, "repository-ready");
+  assert.equal(ready.shouldAsk, true);
+  assert.deepEqual(ready.steps.map((q) => q.key), ["branch"]);
+  const result = buildStartupChainQuestionInstruction({
+    ...ready,
+    startupChainId: "chain-4",
+    sessionID: "unit-session",
+    commandName: "bmad-bmm-quick-dev",
+  });
+  assert.deepEqual(result.questions[0].options, ["Proceed On Current Branch (Recommended)", "Skip"]);
+  assert.equal(result.questions[0].header, "Branch Decision");
 }
 
 {

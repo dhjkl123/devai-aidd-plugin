@@ -201,9 +201,9 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
           trace,
         }),
       resolvePolicy: (workflowContext) => resolveWorkflowPolicy(workflowContext, runtimeConfig.config),
-      listChangedFiles(trace = null) {
+      async listChangedFiles(trace = null) {
         try {
-          const stdout = runGitCommand({
+          const stdout = await runGitCommand({
             directory,
             command: "status-porcelain",
             debug: debugLogger,
@@ -217,7 +217,7 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
             buildGitFailureDiagnostics(error, {
               directory,
               args: ["status", "--short", "--untracked-files=all"],
-              timeoutMs: 1500,
+              timeoutMs: 5000,
               command: "status-porcelain",
               operation: "listChangedFiles",
               trace,
@@ -233,6 +233,25 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       // Story 2.2: prompt body and metadata are derived from the canonical
       // explanation payload built by buildApprovalRequest — this adapter must
       // not recompose strings, only forward what the request already contains.
+      async listLocalBranches() {
+        try {
+          const stdout = await runGitCommand({
+            directory,
+            command: "branch-list",
+            debug: debugLogger,
+          });
+          return String(stdout || "")
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0);
+        } catch {
+          return [];
+        }
+      },
+      async resolveBranchDecision(_decisionContext) {
+        return null;
+      },
+
       async requestApproval(request) {
         debugLogger.log("requestApproval", "received approval request", {
           actionType: request?.actionType,
@@ -255,6 +274,7 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
           const FALLBACK_HEADERS = {
             init: "Initialize Git",
             commit: "Finalize Changes",
+            "branch/stay": "Branch Decision",
             "branch/create": "Create Branch",
             "branch/switch": "Switch Branch",
             push: "Push Changes",
@@ -279,6 +299,12 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
             const fallbackOptions =
               request.actionType === "init"
                 ? ["Initialize Git (Recommended)", "Cancel"]
+                : request.actionType === "branch/stay"
+                  ? ["Proceed On Current Branch (Recommended)", "Skip"]
+                  : request.actionType === "branch/create"
+                    ? ["Create New Branch (Recommended)", "Stay On Current Branch", "Skip"]
+                    : request.actionType === "branch/switch"
+                      ? ["Switch Branch (Recommended)", "Stay On Current Branch", "Skip"]
                 : ["Approve (Recommended)", "Deny", "Ignore and continue"];
             instruction = {
               header: fallbackHeader,

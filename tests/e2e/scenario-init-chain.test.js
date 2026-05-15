@@ -59,7 +59,11 @@ async function fullStartupChain() {
             {
               id: `${startupChainId}:branch`,
               header: "Create Branch `feat/ABC-123-startup-chain`",
-              options: ["Approve (Recommended)", "Ignore and continue"],
+              options: [
+                "Create New Branch (Recommended)",
+                "Stay On Current Branch",
+                "Skip",
+              ],
             },
           ],
         },
@@ -74,7 +78,7 @@ async function fullStartupChain() {
           answers: [
             ["Initialize Git (Recommended)"],
             ["Setup .gitignore and Commit (Recommended)"],
-            ["Approve (Recommended)"],
+            ["Create New Branch (Recommended)"],
           ],
         },
       },

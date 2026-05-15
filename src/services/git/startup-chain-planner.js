@@ -12,6 +12,7 @@ export function buildStartupChainPlan({
   workflowPolicy = null,
   branchConfig = null,
   currentBranch = null,
+  branchProposal = null,
   state = null,
 } = {}) {
   if (state?.gitInitSkipped === true) {
@@ -55,45 +56,36 @@ export function buildStartupChainPlan({
     });
   }
 
-  let branchPreview = null;
-  if (
-    workflowPolicy?.branchRequired === true &&
-    !unavailable &&
-    (needsInit || repositoryKnownInitialized)
-  ) {
-    const branchCurrent =
-      typeof currentBranch === "string" && currentBranch.length > 0
-        ? currentBranch
-        : null;
+  let branchPreview = branchProposal ?? null;
+  if (!branchPreview && workflowPolicy?.branchRequired === true && !unavailable) {
     const strategy = evaluateBranchStrategy({
       workflowContext,
       workflowPolicy,
       branchConfig,
-      currentBranch: branchCurrent,
+      currentBranch,
     });
     if (strategy.requirement !== "unnecessary") {
-      const candidateName = computeCandidateBranchName({
-        workflowContext,
-        workflowPolicy,
-        branchConfig,
-      });
       branchPreview = buildBranchProposal({
         strategy,
-        candidateName,
-        currentBranch: branchCurrent,
+        candidateName: computeCandidateBranchName({
+          workflowContext,
+          workflowPolicy,
+          branchConfig,
+        }),
+        currentBranch,
       });
-      if (branchPreview) {
-        steps.push({
-          key: "branch",
-          kind: "branch",
-          action: branchPreview.action,
-          proposal: branchPreview,
-          correlationId:
-            branchPreview.correlationId ??
-            `startup-branch:${workflowContext?.sessionID ?? "no-session"}:${branchPreview.name}`,
-        });
-      }
     }
+  }
+  if (!unavailable && branchPreview && branchPreview.action !== "stay") {
+    steps.push({
+      key: "branch",
+      kind: "branch",
+      action: branchPreview.action,
+      proposal: branchPreview,
+      correlationId:
+        branchPreview.correlationId ??
+        `startup-branch:${workflowContext?.sessionID ?? "no-session"}:${branchPreview.name}`,
+    });
   }
 
   return {

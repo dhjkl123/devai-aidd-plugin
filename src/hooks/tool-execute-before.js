@@ -97,12 +97,23 @@ function hasQuotedCommitMessage(command, message) {
   );
 }
 
+function isDelegatedFinalizationStatusCheck(command) {
+  const raw = normalizeShellCommand(command);
+  if (raw.length === 0) return false;
+  return (
+    /^git\s+status(?:\s|$)/i.test(raw) ||
+    /^git\s+status\s+--short(?:\s|$)/i.test(raw) ||
+    /^git\s+status\s+--porcelain(?:\s|$)/i.test(raw)
+  );
+}
+
 function isScopedDelegatedFinalizationCommand(command, delegatedFinalization) {
   if (delegatedFinalization?.stage !== "awaiting-commit") {
     return false;
   }
   const raw = normalizeShellCommand(command);
   if (raw.length === 0) return false;
+  if (isDelegatedFinalizationStatusCheck(raw)) return true;
   if (!/\bgit\s+commit\b/i.test(raw)) return false;
   if (!hasQuotedCommitMessage(raw, delegatedFinalization.commitMessage)) return false;
   const gitCommands = raw.match(/\bgit\s+/gi) ?? [];
@@ -115,8 +126,9 @@ function buildDelegatedFinalizationBlockMessage(delegatedFinalization) {
   const message = delegatedFinalization?.commitMessage ?? "";
   return (
     "Git workflow guard: delegated finalization is active. " +
-    "Only the scoped final commit path is allowed right now. " +
-    `Run a git commit that uses the exact suggested message \`${message}\`, ` +
+    "Only the scoped finalization path is allowed right now. " +
+    "You may run `git status` re-checks and then the final commit. " +
+    `The commit MUST use the exact suggested message \`${message}\`, ` +
     "or complete the skip branch if the user chose Skip."
   );
 }
