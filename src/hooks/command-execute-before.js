@@ -312,9 +312,8 @@ export function createCommandExecuteBeforeHook(
           });
         }
         const readinessStartedAt = process.hrtime.bigint();
-        const rawReadiness = checkRepositoryReadiness({
+        const rawReadiness = await checkRepositoryReadiness({
           directory: pluginContext?.directory,
-          gitRunner: pluginContext?.gitRunner,
           policy: workflowPolicy,
           readinessGate,
           trace: {
@@ -630,9 +629,9 @@ export function createCommandExecuteBeforeHook(
         if (baselineRequired) {
           const changedFiles =
             typeof pluginContext?.listChangedFiles === "function"
-              ? (() => {
+              ? await (async () => {
                   try {
-                    return pluginContext.listChangedFiles({
+                    return await pluginContext.listChangedFiles({
                       hook: "command-execute-before",
                       stage: "baseline-proposal-refresh",
                       sessionID: context.sessionID,

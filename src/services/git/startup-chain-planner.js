@@ -76,7 +76,7 @@ export function buildStartupChainPlan({
       });
     }
   }
-  if (!unavailable && branchPreview) {
+  if (!unavailable && branchPreview && branchPreview.action !== "stay") {
     steps.push({
       key: "branch",
       kind: "branch",

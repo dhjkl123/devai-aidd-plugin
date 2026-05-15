@@ -4,10 +4,10 @@ import {
   evaluateBranchStrategy,
 } from "./branch-service.js";
 
-function listLocalBranches(pluginContext) {
+async function listLocalBranches(pluginContext) {
   if (typeof pluginContext?.listLocalBranches !== "function") return [];
   try {
-    const branches = pluginContext.listLocalBranches();
+    const branches = await pluginContext.listLocalBranches();
     return Array.isArray(branches)
       ? branches.filter((branch) => typeof branch === "string" && branch.length > 0)
       : [];
@@ -260,9 +260,12 @@ export async function resolveBranchPlanning({
       branchName: currentBranch ?? null,
     };
     if (persist && workflowState) {
+      const nextState = { ...state };
+      if (Object.prototype.hasOwnProperty.call(nextState, "branchProposal")) {
+        delete nextState.branchProposal;
+      }
       workflowState.set(workflowContext.sessionID, {
-        ...state,
-        branchProposal: null,
+        ...nextState,
       });
     }
     return { proposal: null, strategy, decision, localBranches: [] };
@@ -273,7 +276,7 @@ export async function resolveBranchPlanning({
     workflowPolicy,
     branchConfig,
   });
-  const localBranches = listLocalBranches(pluginContext);
+  const localBranches = await listLocalBranches(pluginContext);
   const deterministicProposal = buildBranchProposal({
     strategy,
     candidateName,

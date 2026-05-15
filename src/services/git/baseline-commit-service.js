@@ -83,7 +83,7 @@ export async function resolveBaselineCommitFiles({
 
   let refreshed = null;
   try {
-    refreshed = listChangedFiles();
+    refreshed = await listChangedFiles();
   } catch (error) {
     if (audit) {
       try {

@@ -2356,7 +2356,7 @@ async function verifyRepositoryReadinessContracts() {
   const remoteWorkspace = createGitWorkspace({ initialize: true, withRemote: true });
 
   try {
-    const askResult = readinessModule.checkRepositoryReadiness({
+    const askResult = await readinessModule.checkRepositoryReadiness({
       directory: noGitWorkspace,
     });
     assert.equal(
@@ -2375,7 +2375,7 @@ async function verifyRepositoryReadinessContracts() {
       "verifyRepositoryReadinessContracts: non-git workspace must attach init proposal details",
     );
 
-    const allowResult = readinessModule.checkRepositoryReadiness({
+    const allowResult = await readinessModule.checkRepositoryReadiness({
       directory: gitWorkspace,
     });
     assert.equal(
@@ -2394,7 +2394,7 @@ async function verifyRepositoryReadinessContracts() {
       "verifyRepositoryReadinessContracts: repository without remotes must report hasRemote=false",
     );
 
-    const detachedHeadResult = readinessModule.checkRepositoryReadiness({
+    const detachedHeadResult = await readinessModule.checkRepositoryReadiness({
       directory: remoteWorkspace,
       gitRunner({ command }) {
         if (command === "rev-parse-inside-work-tree") {
@@ -2435,7 +2435,7 @@ async function verifyRepositoryReadinessContracts() {
     );
 
     const invokedCommands = [];
-    const skippedRemoteResult = readinessModule.checkRepositoryReadiness({
+    const skippedRemoteResult = await readinessModule.checkRepositoryReadiness({
       directory: remoteWorkspace,
       policy: { requiresRemote: false },
       gitRunner({ command }) {
@@ -2464,7 +2464,7 @@ async function verifyRepositoryReadinessContracts() {
       "verifyRepositoryReadinessContracts: requiresRemote=false must skip remote-verbose entirely",
     );
 
-    const unavailableResult = readinessModule.checkRepositoryReadiness({
+    const unavailableResult = await readinessModule.checkRepositoryReadiness({
       directory: gitWorkspace,
       gitRunner() {
         const error = new Error("git missing");
@@ -2566,7 +2566,7 @@ async function verifyRepositoryReadinessSkipContracts() {
     });
     assert.equal(skipGate.enabled, false);
 
-    const skippedInitResult = readinessModule.checkRepositoryReadiness({
+    const skippedInitResult = await readinessModule.checkRepositoryReadiness({
       directory: noGitWorkspace,
       readinessGate: skipGate,
     });
@@ -2583,7 +2583,7 @@ async function verifyRepositoryReadinessSkipContracts() {
       "verifyRepositoryReadinessSkipContracts: skip-active non-git workspace must not attach init proposal",
     );
 
-    const skippedBaselineResult = readinessModule.checkRepositoryReadiness({
+    const skippedBaselineResult = await readinessModule.checkRepositoryReadiness({
       directory: repoNoCommit,
       readinessGate: skipGate,
     });
@@ -2607,7 +2607,7 @@ async function verifyRepositoryReadinessSkipContracts() {
     assert.equal(overrideGate.overrideApplied, true);
     assert.equal(overrideGate.overrideField, "branchRequired");
 
-    const overriddenResult = readinessModule.checkRepositoryReadiness({
+    const overriddenResult = await readinessModule.checkRepositoryReadiness({
       directory: noGitWorkspace,
       readinessGate: overrideGate,
     });
@@ -9587,7 +9587,7 @@ async function verifyRunGitCommandLogsRawFailureEvidence() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-failure-log-"));
   const debugCalls = [];
   try {
-    assert.throws(
+    await assert.rejects(
       () =>
         runGitCommand({
           directory: root,
@@ -9618,7 +9618,7 @@ async function verifyRunGitCommandLogsRawFailureEvidence() {
     assert.equal(debugCalls[0].payload.command, "status-porcelain");
     assert.equal(debugCalls[0].payload.cwd, root);
     assert.deepEqual(debugCalls[0].payload.args, ["status", "--short", "--untracked-files=all"]);
-    assert.equal(debugCalls[0].payload.timeoutMs, 1500);
+    assert.equal(debugCalls[0].payload.timeoutMs, 5000);
     assert.deepEqual(debugCalls[0].payload.trace, {
       hook: "tool-execute-after",
       stage: "sentinel-finalization",

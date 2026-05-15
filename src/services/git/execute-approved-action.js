@@ -271,9 +271,8 @@ export async function executeApprovedAction({
     if (envelope?.ok) {
       let refreshedReadiness = null;
       try {
-        refreshedReadiness = checkRepositoryReadiness({
+        refreshedReadiness = await checkRepositoryReadiness({
           directory: pluginContext?.directory,
-          gitRunner: pluginContext?.gitRunner,
           policy: null,
           trace: {
             hook: "execute-approved-action",
@@ -586,9 +585,8 @@ export async function executeApprovedAction({
     if (envelope.ok) {
       let refreshedReadiness = state.readiness ?? null;
       try {
-        refreshedReadiness = checkRepositoryReadiness({
+        refreshedReadiness = await checkRepositoryReadiness({
           directory: pluginContext?.directory,
-          gitRunner: pluginContext?.gitRunner,
           policy: null,
           trace: {
             hook: "execute-approved-action",
