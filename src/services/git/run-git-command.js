@@ -1,19 +1,23 @@
-import { execFile, execFileSync } from "node:child_process";
-import { promisify } from "node:util";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-const execFileAsync = promisify(execFile);
+import { simpleGit } from "simple-git";
 
 // Inline pathspec is forwarded as `git add -A -- <f1> <f2> ...`. On Windows
 // CreateProcess caps the combined commandline at ~32K characters. For a
 // brownfield baseline-commit (`git init` on top of an existing tree with
-// hundreds of files), the inline form blows past that ceiling and the
-// child_process spawn fails before git ever sees the request. Above this
+// hundreds of files), the inline form blows past that ceiling. Above this
 // file count we switch to git's `--pathspec-from-file=<path> --pathspec-file-nul`
 // mode, which reads NUL-separated paths from a temp file with no argv limit.
 const PATHSPEC_INLINE_LIMIT = 80;
+
+const DEFAULT_READINESS_TIMEOUT_MS = 1500;
+const DEFAULT_STATUS_TIMEOUT_MS = 5000;
+const DEFAULT_BRANCH_LIST_TIMEOUT_MS = 3000;
+const DEFAULT_BRANCH_ACTION_TIMEOUT_MS = 5000;
+const DEFAULT_INIT_TIMEOUT_MS = 5000;
+const DEFAULT_COMMIT_TIMEOUT_MS = 15000;
+const DEFAULT_PUSH_TIMEOUT_MS = 20000;
 
 const ALLOWED_COMMANDS = new Map([
   ["rev-parse-inside-work-tree", ["rev-parse", "--is-inside-work-tree"]],
@@ -21,6 +25,7 @@ const ALLOWED_COMMANDS = new Map([
   ["symbolic-ref-short-head", ["symbolic-ref", "--short", "HEAD"]],
   ["remote-verbose", ["remote", "-v"]],
   ["status-porcelain", ["status", "--short", "--untracked-files=all"]],
+  ["branch-list", ["branch", "--format=%(refname:short)"]],
 ]);
 
 function resolveAllowedArgs(command) {
@@ -29,6 +34,39 @@ function resolveAllowedArgs(command) {
   }
 
   return [...ALLOWED_COMMANDS.get(command)];
+}
+
+function resolveReadOnlyTimeout(command, timeoutMs) {
+  if (typeof timeoutMs === "number") {
+    return timeoutMs;
+  }
+
+  if (command === "status-porcelain") {
+    return DEFAULT_STATUS_TIMEOUT_MS;
+  }
+  if (command === "branch-list") {
+    return DEFAULT_BRANCH_LIST_TIMEOUT_MS;
+  }
+  return DEFAULT_READINESS_TIMEOUT_MS;
+}
+
+function resolveActionTimeout(action, timeoutMs) {
+  if (typeof timeoutMs === "number") {
+    return timeoutMs;
+  }
+
+  switch (action?.kind) {
+    case "commit":
+      return DEFAULT_COMMIT_TIMEOUT_MS;
+    case "push":
+      return DEFAULT_PUSH_TIMEOUT_MS;
+    case "branch":
+      return DEFAULT_BRANCH_ACTION_TIMEOUT_MS;
+    case "init":
+      return DEFAULT_INIT_TIMEOUT_MS;
+    default:
+      return DEFAULT_BRANCH_ACTION_TIMEOUT_MS;
+  }
 }
 
 function buildGitEnv() {
@@ -42,6 +80,14 @@ function buildGitEnv() {
   };
 }
 
+function createGitClient(directory, timeoutMs) {
+  return simpleGit({
+    baseDir: directory,
+    trimmed: false,
+    timeout: { block: timeoutMs },
+  }).env(buildGitEnv());
+}
+
 function truncateDiagnostic(value, maxLength = 4000) {
   const text = typeof value === "string" ? value : value == null ? "" : String(value);
   if (text.length <= maxLength) {
@@ -50,10 +96,96 @@ function truncateDiagnostic(value, maxLength = 4000) {
   return `${text.slice(0, maxLength)}...`;
 }
 
+function pickErrorText(error) {
+  if (typeof error?.stderr === "string" && error.stderr.length > 0) {
+    return error.stderr;
+  }
+  if (typeof error?.stdErr === "string" && error.stdErr.length > 0) {
+    return error.stdErr;
+  }
+  if (Buffer.isBuffer(error?.stdErr) && error.stdErr.length > 0) {
+    return error.stdErr.toString("utf8");
+  }
+  if (typeof error?.message === "string" && error.message.length > 0) {
+    return error.message;
+  }
+  return "";
+}
+
+function pickOutputText(error) {
+  if (typeof error?.stdout === "string") {
+    return error.stdout;
+  }
+  if (typeof error?.stdOut === "string") {
+    return error.stdOut;
+  }
+  if (Buffer.isBuffer(error?.stdOut)) {
+    return error.stdOut.toString("utf8");
+  }
+  return "";
+}
+
+function normalizeGitError(error, { args = [], directory, timeoutMs } = {}) {
+  const normalized = error instanceof Error ? error : new Error(String(error ?? "Git command failed."));
+
+  if (!Array.isArray(normalized.spawnargs)) {
+    if (Array.isArray(normalized.task?.commands)) {
+      normalized.spawnargs = [...normalized.task.commands];
+    } else if (Array.isArray(args) && args.length > 0) {
+      normalized.spawnargs = [...args];
+    }
+  }
+  if (typeof normalized.path !== "string") {
+    normalized.path = "git";
+  }
+  if (typeof normalized.syscall !== "string") {
+    normalized.syscall = "spawn git";
+  }
+  if (typeof normalized.stdout !== "string") {
+    normalized.stdout = pickOutputText(normalized);
+  }
+  if (typeof normalized.stderr !== "string" || normalized.stderr.length === 0) {
+    normalized.stderr = pickErrorText(normalized);
+  }
+  if (
+    (normalized.code === "timeout" || normalized.plugin === "timeout") &&
+    typeof normalized.message === "string" &&
+    /timeout/i.test(normalized.message)
+  ) {
+    normalized.code = "ETIMEDOUT";
+    normalized.signal = normalized.signal || "SIGTERM";
+    normalized.killed = true;
+    normalized.message = `spawn git ETIMEDOUT (${timeoutMs}ms block timeout reached)`;
+  }
+  if (
+    typeof normalized.message === "string" &&
+    /Cannot use simple-git on a directory that does not exist/i.test(normalized.message)
+  ) {
+    normalized.code = normalized.code || "ENOTDIR";
+  }
+  if (
+    typeof normalized.status !== "number" &&
+    typeof normalized.exitCode === "number" &&
+    normalized.exitCode >= 0
+  ) {
+    normalized.status = normalized.exitCode;
+  }
+  if (
+    typeof normalized.cwd !== "string" &&
+    typeof directory === "string" &&
+    directory.length > 0
+  ) {
+    normalized.cwd = directory;
+  }
+
+  return normalized;
+}
+
 export function buildGitFailureDiagnostics(
   error,
   { directory, args, timeoutMs, command = null, operation = null, startedAt = null, trace = null } = {},
 ) {
+  const normalized = normalizeGitError(error, { args, directory, timeoutMs });
   const durationMs =
     typeof startedAt === "bigint" ? Number(process.hrtime.bigint() - startedAt) / 1e6 : null;
   return {
@@ -64,18 +196,18 @@ export function buildGitFailureDiagnostics(
     args: Array.isArray(args) ? [...args] : [],
     timeoutMs: typeof timeoutMs === "number" ? timeoutMs : null,
     durationMs,
-    pid: typeof error?.pid === "number" ? error.pid : null,
-    errorName: error?.name || null,
-    errorCode: error?.code || null,
-    errorErrno: error?.errno ?? null,
-    errorStatus: typeof error?.status === "number" ? error.status : null,
-    errorSignal: error?.signal || null,
-    errorSyscall: error?.syscall || null,
-    errorPath: error?.path || null,
-    errorSpawnargs: Array.isArray(error?.spawnargs) ? [...error.spawnargs] : null,
-    errorMessage: error?.message ? truncateDiagnostic(error.message) : null,
-    stdout: error?.stdout ? truncateDiagnostic(error.stdout) : null,
-    stderr: error?.stderr ? truncateDiagnostic(error.stderr) : null,
+    pid: typeof normalized?.pid === "number" ? normalized.pid : null,
+    errorName: normalized?.name || null,
+    errorCode: normalized?.code || null,
+    errorErrno: normalized?.errno ?? null,
+    errorStatus: typeof normalized?.status === "number" ? normalized.status : null,
+    errorSignal: normalized?.signal || null,
+    errorSyscall: normalized?.syscall || null,
+    errorPath: normalized?.path || null,
+    errorSpawnargs: Array.isArray(normalized?.spawnargs) ? [...normalized.spawnargs] : null,
+    errorMessage: normalized?.message ? truncateDiagnostic(normalized.message) : null,
+    stdout: normalized?.stdout ? truncateDiagnostic(normalized.stdout) : null,
+    stderr: normalized?.stderr ? truncateDiagnostic(normalized.stderr) : null,
     pathEnv: process.env.PATH || null,
     trace: trace && typeof trace === "object" ? { ...trace } : null,
   };
@@ -85,18 +217,13 @@ function logGitFailure(debug, message, error, context) {
   debug?.log?.("git-subprocess", message, buildGitFailureDiagnostics(error, context));
 }
 
-function execGitSync(directory, args, timeoutMs, debugContext = null) {
+async function runRawGitCommand(directory, args, timeoutMs, debugContext = null) {
   const startedAt = process.hrtime.bigint();
   try {
-    return execFileSync("git", args, {
-    cwd: directory,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: timeoutMs,
-    env: buildGitEnv(),
-    });
+    return await createGitClient(directory, timeoutMs).raw(args);
   } catch (error) {
-    logGitFailure(debugContext?.debug, debugContext?.message || "git sync command failed", error, {
+    const normalized = normalizeGitError(error, { args, directory, timeoutMs });
+    logGitFailure(debugContext?.debug, debugContext?.message || "git async command failed", normalized, {
       directory,
       args,
       timeoutMs,
@@ -105,41 +232,24 @@ function execGitSync(directory, args, timeoutMs, debugContext = null) {
       startedAt,
       trace: debugContext?.trace || null,
     });
-    throw error;
+    throw normalized;
   }
 }
 
-async function execGit(directory, args, timeoutMs, debugContext = null) {
-  const startedAt = process.hrtime.bigint();
-  try {
-    const { stdout } = await execFileAsync("git", args, {
-      cwd: directory,
-      encoding: "utf8",
-      timeout: timeoutMs,
-      env: buildGitEnv(),
-    });
-    return stdout;
-  } catch (error) {
-    logGitFailure(debugContext?.debug, debugContext?.message || "git async command failed", error, {
-      directory,
-      args,
-      timeoutMs,
-      command: debugContext?.command || null,
-      operation: debugContext?.operation || null,
-      startedAt,
-      trace: debugContext?.trace || null,
-    });
-    throw error;
-  }
-}
-
-export function runGitCommand({ directory, command, timeoutMs = 1500, debug = null, trace = null } = {}) {
+export async function runGitCommand({
+  directory,
+  command,
+  timeoutMs = undefined,
+  debug = null,
+  trace = null,
+} = {}) {
   if (typeof directory !== "string" || directory.length === 0) {
     throw new Error("A valid directory is required for git readiness commands.");
   }
 
   const args = resolveAllowedArgs(command);
-  return execGitSync(directory, args, timeoutMs, {
+  const resolvedTimeoutMs = resolveReadOnlyTimeout(command, timeoutMs);
+  return runRawGitCommand(directory, args, resolvedTimeoutMs, {
     debug,
     command,
     operation: "runGitCommand",
@@ -155,11 +265,11 @@ export function runGitCommand({ directory, command, timeoutMs = 1500, debug = nu
  * Returns `{ addArgs, commitArgs }`:
  *   - Inline mode (default): `git add -A -- <files>` / `git commit -m <msg> -- <files>`.
  *     The pathspec is restricted to the approved proposal so unrelated
- *     pre-staged files cannot be swept into the commit (Story 3.2 review HIGH).
+ *     pre-staged files cannot be swept into the commit.
  *   - File mode (`options.pathspecFromFile = "<absolute path>"`): the same
  *     scoping guarantee, but path list arrives via `--pathspec-from-file=<path>
  *     --pathspec-file-nul` to bypass the Windows ~32K argv limit when the
- *     proposal contains hundreds of files (typical brownfield baseline).
+ *     proposal contains hundreds of files.
  *
  * @param {{ message?: string|null, files?: string[]|null, allowEmpty?: boolean, allFiles?: boolean }} action
  * @param {{ pathspecFromFile?: string|null }} [options]
@@ -175,11 +285,6 @@ export function buildCommitArgs(action, options = {}) {
       ? action.message
       : "Finish workflow outputs";
 
-  // Baseline commit case (post-`git init` with no working tree changes).
-  // `allowEmpty: true` swaps the standard `add + commit -- <pathspec>` for a
-  // single `commit --allow-empty -m <message>` so a fresh repository can land
-  // its first commit and grow a HEAD ref. The pathspec is omitted because
-  // there are no files to scope to.
   if (action.allowEmpty === true) {
     return {
       addArgs: null,
@@ -277,13 +382,43 @@ export function buildBranchArgs(action) {
   throw new Error(`Unsupported branch operation: ${String(operation)}`);
 }
 
-export async function runGitAction({ directory, action, timeoutMs = 5000, debug = null, trace = null } = {}) {
+async function resolveHeadBranch(directory, timeoutMs, debug, trace) {
+  try {
+    return (
+      await runRawGitCommand(
+        directory,
+        ["symbolic-ref", "--short", "HEAD"],
+        timeoutMs,
+        {
+          debug,
+          operation: "runGitAction",
+          command: "branch:resolve-head",
+          message: "git action failed",
+          trace,
+        },
+      )
+    ).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function runGitAction({
+  directory,
+  action,
+  timeoutMs = undefined,
+  debug = null,
+  trace = null,
+} = {}) {
   if (typeof directory !== "string" || directory.length === 0) {
     throw new Error("A valid directory is required for git action commands.");
   }
   if (!action || typeof action !== "object") {
     throw new Error("A valid git action is required.");
   }
+
+  const resolvedTimeoutMs = resolveActionTimeout(action, timeoutMs);
+  const git = createGitClient(directory, resolvedTimeoutMs);
 
   if (action.kind === "commit") {
     const fileCount = Array.isArray(action.files) ? action.files.length : 0;
@@ -293,8 +428,6 @@ export async function runGitAction({ directory, action, timeoutMs = 5000, debug 
     if (useFileMode) {
       pathspecDir = mkdtempSync(join(tmpdir(), "devai-aidd-pathspec-"));
       pathspecFile = join(pathspecDir, "files.lst");
-      // NUL-separated payload pairs with `--pathspec-file-nul` so paths with
-      // whitespace, quotes, or backslashes survive untouched.
       writeFileSync(pathspecFile, action.files.join("\0"), "utf8");
     }
     try {
@@ -303,7 +436,7 @@ export async function runGitAction({ directory, action, timeoutMs = 5000, debug 
         useFileMode ? { pathspecFromFile: pathspecFile } : {},
       );
       if (Array.isArray(addArgs) && addArgs.length > 0) {
-        await execGit(directory, addArgs, timeoutMs, {
+        await runRawGitCommand(directory, addArgs, resolvedTimeoutMs, {
           debug,
           operation: "runGitAction",
           command: "commit:add",
@@ -311,7 +444,7 @@ export async function runGitAction({ directory, action, timeoutMs = 5000, debug 
           trace,
         });
       }
-      const stdout = await execGit(directory, commitArgs, timeoutMs, {
+      const stdout = await runRawGitCommand(directory, commitArgs, resolvedTimeoutMs, {
         debug,
         operation: "runGitAction",
         command: "commit",
@@ -332,55 +465,89 @@ export async function runGitAction({ directory, action, timeoutMs = 5000, debug 
 
   if (action.kind === "push") {
     const args = buildPushArgs(action);
-    const stdout = await execGit(directory, args, timeoutMs, {
-      debug,
-      operation: "runGitAction",
-      command: "push",
-      message: "git action failed",
-      trace,
-    });
-    return { stdout, observedState: null };
+    try {
+      await git.push(action.remoteName || "origin", args[2]);
+      return { stdout: "", observedState: null };
+    } catch (error) {
+      const normalized = normalizeGitError(error, {
+        args,
+        directory,
+        timeoutMs: resolvedTimeoutMs,
+      });
+      logGitFailure(debug, "git action failed", normalized, {
+        directory,
+        args,
+        timeoutMs: resolvedTimeoutMs,
+        command: "push",
+        operation: "runGitAction",
+        trace,
+      });
+      throw normalized;
+    }
   }
 
   if (action.kind === "init") {
-    // ALLOWED_COMMANDS is intentionally untouched — that allowlist scopes the
-    // read-only readiness probes invoked via `runGitCommand`. `runGitAction`
-    // dispatches on `action.kind` and is the canonical write path; init joins
-    // commit/push here without traversing the read-only allowlist.
-    const stdout = await execGit(directory, ["init"], timeoutMs, {
-      debug,
-      operation: "runGitAction",
-      command: "init",
-      message: "git action failed",
-      trace,
-    });
-    return { stdout, observedState: null };
+    const args = ["init"];
+    try {
+      await git.init();
+      return { stdout: "", observedState: null };
+    } catch (error) {
+      const normalized = normalizeGitError(error, {
+        args,
+        directory,
+        timeoutMs: resolvedTimeoutMs,
+      });
+      logGitFailure(debug, "git action failed", normalized, {
+        directory,
+        args,
+        timeoutMs: resolvedTimeoutMs,
+        command: "init",
+        operation: "runGitAction",
+        trace,
+      });
+      throw normalized;
+    }
   }
 
   if (action.kind === "branch") {
     const args = buildBranchArgs(action);
-    const stdout = await execGit(directory, args, timeoutMs, {
-      debug,
-      operation: "runGitAction",
-      command: `branch:${action.operation || "unknown"}`,
-      message: "git action failed",
-      trace,
-    });
-    let headBranch = null;
     try {
-      headBranch = (
-        await execGit(directory, ["symbolic-ref", "--short", "HEAD"], timeoutMs, {
-          debug,
-          operation: "runGitAction",
-          command: "branch:resolve-head",
-          message: "git action failed",
-          trace,
-        })
-      ).trim();
-    } catch {
-      headBranch = null;
+      if (action.operation === "create") {
+        if (!action.branchName) {
+          throw new Error("Branch create actions require a branch name.");
+        }
+        await git.checkoutLocalBranch(action.branchName);
+      } else if (action.operation === "switch") {
+        const targetBranch =
+          typeof action.targetBranch === "string" && action.targetBranch.length > 0
+            ? action.targetBranch
+            : action.branchName;
+        if (!targetBranch) {
+          throw new Error("Branch switch actions require a target branch.");
+        }
+        await git.checkout(targetBranch);
+      } else {
+        throw new Error(`Unsupported branch operation: ${String(action.operation)}`);
+      }
+    } catch (error) {
+      const normalized = normalizeGitError(error, {
+        args,
+        directory,
+        timeoutMs: resolvedTimeoutMs,
+      });
+      logGitFailure(debug, "git action failed", normalized, {
+        directory,
+        args,
+        timeoutMs: resolvedTimeoutMs,
+        command: `branch:${action.operation || "unknown"}`,
+        operation: "runGitAction",
+        trace,
+      });
+      throw normalized;
     }
-    return { stdout, observedState: { headBranch } };
+
+    const headBranch = await resolveHeadBranch(directory, resolvedTimeoutMs, debug, trace);
+    return { stdout: "", observedState: { headBranch } };
   }
 
   throw new Error(`Unsupported git action command: ${String(action.kind)}`);

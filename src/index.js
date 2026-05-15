@@ -201,9 +201,9 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
           trace,
         }),
       resolvePolicy: (workflowContext) => resolveWorkflowPolicy(workflowContext, runtimeConfig.config),
-      listChangedFiles(trace = null) {
+      async listChangedFiles(trace = null) {
         try {
-          const stdout = runGitCommand({
+          const stdout = await runGitCommand({
             directory,
             command: "status-porcelain",
             debug: debugLogger,
@@ -217,7 +217,7 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
             buildGitFailureDiagnostics(error, {
               directory,
               args: ["status", "--short", "--untracked-files=all"],
-              timeoutMs: 1500,
+              timeoutMs: 5000,
               command: "status-porcelain",
               operation: "listChangedFiles",
               trace,
@@ -233,12 +233,11 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       // Story 2.2: prompt body and metadata are derived from the canonical
       // explanation payload built by buildApprovalRequest — this adapter must
       // not recompose strings, only forward what the request already contains.
-      listLocalBranches() {
+      async listLocalBranches() {
         try {
-          const stdout = runGitCommand({
+          const stdout = await runGitCommand({
             directory,
             command: "branch-list",
-            args: ["branch", "--format=%(refname:short)"],
             debug: debugLogger,
           });
           return String(stdout || "")

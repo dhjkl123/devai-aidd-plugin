@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { simpleGit } from "simple-git";
 
 import { buildInitProposal } from "./build-init-proposal.js";
-import { runGitCommand } from "./run-git-command.js";
 
 function createBaseDetails(directory, checkedAt) {
   return {
@@ -72,9 +72,60 @@ function isDetachedHeadError(error) {
   return error?.status === 128 && /ref HEAD is not a symbolic ref/i.test(stderr);
 }
 
-export function checkRepositoryReadiness({
+const READINESS_ALLOWED_COMMANDS = new Map([
+  ["rev-parse-inside-work-tree", ["rev-parse", "--is-inside-work-tree"]],
+  ["rev-parse-head", ["rev-parse", "HEAD"]],
+  ["symbolic-ref-short-head", ["symbolic-ref", "--short", "HEAD"]],
+  ["remote-verbose", ["remote", "-v"]],
+]);
+
+function resolveAllowedArgs(command) {
+  if (!READINESS_ALLOWED_COMMANDS.has(command)) {
+    throw new Error(`Unsupported git readiness command: ${String(command)}`);
+  }
+
+  return [...READINESS_ALLOWED_COMMANDS.get(command)];
+}
+
+function normalizeReadinessError(error) {
+  const normalized = error instanceof Error ? error : new Error(String(error ?? "Git command failed."));
+  const message = normalized.message ? String(normalized.message) : String(error ?? "");
+  if (typeof normalized.stderr !== "string" || normalized.stderr.length === 0) {
+    normalized.stderr = message;
+  }
+  if (typeof normalized.stdout !== "string") {
+    normalized.stdout = "";
+  }
+  if (typeof normalized.status !== "number") {
+    if (
+      /not a git repository/i.test(message) ||
+      /ref HEAD is not a symbolic ref/i.test(message) ||
+      /ambiguous argument 'HEAD'/i.test(message) ||
+      /bad default revision 'HEAD'/i.test(message)
+    ) {
+      normalized.status = 128;
+    }
+  }
+  return normalized;
+}
+
+async function runSimpleGitReadinessCommand({ directory, command } = {}) {
+  if (typeof directory !== "string" || directory.length === 0) {
+    throw new Error("A valid directory is required for git readiness commands.");
+  }
+
+  try {
+    return await simpleGit({ baseDir: directory, trimmed: false })
+      .env("GIT_TERMINAL_PROMPT", "0")
+      .raw(resolveAllowedArgs(command));
+  } catch (error) {
+    throw normalizeReadinessError(error);
+  }
+}
+
+export async function checkRepositoryReadiness({
   directory,
-  gitRunner = runGitCommand,
+  gitRunner = runSimpleGitReadinessCommand,
   policy,
   readinessGate = null,
   trace = null,
@@ -84,10 +135,10 @@ export function checkRepositoryReadiness({
   const gateEnabled = readinessGate?.enabled !== false;
   const probeTrace = [];
 
-  function runProbe(command) {
+  async function runProbe(command) {
     const startedAt = process.hrtime.bigint();
     try {
-      const output = gitRunner({
+      const output = await gitRunner({
         directory,
         command,
         trace: {
@@ -141,7 +192,7 @@ export function checkRepositoryReadiness({
 
     try {
       repositoryResult = String(
-        runProbe("rev-parse-inside-work-tree") || "",
+        (await runProbe("rev-parse-inside-work-tree")) || "",
       ).trim();
     } catch (error) {
       if (!isNotRepositoryError(error)) {
@@ -179,7 +230,7 @@ export function checkRepositoryReadiness({
 
     try {
       branch = String(
-        runProbe("symbolic-ref-short-head") || "",
+        (await runProbe("symbolic-ref-short-head")) || "",
       ).trim() || null;
     } catch (error) {
       if (!isDetachedHeadError(error)) {
@@ -190,7 +241,7 @@ export function checkRepositoryReadiness({
     const shouldCheckRemotes = policy?.requiresRemote !== false;
     const remoteNames = shouldCheckRemotes
       ? normalizeRemoteNames(
-          runProbe("remote-verbose"),
+          await runProbe("remote-verbose"),
         )
       : [];
 
@@ -207,7 +258,7 @@ export function checkRepositoryReadiness({
     let hasCommit = false;
     try {
       const headOutput = String(
-        runProbe("rev-parse-head") || "",
+        (await runProbe("rev-parse-head")) || "",
       ).trim();
       hasCommit = headOutput.length > 0;
     } catch {

@@ -5,7 +5,7 @@ import {
   normalizeTrackedFileEntry,
 } from "./finalization-artifacts.js";
 
-function extractChangedFiles(input, output, pluginContext, trace = null) {
+async function extractChangedFiles(input, output, pluginContext, trace = null) {
   const collected = [];
 
   if (Array.isArray(output?.changedFiles)) {
@@ -25,7 +25,7 @@ function extractChangedFiles(input, output, pluginContext, trace = null) {
   // applies its own scope filter downstream — no per-policy gating here.
   if (typeof pluginContext?.listChangedFiles === "function") {
     try {
-      const pluginFiles = pluginContext.listChangedFiles(trace);
+      const pluginFiles = await pluginContext.listChangedFiles(trace);
       if (Array.isArray(pluginFiles)) {
         collected.push(...pluginFiles);
       }
@@ -73,7 +73,7 @@ export async function evaluateWorkflowFinalization({
     (Array.isArray(finishedState.touchedFiles) ? finishedState.touchedFiles : [])
       .map((entry) => normalizeTrackedFileEntry(entry, pluginContext?.directory))
       .filter(Boolean),
-    extractChangedFiles(input, output, pluginContext, trace)
+    (await extractChangedFiles(input, output, pluginContext, trace))
       .map((entry) => normalizeTrackedFileEntry(entry, pluginContext?.directory))
       .filter(Boolean),
   );
