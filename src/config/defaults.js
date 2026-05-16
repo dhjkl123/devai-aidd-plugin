@@ -10,7 +10,7 @@
 //   - workflowPolicy.<command>     → templates/devai-aidd-plugin.project.jsonc
 //
 // Code-side safety nets remain:
-//   - The bundled global template (`templates/devai-aidd-plugin.global.jsonc`)
+//   - The bundled merged project template (shared base + project override)
 //     is embedded into the JS bundle at build time as `BASELINE_TEMPLATE_TEXT`
 //     and merged in as a "Layer 0" baseline by `validateAndRecover` in
 //     `src/config/load-config.js`. This supplies branch.pattern,

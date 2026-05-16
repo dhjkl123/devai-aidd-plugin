@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Operates on the CURRENT WORKING DIRECTORY's .opencode/. Removes:
 #   - .opencode/plugins/devai-aidd-plugin.js
-#   - .opencode/devai-aidd-plugin.*.jsonc (project, global, ...)
+#   - .opencode/devai-aidd-plugin.project.jsonc
 
 CWD="$(pwd)"
 OPENCODE_DIR="$CWD/.opencode"
@@ -21,12 +21,11 @@ if [ -f "$PLUGIN_PATH" ]; then
   REMOVED+=("$PLUGIN_PATH")
 fi
 
-shopt -s nullglob
-for f in "$OPENCODE_DIR"/devai-aidd-plugin.*.jsonc; do
-  rm -f "$f"
-  REMOVED+=("$f")
-done
-shopt -u nullglob
+PROJECT_CONFIG_PATH="$OPENCODE_DIR/devai-aidd-plugin.project.jsonc"
+if [ -f "$PROJECT_CONFIG_PATH" ]; then
+  rm -f "$PROJECT_CONFIG_PATH"
+  REMOVED+=("$PROJECT_CONFIG_PATH")
+fi
 
 if [ "${#REMOVED[@]}" -eq 0 ]; then
   echo "No DevAI AIDD Plugin files found under $OPENCODE_DIR."

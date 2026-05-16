@@ -2,8 +2,6 @@ import path from "node:path";
 import { DEFAULT_PLUGIN_CONFIG } from "./defaults.js";
 import { BASELINE_TEMPLATE_TEXT } from "./baseline-template.generated.js";
 import {
-  GLOBAL_CONFIG_DIR,
-  GLOBAL_CONFIG_FILE_NAME,
   PROJECT_CONFIG_DIR,
   PROJECT_CONFIG_FILE_NAME,
   SKILLS_SUBDIR,
@@ -95,9 +93,9 @@ export function mergeConfigs(layers) {
 // Source of "default values":
 //   - `pattern`, `defaultType`, `fallbackTicket`, `validationRegex`,
 //     `commandTypeMap` and the rest of the user-facing knobs come from the
-//     bundled baseline (`templates/devai-aidd-plugin.global.jsonc`, embedded
-//     into `BASELINE_TEMPLATE_TEXT` at build time). Edit the template to
-//     change them — no JS code change required.
+//     bundled baseline (build-time merge of the shared base + project
+//     template, embedded into `BASELINE_TEMPLATE_TEXT`). Edit the templates
+//     to change them — no JS code change required.
 //   - `longLivedBranches` is intentionally kept as a JS-side hardcoded
 //     ALWAYS-UNION list: `main` and `master` are universal across teams, so
 //     we always include them in the effective config regardless of what
@@ -255,21 +253,21 @@ function tagErrorsWithLayer(errors, layerName) {
  *   - When every layer fails, the result is the normalized DEFAULT_PLUGIN_CONFIG.
  *
  * Precedence order (lowest to highest priority):
- *   DEFAULT_PLUGIN_CONFIG → baselineConfig → globalConfig → projectConfig
+ *   DEFAULT_PLUGIN_CONFIG → baselineConfig → projectConfig
  *
- * `baselineConfig` is the bundled `templates/devai-aidd-plugin.global.jsonc`,
- * embedded into the JS bundle at build time. It supplies the user-facing
- * defaults (branch.pattern, branch.defaultType, branch.commandTypeMap, etc.)
- * so neither `normalizeConfig` nor downstream services need to carry their
- * own copies of those values. A user's installed global JSONC is still read
- * from disk and overrides this baseline.
+ * `baselineConfig` is the bundled merge of
+ * `templates/devai-aidd-plugin.global.jsonc` and
+ * `templates/devai-aidd-plugin.project.jsonc`, embedded into the JS bundle
+ * at build time. It supplies the user-facing defaults (branch.pattern,
+ * branch.defaultType, branch.commandTypeMap, workflowPolicy.*, etc.) so
+ * neither `normalizeConfig` nor downstream services need to carry their own
+ * copies of those values.
  *
  * @returns {{ mergedConfig: object, droppedLayers: string[], errors: import("ajv").ErrorObject[] }}
  */
-function validateAndRecover(globalConfig, projectConfig) {
+function validateAndRecover(projectConfig) {
   const orderedLayers = [
     { name: "baselineConfig", value: BASELINE_CONFIG },
-    { name: "globalConfig", value: globalConfig },
     { name: "projectConfig", value: projectConfig },
   ];
 
@@ -301,15 +299,9 @@ function validateAndRecover(globalConfig, projectConfig) {
 }
 
 export function resolveConfigPaths(directory, fsAdapter) {
-  const globalConfigPath = path.join(
-    fsAdapter.homedir(),
-    GLOBAL_CONFIG_DIR,
-    GLOBAL_CONFIG_FILE_NAME,
-  );
   const projectConfigPath = path.join(directory, PROJECT_CONFIG_DIR, PROJECT_CONFIG_FILE_NAME);
 
   return {
-    globalConfigPath,
     projectConfigPath,
   };
 }
@@ -317,12 +309,12 @@ export function resolveConfigPaths(directory, fsAdapter) {
 /**
  * Load and merge runtime configuration from all sources using a deterministic
  * precedence pipeline (lowest to highest priority):
- *   DEFAULT_PLUGIN_CONFIG → globalConfig → projectConfig
+ *   DEFAULT_PLUGIN_CONFIG → projectConfig
  *
  * Returns an object with:
  *   - `config`: the normalized effective configuration
  *   - `paths`: resolved file paths
- *   - `sources`: boolean flags `{ hasGlobalConfig, hasProjectConfig }`
+ *   - `sources`: boolean flags `{ hasProjectConfig }`
  *   - `validation`:
  *       - `valid`: final mergedConfig passes schema/parse checks (vocabulary
  *         warnings do NOT flip this to false)
@@ -339,13 +331,6 @@ export function loadRuntimeConfig(directory, fsAdapter) {
 
   const parseErrors = [];
 
-  const globalConfigRaw = readConfigFile(
-    fsAdapter,
-    paths.globalConfigPath,
-    "globalConfig",
-    parseErrors,
-  );
-  const globalConfig = globalConfigRaw || {};
   const projectConfig = readConfigFile(
     fsAdapter,
     paths.projectConfigPath,
@@ -353,10 +338,7 @@ export function loadRuntimeConfig(directory, fsAdapter) {
     parseErrors,
   );
 
-  const { mergedConfig, droppedLayers, errors: schemaErrors } = validateAndRecover(
-    globalConfig,
-    projectConfig,
-  );
+  const { mergedConfig, droppedLayers, errors: schemaErrors } = validateAndRecover(projectConfig);
 
   const vocabularyWarnings = collectWorkflowPolicyVocabularyWarnings(mergedConfig);
 
@@ -368,7 +350,6 @@ export function loadRuntimeConfig(directory, fsAdapter) {
     config: mergedConfig,
     paths,
     sources: {
-      hasGlobalConfig: globalConfigRaw !== null,
       hasProjectConfig: projectConfig !== null,
     },
     validation: {

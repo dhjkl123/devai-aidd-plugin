@@ -2,9 +2,7 @@ export const DISPLAY_NAME = "DevAI AIDD Plugin";
 export const PRODUCT_NAME = "DevAI AIDD Plugin";
 export const PACKAGE_NAME = "devai-aidd-plugin";
 export const DIST_FILE_NAME = "devai-aidd-plugin.js";
-export const GLOBAL_CONFIG_FILE_NAME = "devai-aidd-plugin.global.jsonc";
 export const PROJECT_CONFIG_FILE_NAME = "devai-aidd-plugin.project.jsonc";
-export const GLOBAL_CONFIG_DIR = ".config/opencode";
 export const PROJECT_CONFIG_DIR = ".opencode";
 export const SKILLS_SUBDIR = "skills";
 
