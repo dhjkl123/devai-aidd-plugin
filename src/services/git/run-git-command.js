@@ -70,7 +70,7 @@ function resolveActionTimeout(action, timeoutMs) {
 }
 
 function buildGitEnv() {
-  return {
+  const env = {
     ...process.env,
     GIT_TERMINAL_PROMPT: "0",
     GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || "DevAI AIDD",
@@ -78,6 +78,15 @@ function buildGitEnv() {
     GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || "DevAI AIDD",
     GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || "devai-aidd@example.invalid",
   };
+
+  // simple-git blocks inherited editor variables unless allowUnsafeEditor is
+  // enabled. The plugin never launches interactive editors, so strip them
+  // from subprocess env to keep read-only and mutating git flows non-interactive.
+  delete env.EDITOR;
+  delete env.VISUAL;
+  delete env.GIT_EDITOR;
+
+  return env;
 }
 
 function createGitClient(directory, timeoutMs) {

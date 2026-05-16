@@ -127,7 +127,6 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
         workflowCommandCount: workflowCommands.size,
         workflowSkillCount: workflowSkills.size,
         workflowNameCount: workflowNames.size,
-        hasGlobalConfig: runtimeConfig.sources.hasGlobalConfig,
         hasProjectConfig: runtimeConfig.sources.hasProjectConfig,
         supportedRuntime: SUPPORTED_RUNTIME,
       });
@@ -152,7 +151,6 @@ export async function DevaiAiddGuardPlugin({ client, directory }) {
       workflowCommandCount: workflowCommands.size,
       workflowSkillCount: workflowSkills.size,
       workflowNameCount: workflowNames.size,
-      hasGlobalConfig: runtimeConfig.sources.hasGlobalConfig,
       hasProjectConfig: runtimeConfig.sources.hasProjectConfig,
     });
 

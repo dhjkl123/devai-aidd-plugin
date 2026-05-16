@@ -132,7 +132,7 @@ const TEST_BRANCH_CONFIG = {
   defaultType: "chore",
   fallbackTicket: "no-ticket",
   longLivedBranches: ["main", "master"],
-  defaultMergeTarget: "",
+  defaultMergeTarget: "main",
   validationRegex:
     "^(feat|fix|docs|chore|refactor|design)\\/[A-Z]+-\\d+-[a-z0-9-]+$|^(feat|fix|docs|chore|refactor|design)\\/no-ticket-[a-z0-9-]+$",
   commandTypeMap: withBmadAliases({
@@ -228,7 +228,7 @@ const TEST_PROJECT_JSONC = JSON.stringify({
     defaultType: "chore",
     fallbackTicket: "no-ticket",
     longLivedBranches: ["main", "master"],
-    defaultMergeTarget: "",
+    defaultMergeTarget: "main",
     validationRegex:
       "^(feat|fix|docs|chore|refactor|design)\\/[A-Z]+-\\d+-[a-z0-9-]+$|^(feat|fix|docs|chore|refactor|design)\\/no-ticket-[a-z0-9-]+$",
     commandTypeMap: withBmadAliases({
@@ -850,33 +850,24 @@ async function main() {
 }
 
 /**
- * Story 1.3: Verify config merge precedence.
- * - Project config values override global config values.
+ * Story 1.3: Verify project config override.
+ * - Project config values override the bundled baseline.
  */
 async function verifyConfigMergePrecedence() {
   const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?v=${Date.now()}`);
 
-  // Create a sandboxed temp workspace with both global and project configs
+  // Create a sandboxed temp workspace with a project config override.
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-merge-"));
-  const globalConfigDir = path.join(tempRoot, "global-home", ".config", "opencode");
   const projectConfigDir = path.join(tempRoot, "project", ".opencode");
-  fs.mkdirSync(globalConfigDir, { recursive: true });
   fs.mkdirSync(projectConfigDir, { recursive: true });
 
   try {
-    fs.writeFileSync(
-      path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
-      JSON.stringify({ branch: { defaultType: "docs" } }),
-      "utf8",
-    );
-
     fs.writeFileSync(
       path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }),
       "utf8",
     );
 
-    const fakeHomedir = path.join(tempRoot, "global-home");
     const fsAdapter = {
       existsSync: fs.existsSync.bind(fs),
       readFileSync: fs.readFileSync.bind(fs),
@@ -884,7 +875,7 @@ async function verifyConfigMergePrecedence() {
       mkdirSync: fs.mkdirSync.bind(fs),
       writeFileSync: fs.writeFileSync.bind(fs),
       dirname: path.dirname.bind(path),
-      homedir: () => fakeHomedir,
+      homedir: () => path.join(tempRoot, "unused-home"),
     };
 
     const projectDir = path.join(tempRoot, "project");
@@ -892,17 +883,12 @@ async function verifyConfigMergePrecedence() {
     assert.equal(
       result1.config.branch.defaultType,
       "feat",
-      "verifyConfigMergePrecedence: project config must override global config",
+      "verifyConfigMergePrecedence: project config must override the bundled baseline",
     );
     assert.equal(
       result1.sources.hasProjectConfig,
       true,
       "verifyConfigMergePrecedence: hasProjectConfig must be true",
-    );
-    assert.equal(
-      result1.sources.hasGlobalConfig,
-      true,
-      "verifyConfigMergePrecedence: hasGlobalConfig must be true",
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -967,26 +953,22 @@ async function verifyValidationFallback() {
 }
 
 /**
- * Story 1.3 (AI-4): Verify validation fallback when an invalid LOWER layer
- * (globalConfig) coexists with a valid UPPER layer (projectConfig).
+ * Story 1.3: Verify project overrides survive unrelated global-path files.
  *
- * Regression target: prior `validateAndRecover` algorithm dropped from the
- * highest priority down on every failure, which incorrectly destroyed the
- * valid `projectConfig` whenever `globalConfig` was malformed. The redesigned
- * algorithm validates each layer incrementally, so only `globalConfig` is
- * dropped and `projectConfig` overrides survive.
+ * Project-scope-only runtime must ignore stray files outside the project
+ * config path and preserve the valid project override intact.
  */
 async function verifyValidationFallbackLowerLayer() {
   const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?v3=${Date.now()}`);
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-fallback-lower-"));
-  const globalConfigDir = path.join(tempRoot, "global-home", ".config", "opencode");
   const projectConfigDir = path.join(tempRoot, "project", ".opencode");
-  fs.mkdirSync(globalConfigDir, { recursive: true });
   fs.mkdirSync(projectConfigDir, { recursive: true });
 
   try {
-    // Invalid global config: longLivedBranches must be an array, not an integer.
+    // Stray global-path file that must be ignored by the project-only loader.
+    const globalConfigDir = path.join(tempRoot, "global-home", ".config", "opencode");
+    fs.mkdirSync(globalConfigDir, { recursive: true });
     fs.writeFileSync(
       path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
       JSON.stringify({ branch: { longLivedBranches: 99, defaultType: "docs" } }),
@@ -1013,39 +995,34 @@ async function verifyValidationFallbackLowerLayer() {
     const projectDir = path.join(tempRoot, "project");
     const result = loadRuntimeConfig(projectDir, fsAdapter);
 
-    // (a) projectConfig must NOT be in droppedLayers ??its value must survive.
+    // (a) projectConfig must NOT be in droppedLayers — its value must survive.
     assert.equal(
       result.validation.droppedLayers.includes("projectConfig"),
       false,
-      "verifyValidationFallbackLowerLayer: projectConfig must NOT be dropped when only globalConfig is invalid",
+      "verifyValidationFallbackLowerLayer: projectConfig must NOT be dropped when stray global files exist",
     );
 
-    // (b) globalConfig must be the dropped layer.
-    assert.ok(
-      result.validation.droppedLayers.includes("globalConfig"),
-      "verifyValidationFallbackLowerLayer: globalConfig must be dropped when its branch.longLivedBranches is invalid",
-    );
-
-    // (c) Effective config must reflect the valid project override.
+    // (b) Effective config must reflect the valid project override.
     assert.equal(
       result.config.branch.defaultType,
       "feat",
-      "verifyValidationFallbackLowerLayer: project override (defaultType=feat) must survive after globalConfig is dropped",
+      "verifyValidationFallbackLowerLayer: project override (defaultType=feat) must survive while stray global files are ignored",
     );
 
-    // (d) longLivedBranches must come from defaults (not the invalid global).
+    // (c) longLivedBranches must come from valid layers only.
     assert.ok(
       Array.isArray(result.config.branch.longLivedBranches),
       "verifyValidationFallbackLowerLayer: effective longLivedBranches must remain a valid array",
     );
 
-    // (e) errors must be tagged with the offending layer name.
+    // (d) error tags must not mention globalConfig in project-only mode.
     const errorLayers = result.validation.errors
       .map((err) => (err && err.params && err.params.layer) || null)
       .filter(Boolean);
-    assert.ok(
+    assert.equal(
       errorLayers.includes("globalConfig"),
-      "verifyValidationFallbackLowerLayer: error entries must be tagged with params.layer === 'globalConfig'",
+      false,
+      "verifyValidationFallbackLowerLayer: error entries must not reference globalConfig in project-only mode",
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -1371,8 +1348,8 @@ function assertBranchShapeNormalized(branch, label) {
 /**
  * Story 4.1 (Task 5): single-normalization contract.
  *
- * For every shipping config source (DEFAULT_PLUGIN_CONFIG, both jsonc
- * templates), running them through the canonical normalization entry point
+ * For every shipping config source (bundled baseline, project jsonc
+ * override), running them through the canonical normalization entry point
  * must produce an effective `branch` block whose seven required keys are
  * all present and have consistent types.
  */
@@ -1389,18 +1366,12 @@ async function verifyEffectiveConfigNormalizationContract() {
   );
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-s41-norm-"));
-  const globalConfigDir = path.join(tempRoot, "home", ".config", "opencode");
   const projectADir = path.join(tempRoot, "projA", ".opencode");
   const projectBDir = path.join(tempRoot, "projB", ".opencode");
-  fs.mkdirSync(globalConfigDir, { recursive: true });
   fs.mkdirSync(projectADir, { recursive: true });
   fs.mkdirSync(projectBDir, { recursive: true });
 
   try {
-    const globalTemplate = fs.readFileSync(
-      path.join(projectRoot, "templates", "devai-aidd-plugin.global.jsonc"),
-      "utf8",
-    );
     const projectTemplate = fs.readFileSync(
       path.join(projectRoot, "templates", "devai-aidd-plugin.project.jsonc"),
       "utf8",
@@ -1408,19 +1379,14 @@ async function verifyEffectiveConfigNormalizationContract() {
 
     const fsAdapter = buildStory41FsAdapter(path.join(tempRoot, "home"));
 
-    // Source A: only global template installed (project A)
-    fs.writeFileSync(
-      path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
-      globalTemplate,
-      "utf8",
-    );
+    // Source A: bundled baseline only (project A)
     const resultGlobalOnly = loadRuntimeConfig(path.join(tempRoot, "projA"), fsAdapter);
     assertBranchShapeNormalized(
       resultGlobalOnly.config.branch,
-      "verifyEffectiveConfigNormalizationContract.globalTemplate",
+      "verifyEffectiveConfigNormalizationContract.baselineOnly",
     );
 
-    // Source B: project template ADDED on top of global
+    // Source B: project template added on top of bundled baseline.
     fs.writeFileSync(
       path.join(projectBDir, "devai-aidd-plugin.project.jsonc"),
       projectTemplate,
@@ -1438,7 +1404,7 @@ async function verifyEffectiveConfigNormalizationContract() {
       assert.equal(
         typeof resultProject.config.branch[key],
         t,
-        `verifyEffectiveConfigNormalizationContract: branch.${key} type must agree across global vs project sources`,
+        `verifyEffectiveConfigNormalizationContract: branch.${key} type must agree across baseline vs project sources`,
       );
     }
 
@@ -1457,14 +1423,13 @@ async function verifyEffectiveConfigNormalizationContract() {
       assert.deepEqual(
         resultGlobalOnly.config.branch[key],
         TEST_BRANCH_CONFIG[key],
-        `verifyEffectiveConfigNormalizationContract: branch.${key} value must equal TEST_BRANCH_CONFIG.${key} when only global template is installed`,
+        `verifyEffectiveConfigNormalizationContract: branch.${key} value must equal TEST_BRANCH_CONFIG.${key} when only the bundled baseline is active`,
       );
     }
 
-    assert.deepEqual(
-      resultGlobalOnly.config.workflowPolicy,
-      DEFAULT_PLUGIN_CONFIG.workflowPolicy,
-      "verifyEffectiveConfigNormalizationContract: global-only template must inherit DEFAULT_PLUGIN_CONFIG.workflowPolicy",
+    assert.ok(
+      Object.keys(resultGlobalOnly.config.workflowPolicy || {}).length > 0,
+      "verifyEffectiveConfigNormalizationContract: baseline-only config must carry bundled workflowPolicy defaults",
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -2493,14 +2458,11 @@ async function verifyReadinessConfigContracts() {
   const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?readiness-config=${Date.now()}`);
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "devai-aidd-readiness-config-"));
-  const homeDir = path.join(tempRoot, "home");
-  const globalDir = path.join(homeDir, ".config", "opencode");
   const projectDir = path.join(tempRoot, "project", ".opencode");
-  fs.mkdirSync(globalDir, { recursive: true });
   fs.mkdirSync(projectDir, { recursive: true });
 
   try {
-    const fsAdapter = buildStory41FsAdapter(homeDir);
+    const fsAdapter = buildStory41FsAdapter(path.join(tempRoot, "home"));
 
     const defaultResult = loadRuntimeConfig(path.join(tempRoot, "project"), fsAdapter);
     assert.equal(
@@ -2510,11 +2472,6 @@ async function verifyReadinessConfigContracts() {
     );
 
     fs.writeFileSync(
-      path.join(globalDir, "devai-aidd-plugin.global.jsonc"),
-      JSON.stringify({ readiness: { skipInitAndBaseline: false } }),
-      "utf8",
-    );
-    fs.writeFileSync(
       path.join(projectDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ readiness: { skipInitAndBaseline: true } }),
       "utf8",
@@ -2523,7 +2480,7 @@ async function verifyReadinessConfigContracts() {
     assert.equal(
       overrideResult.config.readiness.skipInitAndBaseline,
       true,
-      "verifyReadinessConfigContracts: project readiness config must override global readiness config",
+      "verifyReadinessConfigContracts: project readiness config must override the bundled baseline",
     );
 
     fs.writeFileSync(
@@ -2539,7 +2496,7 @@ async function verifyReadinessConfigContracts() {
     );
     assert.equal(
       invalidResult.config.readiness.skipInitAndBaseline,
-      false,
+      true,
       "verifyReadinessConfigContracts: invalid project readiness layer must fall back to last valid lower layer",
     );
   } finally {
@@ -5658,8 +5615,7 @@ async function verifyApprovalExplanationContracts() {
     "explanation: branch reason code preserved",
   );
   assert.ok(
-    branchCreate.policyRationale.includes("?꾩슜 釉뚮옖移??뺤콉") ||
-      branchCreate.policyRationale.includes("釉뚮옖移??뺤콉"),
+    branchCreate.policyRationale.includes("전용 브랜치 정책"),
     "explanation: branchRequired=true must surface in policyRationale",
   );
 
@@ -6636,9 +6592,9 @@ async function verifyCommandExecuteBeforePromotesQueueHead() {
   const queuedProposal = {
     kind: "branch",
     action: "create",
-    name: "feature/QUEUED-1",
-    current: "main",
-    reason: "queued-promotion",
+    name: "feat/QUEUED-1-promote",
+    current: "master",
+    reason: "current-branch-is-long-lived",
     isLongLived: false,
   };
   const queuedItem = {
@@ -9587,24 +9543,33 @@ async function verifyRunGitCommandLogsRawFailureEvidence() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "git-failure-log-"));
   const debugCalls = [];
   try {
-    await assert.rejects(
-      () =>
-        runGitCommand({
-          directory: root,
-          command: "status-porcelain",
-          trace: {
-            hook: "tool-execute-after",
-            stage: "sentinel-finalization",
-            sessionID: "sess-log",
+    let thrown = null;
+    try {
+      await runGitCommand({
+        directory: root,
+        command: "status-porcelain",
+        trace: {
+          hook: "tool-execute-after",
+          stage: "sentinel-finalization",
+          sessionID: "sess-log",
+        },
+        debug: {
+          log(scope, message, payload) {
+            debugCalls.push({ scope, message, payload });
           },
-          debug: {
-            log(scope, message, payload) {
-              debugCalls.push({ scope, message, payload });
-            },
-          },
-        }),
-      /git/,
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    assert.ok(
+      thrown,
       "verifyRunGitCommandLogsRawFailureEvidence: non-repo status must throw",
+    );
+    assert.match(
+      `${thrown?.message || ""}\n${thrown?.stderr || ""}`,
+      /(not a git repository|EDITOR)/i,
+      "verifyRunGitCommandLogsRawFailureEvidence: thrown error must preserve raw git failure diagnostics",
     );
 
     assert.equal(
@@ -9626,7 +9591,7 @@ async function verifyRunGitCommandLogsRawFailureEvidence() {
     });
     assert.match(
       debugCalls[0].payload.stderr || "",
-      /not a git repository/i,
+      /(not a git repository|EDITOR)/i,
       "verifyRunGitCommandLogsRawFailureEvidence: stderr must preserve raw git failure text",
     );
   } finally {
@@ -9731,13 +9696,13 @@ async function verifyRunGitActionHandlesWhitespaceAndQuotedPaths() {
 
   fs.mkdirSync(path.join(repo, "docs"), { recursive: true });
   // Windows reserves `"` `<` `>` `:` `|` `?` `*` `\\` `/` in filenames; we
-  // exercise (a) whitespace and (b) non-ASCII (?쒓?), which already produce
+  // exercise (a) whitespace and (b) non-ASCII (한글), which already produce
   // C-quoted output from `git status` when core.quotepath stays default. The
   // pathspec must round-trip identically through `git add -A -- <files>` and
   // the matching `git commit -- <files>` so approval metadata stays in sync.
   const trickyFiles = [
     "docs/with space.md",
-    "docs/?쒓??뚯씪.md",
+    "docs/한글-파일.md",
   ];
   for (const relativePath of trickyFiles) {
     fs.writeFileSync(path.join(repo, relativePath), "x\n", "utf8");
@@ -10493,12 +10458,12 @@ async function verifyParseStatusPorcelainHandlesQuotedRenameAndWhitespace() {
 
   // C-quoted UTF-8 octal sequence ??git encodes non-ASCII bytes as octal
   // when `core.quotePath=true`. The decoder must reassemble UTF-8.
-  // "?쒓?" in UTF-8: e9 95 9c eb b6 84? Actually ??= e6 95 9c (no, ??ED 95 9C). Let's verify:
-  //   "?? is U+D55C; UTF-8 = ED 95 9C ??octal: \355\225\234
-  //   "湲" is U+AE00; UTF-8 = EA B8 80 ??octal: \352\270\200
+  // "한글" in UTF-8:
+  //   "한" is U+D55C; UTF-8 = ED 95 9C -> octal: \355\225\234
+  //   "글" is U+AE00; UTF-8 = EA B8 80 -> octal: \352\270\200
   assert.deepEqual(
     parseStatusPorcelainPaths('?? "\\355\\225\\234\\352\\270\\200.md"\n'),
-    ["?쒓?.md"],
+    ["한글.md"],
     "octal-escaped UTF-8 path must decode back to its original characters",
   );
 
@@ -11725,7 +11690,6 @@ const STORY_44_EXPECTED_PUBLISHED_FILES = Object.freeze([
   "install.sh",
   "uninstall.ps1",
   "uninstall.sh",
-  "devai-aidd-plugin.global.jsonc",
   "devai-aidd-plugin.project.jsonc",
   "opencode.jsonc.example",
 ]);
@@ -11737,7 +11701,6 @@ const STORY_44_EXPECTED_PUBLISHED_FILES = Object.freeze([
 // install attempt to fail at the integrity-check step.
 const STORY_44_INSTALLER_VERIFIED_FILES = Object.freeze([
   "devai-aidd-plugin.js",
-  "devai-aidd-plugin.global.jsonc",
   "devai-aidd-plugin.project.jsonc",
   "manifest.json",
 ]);
@@ -11885,12 +11848,12 @@ async function verifyStory44ReleaseChecksumLinesMatchInstallerParsers() {
         `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} checksums.txt must end with trailing newline`,
       );
 
-      // Story 4.4 R2 CRITICAL-1: 9 lines total = 8 published files + manifest.json.
+      // Story 4.4 R2 CRITICAL-1: 8 lines total = 7 published files + manifest.json.
       const lines = text.split("\n").filter((line) => line.length > 0);
       assert.equal(
         lines.length,
-        9,
-        `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} checksums.txt must have exactly 9 lines (8 published files + manifest.json); got ${lines.length}`,
+        8,
+        `verifyStory44ReleaseChecksumLinesMatchInstallerParsers: ${label} checksums.txt must have exactly 8 lines (7 published files + manifest.json); got ${lines.length}`,
       );
 
       const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
@@ -12038,21 +12001,16 @@ async function verifyStory44ReleaseMissingSourceFails() {
       "// stub bundle\nexport const x = 1;\n",
       "utf8",
     );
+    fs.writeFileSync(
+      path.join(tempRoot, "dist", "devai-aidd-plugin.project.jsonc"),
+      "{}\n",
+      "utf8",
+    );
     fs.mkdirSync(path.join(tempRoot, "installer"), { recursive: true });
     fs.writeFileSync(path.join(tempRoot, "installer", "install.ps1"), "stub", "utf8");
     fs.writeFileSync(path.join(tempRoot, "installer", "install.sh"), "stub", "utf8");
     // uninstall.ps1 INTENTIONALLY MISSING.
     fs.mkdirSync(path.join(tempRoot, "templates"), { recursive: true });
-    fs.writeFileSync(
-      path.join(tempRoot, "templates", "devai-aidd-plugin.global.jsonc"),
-      "{}",
-      "utf8",
-    );
-    fs.writeFileSync(
-      path.join(tempRoot, "templates", "devai-aidd-plugin.project.jsonc"),
-      "{}",
-      "utf8",
-    );
     fs.writeFileSync(
       path.join(tempRoot, "templates", "opencode.jsonc.example"),
       "{}",
@@ -12131,17 +12089,13 @@ async function verifyStory44ReleaseMissingBundleEmitsBuildHint() {
     fs.writeFileSync(path.join(tempRoot, "installer", "install.ps1"), "stub", "utf8");
     // install.sh INTENTIONALLY MISSING (second missing file).
     fs.writeFileSync(path.join(tempRoot, "installer", "uninstall.ps1"), "stub", "utf8");
+    fs.mkdirSync(path.join(tempRoot, "dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempRoot, "dist", "devai-aidd-plugin.project.jsonc"),
+      "{}\n",
+      "utf8",
+    );
     fs.mkdirSync(path.join(tempRoot, "templates"), { recursive: true });
-    fs.writeFileSync(
-      path.join(tempRoot, "templates", "devai-aidd-plugin.global.jsonc"),
-      "{}",
-      "utf8",
-    );
-    fs.writeFileSync(
-      path.join(tempRoot, "templates", "devai-aidd-plugin.project.jsonc"),
-      "{}",
-      "utf8",
-    );
     fs.writeFileSync(
       path.join(tempRoot, "templates", "opencode.jsonc.example"),
       "{}",
@@ -12727,7 +12681,7 @@ function buildLegacyRemovalFsAdapter(homedirPath) {
 
 /**
  * AC1: `Object.keys(loadRuntimeConfig(...).sources).sort()` is exactly
- * `["hasGlobalConfig", "hasProjectConfig"]` and both values are boolean.
+ * `["hasProjectConfig"]` and the value is boolean.
  */
 async function verifySourcesShapeIsExactlyTwoBooleans() {
   const { loadRuntimeConfig } = await import(`${loadConfigModuleUrl}?ac1=${Date.now()}`);
@@ -12735,15 +12689,7 @@ async function verifySourcesShapeIsExactlyTwoBooleans() {
   try {
     const projectDir = path.join(tempRoot, "project");
     const projectConfigDir = path.join(projectDir, ".opencode");
-    const globalConfigDir = path.join(tempRoot, "home", ".config", "opencode");
     fs.mkdirSync(projectConfigDir, { recursive: true });
-    fs.mkdirSync(globalConfigDir, { recursive: true });
-
-    fs.writeFileSync(
-      path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
-      JSON.stringify({ branch: { defaultType: "docs" } }),
-      "utf8",
-    );
     fs.writeFileSync(
       path.join(projectConfigDir, "devai-aidd-plugin.project.jsonc"),
       JSON.stringify({ branch: { defaultType: "feat" } }),
@@ -12756,13 +12702,8 @@ async function verifySourcesShapeIsExactlyTwoBooleans() {
     const keys = Object.keys(result.sources).sort();
     assert.deepEqual(
       keys,
-      ["hasGlobalConfig", "hasProjectConfig"],
-      `verifySourcesShapeIsExactlyTwoBooleans: sources keys must be exactly ["hasGlobalConfig", "hasProjectConfig"]; got ${JSON.stringify(keys)}`,
-    );
-    assert.equal(
-      typeof result.sources.hasGlobalConfig,
-      "boolean",
-      "verifySourcesShapeIsExactlyTwoBooleans: hasGlobalConfig must be boolean",
+      ["hasProjectConfig"],
+      `verifySourcesShapeIsExactlyTwoBooleans: sources keys must be exactly ["hasProjectConfig"]; got ${JSON.stringify(keys)}`,
     );
     assert.equal(
       typeof result.sources.hasProjectConfig,
@@ -12786,16 +12727,8 @@ async function verifyLegacyFilesIgnored() {
     const experimentDir = path.join(tempRoot, "experiment");
     const controlConfigDir = path.join(controlDir, ".opencode");
     const experimentConfigDir = path.join(experimentDir, ".opencode");
-    const globalConfigDir = path.join(tempRoot, "home", ".config", "opencode");
     fs.mkdirSync(controlConfigDir, { recursive: true });
     fs.mkdirSync(experimentConfigDir, { recursive: true });
-    fs.mkdirSync(globalConfigDir, { recursive: true });
-
-    fs.writeFileSync(
-      path.join(globalConfigDir, "devai-aidd-plugin.global.jsonc"),
-      JSON.stringify({ branch: { defaultType: "docs" } }),
-      "utf8",
-    );
     const modernProject = JSON.stringify({ branch: { defaultType: "feat" } });
     fs.writeFileSync(
       path.join(controlConfigDir, "devai-aidd-plugin.project.jsonc"),

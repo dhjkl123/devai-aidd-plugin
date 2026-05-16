@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 # Operates on the CURRENT WORKING DIRECTORY's .opencode/. Removes:
 #   - .opencode/plugins/devai-aidd-plugin.js
-#   - .opencode/devai-aidd-plugin.*.jsonc (project, global, ...)
+#   - .opencode/devai-aidd-plugin.project.jsonc
 
 $cwd = (Get-Location).Path
 $opencodeDir = Join-Path $cwd ".opencode"
@@ -20,10 +20,10 @@ if (Test-Path $pluginPath) {
   $removed += $pluginPath
 }
 
-$jsoncFiles = Get-ChildItem -LiteralPath $opencodeDir -Filter "devai-aidd-plugin.*.jsonc" -File -ErrorAction SilentlyContinue
-foreach ($file in $jsoncFiles) {
-  Remove-Item -LiteralPath $file.FullName -Force
-  $removed += $file.FullName
+$projectConfigPath = Join-Path $opencodeDir "devai-aidd-plugin.project.jsonc"
+if (Test-Path $projectConfigPath) {
+  Remove-Item -LiteralPath $projectConfigPath -Force
+  $removed += $projectConfigPath
 }
 
 if ($removed.Count -eq 0) {

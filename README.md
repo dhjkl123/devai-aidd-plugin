@@ -81,14 +81,24 @@ bash install.sh
 - Node가 PATH에 있을 것 (머지 헬퍼가 Node로 실행됨)
 
 ```powershell
-# Windows: repo 루트에서
+# Windows: 프로젝트 루트에서 실행하면 현재 경로에 설치
 npm run build
+powershell -ExecutionPolicy Bypass -File .\installer\install.ps1
+```
+
+```powershell
+# 또는 명시적으로 대상 프로젝트 지정
 powershell -ExecutionPolicy Bypass -File .\installer\install.ps1 -ProjectPath C:\path\to\project
 ```
 
 ```bash
-# Linux / WSL / macOS: repo 루트에서
+# Linux / WSL / macOS: 프로젝트 루트에서 실행하면 현재 경로에 설치
 npm run build
+bash installer/install.sh
+```
+
+```bash
+# 또는 명시적으로 대상 프로젝트 지정
 bash installer/install.sh --project-path /path/to/project
 ```
 

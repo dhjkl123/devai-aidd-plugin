@@ -35,84 +35,50 @@ done
 set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
 BASE_URL="${1:-https://<storage-account>.blob.core.windows.net/opencode-plugins/devai-aidd-plugin/latest}"
-INSTALL_ROOT="${INSTALL_ROOT:-$HOME/.config/opencode}"
-PLUGIN_DIR="$INSTALL_ROOT/plugins"
-TEMPLATE_DIR="$INSTALL_ROOT/templates"
 
-if [ -n "$PROJECT_PATH" ]; then
-  if [ ! -d "$PROJECT_PATH" ]; then
-    echo "Project path does not exist: $PROJECT_PATH" >&2
-    exit 2
-  fi
-
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-  JS_SOURCE="$REPO_ROOT/dist/devai-aidd-plugin.js"
-  GLOBAL_SOURCE="$REPO_ROOT/templates/devai-aidd-plugin.global.jsonc"
-  PROJECT_SOURCE="$REPO_ROOT/templates/devai-aidd-plugin.project.jsonc"
-  MERGE_SCRIPT="$REPO_ROOT/installer/merge-configs.mjs"
-
-  for path in "$JS_SOURCE" "$GLOBAL_SOURCE" "$PROJECT_SOURCE" "$MERGE_SCRIPT"; do
-    if [ ! -f "$path" ]; then
-      echo "Required source missing: $path. Run 'npm run build' before re-running with --project-path." >&2
-      exit 1
-    fi
-  done
-
-  RESOLVED_PROJECT="$(cd "$PROJECT_PATH" && pwd)"
-  PROJECT_OPENCODE_DIR="$RESOLVED_PROJECT/.opencode"
-  PROJECT_PLUGIN_DIR="$PROJECT_OPENCODE_DIR/plugins"
-  MERGED_CONFIG_TARGET="$PROJECT_OPENCODE_DIR/devai-aidd-plugin.project.jsonc"
-
-  mkdir -p "$PROJECT_PLUGIN_DIR"
-
-  cp "$JS_SOURCE" "$PROJECT_PLUGIN_DIR/devai-aidd-plugin.js"
-
-  if [ -f "$MERGED_CONFIG_TARGET" ]; then
-    echo "Existing project config preserved: $MERGED_CONFIG_TARGET"
-  else
-    node "$MERGE_SCRIPT" --global "$GLOBAL_SOURCE" --project "$PROJECT_SOURCE" --out "$MERGED_CONFIG_TARGET"
-  fi
-
-  echo "Installed DevAI AIDD Plugin (project mode) to $PROJECT_OPENCODE_DIR"
-  echo ""
-  echo "Next: ensure your opencode.jsonc points to the project-local plugin path."
-  echo "Example (at $RESOLVED_PROJECT/opencode.jsonc):"
-  echo '  { "plugins": [ { "name": "DevAI AIDD Plugin", "path": ".opencode/plugins/devai-aidd-plugin.js" } ] }'
-  exit 0
+if [ -z "$PROJECT_PATH" ]; then
+  PROJECT_PATH="$(pwd)"
 fi
 
-mkdir -p "$PLUGIN_DIR"
-mkdir -p "$TEMPLATE_DIR"
+if [ ! -d "$PROJECT_PATH" ]; then
+  echo "Project path does not exist: $PROJECT_PATH" >&2
+  exit 2
+fi
+
+RESOLVED_PROJECT="$(cd "$PROJECT_PATH" && pwd)"
+PROJECT_OPENCODE_DIR="$RESOLVED_PROJECT/.opencode"
+PROJECT_PLUGIN_DIR="$PROJECT_OPENCODE_DIR/plugins"
+PLUGIN_TARGET="$PROJECT_PLUGIN_DIR/devai-aidd-plugin.js"
+CONFIG_TARGET="$PROJECT_OPENCODE_DIR/devai-aidd-plugin.project.jsonc"
+
+mkdir -p "$PROJECT_PLUGIN_DIR"
 
 if [ "$LOCAL_MODE" -eq 1 ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
   JS_SOURCE="$REPO_ROOT/dist/devai-aidd-plugin.js"
-  GLOBAL_SOURCE="$REPO_ROOT/templates/devai-aidd-plugin.global.jsonc"
-  PROJECT_SOURCE="$REPO_ROOT/templates/devai-aidd-plugin.project.jsonc"
+  PROJECT_SOURCE="$REPO_ROOT/dist/devai-aidd-plugin.project.jsonc"
 
-  for path in "$JS_SOURCE" "$GLOBAL_SOURCE" "$PROJECT_SOURCE"; do
+  for path in "$JS_SOURCE" "$PROJECT_SOURCE"; do
     if [ ! -f "$path" ]; then
       echo "Local source missing: $path. Run 'npm run build' before re-running with --local." >&2
       exit 1
     fi
   done
 
-  cp "$JS_SOURCE" "$PLUGIN_DIR/devai-aidd-plugin.js"
-
-  if [ ! -f "$INSTALL_ROOT/devai-aidd-plugin.global.jsonc" ]; then
-    cp "$GLOBAL_SOURCE" "$INSTALL_ROOT/devai-aidd-plugin.global.jsonc"
+  cp "$JS_SOURCE" "$PLUGIN_TARGET"
+  if [ -f "$CONFIG_TARGET" ]; then
+    echo "Existing project config preserved: $CONFIG_TARGET"
+  else
+    cp "$PROJECT_SOURCE" "$CONFIG_TARGET"
   fi
 
-  if [ ! -f "$TEMPLATE_DIR/devai-aidd-plugin.project.jsonc" ]; then
-    cp "$PROJECT_SOURCE" "$TEMPLATE_DIR/devai-aidd-plugin.project.jsonc"
-  fi
-
-  echo "Installed DevAI AIDD Plugin (local source: $REPO_ROOT) to $INSTALL_ROOT"
-  echo "Project override template: $TEMPLATE_DIR/devai-aidd-plugin.project.jsonc"
+  echo "Installed DevAI AIDD Plugin (project scope, local source) to $PROJECT_OPENCODE_DIR"
+  echo ""
+  echo "Next: ensure your opencode.jsonc points to the project-local plugin path."
+  echo "Example (at $RESOLVED_PROJECT/opencode.jsonc):"
+  echo '  { "plugins": [ { "name": "DevAI AIDD Plugin", "path": ".opencode/plugins/devai-aidd-plugin.js" } ] }'
   exit 0
 fi
 
@@ -136,12 +102,11 @@ checksum_file() {
 }
 
 download "devai-aidd-plugin.js"
-download "devai-aidd-plugin.global.jsonc"
 download "devai-aidd-plugin.project.jsonc"
 download "manifest.json"
 download "checksums.txt"
 
-for file in devai-aidd-plugin.js devai-aidd-plugin.global.jsonc devai-aidd-plugin.project.jsonc manifest.json; do
+for file in devai-aidd-plugin.js devai-aidd-plugin.project.jsonc manifest.json; do
   expected="$(awk -v name="$file" '$2 == name { print $1 }' "$TEMP_DIR/checksums.txt")"
   actual="$(checksum_file "$TEMP_DIR/$file")"
   if [ "$expected" != "$actual" ]; then
@@ -150,18 +115,15 @@ for file in devai-aidd-plugin.js devai-aidd-plugin.global.jsonc devai-aidd-plugi
   fi
 done
 
-cp "$TEMP_DIR/devai-aidd-plugin.js" "$PLUGIN_DIR/devai-aidd-plugin.js"
-
-if [ ! -f "$INSTALL_ROOT/devai-aidd-plugin.global.jsonc" ]; then
-  cp "$TEMP_DIR/devai-aidd-plugin.global.jsonc" "$INSTALL_ROOT/devai-aidd-plugin.global.jsonc"
+cp "$TEMP_DIR/devai-aidd-plugin.js" "$PLUGIN_TARGET"
+if [ -f "$CONFIG_TARGET" ]; then
+  echo "Existing project config preserved: $CONFIG_TARGET"
+else
+  cp "$TEMP_DIR/devai-aidd-plugin.project.jsonc" "$CONFIG_TARGET"
 fi
 
-if [ ! -f "$TEMPLATE_DIR/devai-aidd-plugin.project.jsonc" ]; then
-  cp "$TEMP_DIR/devai-aidd-plugin.project.jsonc" "$TEMPLATE_DIR/devai-aidd-plugin.project.jsonc"
-fi
-
-cp "$TEMP_DIR/manifest.json" "$INSTALL_ROOT/manifest.json"
-cp "$TEMP_DIR/checksums.txt" "$INSTALL_ROOT/checksums.txt"
-
-echo "Installed DevAI AIDD Plugin to $INSTALL_ROOT"
-echo "Project override template: $TEMPLATE_DIR/devai-aidd-plugin.project.jsonc"
+echo "Installed DevAI AIDD Plugin (project scope) to $PROJECT_OPENCODE_DIR"
+echo ""
+echo "Next: ensure your opencode.jsonc points to the project-local plugin path."
+echo "Example (at $RESOLVED_PROJECT/opencode.jsonc):"
+echo '  { "plugins": [ { "name": "DevAI AIDD Plugin", "path": ".opencode/plugins/devai-aidd-plugin.js" } ] }'
