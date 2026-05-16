@@ -71,11 +71,13 @@ async function nativeEventStartupSkipBaselineFlow() {
             {
               id: `${startupChainId}:init`,
               header: "Initialize Git",
+              question: "Initialize Git for this workspace before the workflow continues?",
               options: ["Initialize Git (Recommended)", "Skip"],
             },
             {
               id: `${startupChainId}:baseline`,
               header: "Create Baseline Commit",
+              question: "Create a baseline commit before starting workflow changes?",
               options: [
                 "Setup .gitignore and Commit (Recommended)",
                 "Commit Without .gitignore",

@@ -45,11 +45,13 @@ async function fullStartupChain() {
             {
               id: `${startupChainId}:init`,
               header: "Initialize Git",
+              question: "Initialize Git for this workspace before the workflow continues?",
               options: ["Initialize Git (Recommended)", "Skip"],
             },
             {
               id: `${startupChainId}:baseline`,
               header: "Create Baseline Commit",
+              question: "Create a baseline commit before starting workflow changes?",
               options: [
                 "Setup .gitignore and Commit (Recommended)",
                 "Commit Without .gitignore",
@@ -59,6 +61,7 @@ async function fullStartupChain() {
             {
               id: `${startupChainId}:branch`,
               header: "Create Branch `feat/ABC-123-startup-chain`",
+              question: "Create and check out feat/ABC-123-startup-chain before editing files, or stay on the current branch?",
               options: [
                 "Create New Branch (Recommended)",
                 "Stay On Current Branch",

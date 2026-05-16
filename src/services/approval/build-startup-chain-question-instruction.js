@@ -14,18 +14,21 @@ export function buildStartupChainQuestionInstruction(chainPlan = {}) {
   const header = "Prepare Git Workflow";
   const questionLines = questions.flatMap((question, index) => [
     `${index + 1}. header: \`${question.header}\``,
+    `   question: \`${buildStartupChainQuestionText(question)}\``,
     `   options: ${question.options.map((option) => `\`${option}\``).join(", ")}`,
   ]);
   const questionsArgPreview = JSON.stringify(
     questions.map((question) => ({
       header: question.header,
+      question: buildStartupChainQuestionText(question),
       options: question.options,
     })),
   );
   const instructionText = [
     commandName ? `Git workflow guard is active for /${commandName}.` : "Git workflow guard is active.",
     "Call the native `question` tool now with ALL of the following questions in a single batch (one tool call, one `questions` array).",
-    "Pass `header` and `options` EXACTLY as listed below for each question, in the same order. Do not translate, paraphrase, or reorder anything. The plugin matches answers positionally by header.",
+    "Pass `header`, `question`, and `options` EXACTLY as listed below for each question, in the same order. Do not translate, paraphrase, or reorder anything. The plugin matches answers positionally by header.",
+    "Do not omit `question`. If it is missing, the native tool call is invalid.",
     "Do not call any other tool, read or modify files, or respond with plain text until the user answers the questions.",
     "After the user answers, the plugin will run only the approved Git actions in order: init, baseline commit, then branch.",
     `Example tool args shape: { questions: ${questionsArgPreview} }`,
@@ -52,7 +55,7 @@ export function buildStartupChainQuestionInstruction(chainPlan = {}) {
 export function buildStartupChainToolQuestions(chainPlan = {}) {
   const instruction = buildStartupChainQuestionInstruction(chainPlan);
   return instruction.questions.map((question) => ({
-    question: buildQuestionText(question),
+    question: buildStartupChainQuestionText(question),
     header: question.header,
     options: question.options.map((label) => ({
       label,
@@ -62,7 +65,7 @@ export function buildStartupChainToolQuestions(chainPlan = {}) {
   }));
 }
 
-function buildQuestionText(question) {
+export function buildStartupChainQuestionText(question) {
   if (question.key === "init") {
     return "Initialize Git for this workspace before the workflow continues?";
   }
