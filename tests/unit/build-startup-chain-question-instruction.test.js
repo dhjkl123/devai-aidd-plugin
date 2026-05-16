@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 
-import { buildStartupChainQuestionInstruction } from "../../src/services/approval/build-startup-chain-question-instruction.js";
+import {
+  buildStartupChainQuestionInstruction,
+  buildStartupChainQuestionText,
+  buildStartupChainToolQuestions,
+} from "../../src/services/approval/build-startup-chain-question-instruction.js";
 import { buildStartupChainPlan } from "../../src/services/git/startup-chain-planner.js";
 
 const workflowContext = {
@@ -48,6 +52,8 @@ function plan(readiness, currentBranch = null) {
   });
   assert.deepEqual(result.questions.map((q) => q.key), ["init", "baseline", "branch"]);
   assert.deepEqual(result.metadata.questionIds, ["chain-1:init", "chain-1:baseline", "chain-1:branch"]);
+  assert.match(result.instructionText, /Do not omit `question`\./);
+  assert.match(result.instructionText, /"question":"Initialize Git for this workspace before the workflow continues\?"/);
 }
 
 {
@@ -85,16 +91,46 @@ function plan(readiness, currentBranch = null) {
       branch: "feat/ABC-123-startup-matrix",
     },
   }, "feat/ABC-123-startup-matrix");
-  assert.equal(ready.shouldAsk, true);
-  assert.deepEqual(ready.steps.map((q) => q.key), ["branch"]);
-  const result = buildStartupChainQuestionInstruction({
-    ...ready,
+  assert.equal(ready.shouldAsk, false);
+  assert.deepEqual(ready.steps.map((q) => q.key), []);
+}
+
+{
+  const branchDecision = buildStartupChainQuestionInstruction({
+    shouldAsk: true,
+    reason: "repository-ready",
+    steps: [
+      {
+        key: "branch",
+        action: "stay",
+        proposal: { name: "feat/ABC-123-startup-matrix" },
+      },
+    ],
     startupChainId: "chain-4",
     sessionID: "unit-session",
     commandName: "bmad-bmm-quick-dev",
   });
-  assert.deepEqual(result.questions[0].options, ["Proceed On Current Branch (Recommended)", "Skip"]);
-  assert.equal(result.questions[0].header, "Branch Decision");
+  assert.deepEqual(branchDecision.questions[0].options, ["Proceed On Current Branch (Recommended)", "Skip"]);
+  assert.equal(branchDecision.questions[0].header, "Branch Decision");
+  assert.equal(
+    buildStartupChainQuestionText(branchDecision.questions[0]),
+    "Proceed on feat/ABC-123-startup-matrix before editing files?",
+  );
+}
+
+{
+  const result = buildStartupChainToolQuestions({
+    ...plan({
+      outcome: "ask",
+      reason: "git-not-initialized",
+      details: { isGitRepository: false, hasCommit: false, proposal: { kind: "init" } },
+    }),
+    startupChainId: "chain-5",
+    sessionID: "unit-session",
+    commandName: "bmad-bmm-quick-dev",
+  });
+  assert.equal(result[0].question, "Initialize Git for this workspace before the workflow continues?");
+  assert.equal(result[1].question, "Create a baseline commit before starting workflow changes?");
 }
 
 {

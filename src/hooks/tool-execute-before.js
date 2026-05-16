@@ -23,6 +23,7 @@ import { looksLikeGitCommand } from "../services/workflow/looks-like-git-command
 import { buildQuestionInstruction } from "../services/approval/build-question-instruction.js";
 import {
   buildStartupChainQuestionInstruction,
+  buildStartupChainQuestionText,
 } from "../services/approval/build-startup-chain-question-instruction.js";
 import { FINALIZATION_SENTINEL_HEADER } from "../services/approval/build-finalization-sentinel-instruction.js";
 import { SKILL_TOOL_TOKENS } from "../utils/constants.js";
@@ -406,6 +407,7 @@ export function createToolExecuteBeforeHook({
             ? toolArgs
             : null;
         const expectedHeaders = expected.questions.map((q) => q.header);
+        const expectedQuestionTexts = expected.questions.map((q) => buildStartupChainQuestionText(q));
         const actualHeaders = Array.isArray(questions)
           ? questions.map((q) =>
               typeof q?.header === "string"
@@ -415,13 +417,21 @@ export function createToolExecuteBeforeHook({
                   : null,
             )
           : [];
+        const actualQuestionTexts = Array.isArray(questions)
+          ? questions.map((q) => (typeof q?.question === "string" ? q.question : null))
+          : [];
         const lengthOk = Array.isArray(questions) && actualHeaders.length === expectedHeaders.length;
         const headersOk =
           lengthOk &&
           expectedHeaders.every((header, index) => actualHeaders[index] === header);
-        if (!headersOk) {
+        const questionsOk =
+          lengthOk &&
+          expected.questions.every(
+            (_expectedQuestion, index) => actualQuestionTexts[index] === expectedQuestionTexts[index],
+          );
+        if (!headersOk || !questionsOk) {
           throw new Error(
-            `Git workflow guard: a startup approval chain is pending and the question tool must be called with this exact list of questions (same length, same order, same headers): ${JSON.stringify(expected.questions.map((q) => ({ header: q.header, options: q.options })))}. The plugin matches answers positionally, so question ids are optional, but the headers and option order MUST be byte-for-byte identical.`,
+            `Git workflow guard: a startup approval chain is pending and the question tool must be called with this exact list of questions (same length, same order, same headers, same question text): ${JSON.stringify(expected.questions.map((q) => ({ header: q.header, question: buildStartupChainQuestionText(q), options: q.options })))}. The plugin matches answers positionally, so question ids are optional, but the headers, question text, and option order MUST be byte-for-byte identical.`,
           );
         }
       }
