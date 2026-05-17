@@ -5,6 +5,8 @@ src/config/baseline-template.generated.js
 
 .opencode/state/
 
+docs/legacy/
+
 dist/*
 !dist/.gitkeep
 
